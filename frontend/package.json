@@ -9,7 +9,10 @@
     "start": "next start",
     "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc --noEmit",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:unit": "vitest run lib/__tests__ components/ui/__tests__ lib/hooks/__tests__"
   },
   "dependencies": {
     "@verdictpay/sdk": "file:../packages/verdictpay-sdk",
@@ -25,13 +28,19 @@
   "devDependencies": {
     "@eslint/eslintrc": "3.3.3",
     "@tailwindcss/postcss": "4.3.4",
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
+    "@testing-library/user-event": "^14.6.8",
     "@types/node": "22.18.13",
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
     "eslint": "9.39.5",
     "eslint-config-next": "15.5.29",
+    "jsdom": "^26.1.0",
+    "msw": "^2.15.0",
     "prettier": "3.6.2",
     "tailwindcss": "4.3.4",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "vitest": "^3.2.4"
   }
 }
