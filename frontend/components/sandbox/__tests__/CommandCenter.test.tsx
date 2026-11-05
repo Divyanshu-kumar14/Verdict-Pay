@@ -4,10 +4,15 @@ import { render, screen } from "@testing-library/react";
 
 import { CommandCenter } from "../CommandCenter";
 import type { PolledQuery } from "@/lib/hooks/usePolledQuery";
-import type { DisputeDetail, CustomerTimeline, DisputeSimulationResponse } from "@/lib/types";
+import type {
+  CustomerTimeline,
+  DisputeDetail,
+  DisputeSimulationResponse,
+  EvBreakdown,
+} from "@/lib/types";
 
 // Minimal but realistic fixtures covering all fields CommandCenter touches
-function makeBreakdown(overrides: Partial<Record<string, unknown>> = {}) {
+function makeBreakdown(overrides: Partial<EvBreakdown> = {}): EvBreakdown {
   return {
     amount_usd: 99,
     high_volume: false,
@@ -51,7 +56,7 @@ function makeDisputeDetail(overrides: Partial<Record<string, unknown>> = {}): Di
     seller_response_due_date: "2026-11-20T23:59:00.000Z",
     created_at: "2026-11-06T03:07:00.000Z",
     updated_at: "2026-11-06T03:07:00.000Z",
-    breakdown: makeBreakdown() as any,
+    breakdown: makeBreakdown(),
     win_probability: {
       score: 0.68,
       base: 0.5,
@@ -174,8 +179,8 @@ describe("CommandCenter", () => {
         restoredFromQueue={false}
         flowDispute={null}
         fallbackEvents={null}
-        caseQuery={makePolled(null)}
-        timeline={makePolled(null)}
+        caseQuery={makePolled<DisputeDetail>(null)}
+        timeline={makePolled<CustomerTimeline>(null)}
         onCaseChanged={vi.fn()}
       />,
     );
@@ -282,7 +287,7 @@ describe("CommandCenter", () => {
         flowDispute={null}
         fallbackEvents={null}
         caseQuery={loadingQuery}
-        timeline={makePolled(null, { loading: true })}
+        timeline={makePolled<CustomerTimeline>(null, { loading: true })}
         onCaseChanged={vi.fn()}
       />,
     );

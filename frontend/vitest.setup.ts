@@ -27,7 +27,7 @@ Object.defineProperty(window, "matchMedia", {
   })),
 });
 
+// jsdom ships without fetch; the demo suite stubs it per test.
 if (!globalThis.fetch) {
-  // @ts-ignore
-  globalThis.fetch = vi.fn();
+  globalThis.fetch = vi.fn() as unknown as typeof globalThis.fetch;
 }

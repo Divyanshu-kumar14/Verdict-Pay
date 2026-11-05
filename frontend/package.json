@@ -12,7 +12,8 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:unit": "vitest run lib/__tests__ components/ui/__tests__ lib/hooks/__tests__"
+    "test:unit": "vitest run lib/__tests__ components/ui/__tests__ lib/hooks/__tests__",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "dependencies": {
     "@verdictpay/sdk": "file:../packages/verdictpay-sdk",

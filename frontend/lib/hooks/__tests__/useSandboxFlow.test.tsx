@@ -160,7 +160,6 @@ const disputeFixture = {
 describe("useSandboxFlow", () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    // @ts-ignore - allow Date.now mocking
     vi.setSystemTime(new Date("2026-11-06T03:00:00.000Z"));
   });
 
