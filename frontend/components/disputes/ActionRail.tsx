@@ -7,7 +7,8 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
-import { Panel, PanelBody, PanelHeader } from "@/components/ui/Panel";
+import { FieldLabel } from "@/components/premium/FieldLabel";
+import { SpotlightCard } from "@/components/premium/SpotlightCard";
 import { api, toApiError, type ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { formatPercent, formatUsd } from "@/lib/format";
@@ -16,7 +17,7 @@ import { ACTION_META, CHANNEL_META, RECOMMENDATION_META, STAGE_META } from "@/li
 import { DISPUTE_ACTIONS } from "@/lib/types";
 
 /**
- * The HATEOAS action rail. Buttons are enabled only when PayPal's returned
+ * The HATEOAS action rail. Buttons are enabled only when the returned
  * links[] allow the action; every irreversible action passes a confirm dialog.
  */
 export function ActionRail({
@@ -36,15 +37,15 @@ export function ActionRail({
 
   const consequenceFor = (action: DisputeAction, feeUsd: number): string => {
     if (action === "ACCEPT_CLAIM") {
-      return `Accepting concedes ${formatUsd(detail.amount_usd)} and incurs ${formatUsd(feeUsd)} in PayPal fees. The case closes.`;
+      return "Accepting concedes " + formatUsd(detail.amount_usd) + " and incurs " + formatUsd(feeUsd) + " in PayPal fees. The case closes.";
     }
     if (action === "PROVIDE_EVIDENCE") {
-      return `Filing costs ${formatUsd(feeUsd)} and risks ${formatUsd(Math.abs(detail.breakdown.ev_settle_usd))} if the claim is lost.`;
+      return "Filing costs " + formatUsd(feeUsd) + " and risks " + formatUsd(Math.abs(detail.breakdown.ev_settle_usd)) + " if the claim is lost.";
     }
     if (action === "MAKE_OFFER") {
-      return `Offer outlay ${formatUsd(Math.abs(detail.breakdown.ev_offer_usd))} (${formatPercent(detail.breakdown.offer_ratio, 0)} of the claim); no dispute fee at INQUIRY.`;
+      return "Offer outlay " + formatUsd(Math.abs(detail.breakdown.ev_offer_usd)) + " (" + formatPercent(detail.breakdown.offer_ratio, 0) + " of the claim); no dispute fee at INQUIRY.";
     }
-    return `No PayPal fee at ${detail.stage} stage; the inquiry stays open for the buyer's response.`;
+    return "No PayPal fee at " + detail.stage + " stage; the inquiry stays open for the buyer response.";
   };
 
   const orderedActions: AllowedAction[] = DISPUTE_ACTIONS.map((action) => {
@@ -68,7 +69,7 @@ export function ActionRail({
     try {
       const response = await api.performAction(detail.dispute_id, action, {
         ...(note.trim().length > 0 ? { note: note.trim() } : {}),
-        idempotency_key: `${detail.dispute_id}:${action}:${Date.now()}`,
+        idempotency_key: detail.dispute_id + ":" + action + ":" + String(Date.now()),
       });
       setResult(response);
       setPending(null);
@@ -82,19 +83,23 @@ export function ActionRail({
   };
 
   return (
-    <Panel>
-      <PanelHeader
-        kicker="Action rail"
-        title="PayPal response"
-        description="Enabled only when the case's allowed_actions expose the action at this stage."
-        actions={
-          <Badge tone="neutral" mono>
-            {detail.allowed_actions.filter((candidate) => candidate.allowed).length} /{" "}
-            {DISPUTE_ACTIONS.length} open
-          </Badge>
-        }
-      />
-      <PanelBody className="space-y-2.5">
+    <SpotlightCard className="p-4 sm:p-5" >
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <FieldLabel rule tone="ice">
+            Action rail · PayPal response
+          </FieldLabel>
+          <p className="mt-1.5 text-[11.5px] leading-relaxed text-muted">
+            Enabled only when the case&#39;s allowed_actions expose the action at this stage.
+          </p>
+        </div>
+        <Badge tone="neutral" mono>
+          {detail.allowed_actions.filter((candidate) => candidate.allowed).length} /{" "}
+          {DISPUTE_ACTIONS.length} open
+        </Badge>
+      </div>
+
+      <div className="mt-3 space-y-2.5">
         {result ? (
           <div
             role="status"
@@ -114,38 +119,41 @@ export function ActionRail({
 
         {error && !pending ? <ErrorBanner error={error} context="Action failed." /> : null}
 
-        <ul className="space-y-2">
-          {orderedActions.map((candidate) => {
+        <ol className="space-y-2" aria-label="Available PayPal actions">
+          {orderedActions.map((candidate, index) => {
             const meta = ACTION_META[candidate.action];
             const isRecommended = candidate.action === recommendedAction;
             return (
               <li
                 key={candidate.action}
                 className={cn(
-                  "rounded-md border p-2.5",
+                  "rounded-lg border p-2.5",
                   isRecommended
-                    ? "border-emerald/25 bg-emerald/[0.035]"
+                    ? "border-emerald/30 bg-emerald/[0.04]"
                     : "border-hairline bg-white/[0.012]",
                 )}
               >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
+                <div className="flex items-start gap-2.5">
+                  <span className="num mt-0.5 font-mono text-[10px] text-dim" aria-hidden>
+                    {"0" + String(index + 1)}
+                  </span>
+                  <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="text-[11.5px] font-medium text-ink">{meta.label}</span>
+                      <span className="text-[12px] font-medium text-ink">{meta.label}</span>
                       {isRecommended ? (
                         <Badge tone="emerald" dot>
                           RECOMMENDED
                         </Badge>
                       ) : null}
                     </div>
-                    <p className="mt-0.5 text-[10px] leading-snug text-muted">{meta.description}</p>
+                    <p className="mt-0.5 text-[10.5px] leading-snug text-muted">{meta.description}</p>
                   </div>
-                  <span className="num shrink-0 text-[10px] text-muted">
+                  <span className="num shrink-0 text-[11px] text-muted">
                     {formatUsd(candidate.fee_usd)}
                   </span>
                 </div>
 
-                <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+                <div className="mt-2 flex flex-wrap items-center justify-between gap-2 pl-7">
                   <span
                     className={cn(
                       "min-w-0 flex-1 text-[9.5px] leading-snug",
@@ -173,7 +181,7 @@ export function ActionRail({
 
                 {candidate.paypal_link ? (
                   <p
-                    className="mt-1.5 flex items-center gap-1 truncate font-mono text-[8.5px] text-dim"
+                    className="mt-1.5 flex items-center gap-1 truncate pl-7 font-mono text-[8.5px] text-dim"
                     title={candidate.paypal_link}
                   >
                     <ExternalLink size={9} aria-hidden />
@@ -183,14 +191,14 @@ export function ActionRail({
               </li>
             );
           })}
-        </ul>
-      </PanelBody>
+        </ol>
+      </div>
 
       {pending ? (
         <ConfirmDialog
           open
-          title={`${ACTION_META[pending.action].label} this case?`}
-          description="This writes to PayPal's dispute lifecycle. The case is never updated optimistically."
+          title={ACTION_META[pending.action].label + " this case?"}
+          description="This writes to PayPal&#39;s dispute lifecycle. The case is never updated optimistically."
           confirmLabel={ACTION_META[pending.action].label}
           tone={pending.action === "ACCEPT_CLAIM" ? "rose" : "emerald"}
           loading={running !== null}
@@ -221,7 +229,7 @@ export function ActionRail({
               </div>
               <div>
                 <dt className="kicker">PayPal fee</dt>
-                <dd className="num mt-0.5 text-[12px] text-ink">{formatUsd(pending.fee_usd)}</dd>
+                <dd className="num mt-0.5 text-[13px] text-ink">{formatUsd(pending.fee_usd)}</dd>
               </div>
               <div>
                 <dt className="kicker">Dispute</dt>
@@ -229,7 +237,7 @@ export function ActionRail({
               </div>
             </dl>
 
-            <p className="rounded border border-hairline bg-white/[0.02] px-2.5 py-2 text-[10.5px] leading-snug text-muted">
+            <p className="rounded-md border border-hairline bg-white/[0.02] px-2.5 py-2 text-[10.5px] leading-snug text-muted">
               <span className="text-ink">Consequence · </span>
               {consequenceFor(pending.action, pending.fee_usd)}
             </p>
@@ -244,7 +252,7 @@ export function ActionRail({
                 placeholder="Shown in the PayPal resolution centre."
                 className="mt-1 w-full resize-none rounded-md border border-border-strong bg-chrome px-2.5 py-2 text-[11.5px] text-ink placeholder:text-dim"
               />
-              <span className="mt-0.5 block text-right font-mono text-[9px] text-dim">
+              <span className="num mt-0.5 block text-right font-mono text-[9px] text-dim">
                 {note.length}/2000
               </span>
             </label>
@@ -258,6 +266,6 @@ export function ActionRail({
           </div>
         </ConfirmDialog>
       ) : null}
-    </Panel>
+    </SpotlightCard>
   );
 }

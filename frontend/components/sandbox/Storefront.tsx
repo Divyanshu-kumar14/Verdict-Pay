@@ -1,11 +1,14 @@
 "use client";
 
+import { motion } from "motion/react";
 import { AlertTriangle, Check, RotateCcw, Store } from "lucide-react";
+import { useCallback, useRef, type PointerEvent as ReactPointerEvent } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { Panel } from "@/components/ui/Panel";
+import { FieldLabel } from "@/components/premium/FieldLabel";
 import { StepLog } from "@/components/sandbox/StepLog";
 import { cn } from "@/lib/cn";
 import { DEMO_BUYER_EMAIL, DEMO_PLAN } from "@/lib/constants";
@@ -48,14 +51,37 @@ function StepButton({
   disabled: boolean;
   onRun: () => void;
 }) {
+  const sheenRef = useRef<HTMLSpanElement | null>(null);
+
+  const onPointerMove = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
+    const sheen = sheenRef.current;
+    if (sheen === null) return;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    sheen.style.background =
+      `radial-gradient(240px circle at ${x}px ${y}px, rgba(255,255,255,0.08), transparent 65%)`;
+    sheen.style.opacity = "1";
+  }, []);
+
+  const onPointerLeave = useCallback(() => {
+    const sheen = sheenRef.current;
+    if (sheen !== null) sheen.style.opacity = "0";
+  }, []);
+
   return (
-    <button
+    <motion.button
       type="button"
       onClick={onRun}
+      onPointerMove={onPointerMove}
+      onPointerLeave={onPointerLeave}
       disabled={disabled || status === "running"}
+      whileTap={disabled || status === "running" ? undefined : { scale: 0.985 }}
+      transition={{ type: "spring", stiffness: 520, damping: 32 }}
       aria-label={`Step ${index}: ${title} — ${HINT[status]}`}
       className={cn(
-        "group flex w-full items-start gap-3 rounded-lg border px-3 py-3 text-left transition-colors",
+        "relative flex w-full items-start gap-3 overflow-hidden rounded-lg border px-3 py-3 text-left transition-colors",
+        "focus-visible:outline-2 focus-visible:outline-offset-2",
         status === "success" && "border-emerald/25 bg-emerald/[0.05]",
         status === "error" && "border-rose/30 bg-rose/[0.06]",
         status === "running" && "border-amber/30 bg-amber/[0.06]",
@@ -67,25 +93,11 @@ function StepButton({
       )}
     >
       <span
-        className={cn(
-          "num mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded border text-[10.5px]",
-          NUMBER_BOX[status],
-        )}
-      >
-        {status === "success" ? (
-          <Check size={12} aria-hidden />
-        ) : status === "error" ? (
-          <AlertTriangle size={12} aria-hidden />
-        ) : status === "running" ? (
-          <span
-            aria-hidden
-            className="h-2.5 w-2.5 animate-spin rounded-full border border-current border-t-transparent"
-          />
-        ) : (
-          index
-        )}
-      </span>
-      <span className="min-w-0 flex-1">
+        ref={sheenRef}
+        aria-hidden
+        className="pointer-events-none absolute inset-0 opacity-0 transition-opacity duration-300"
+      />
+      <span className="relative min-w-0 flex-1">
         <span className="flex items-center justify-between gap-2">
           <span className="text-[12.5px] font-medium tracking-[-0.01em] text-ink">{title}</span>
           <span
@@ -98,8 +110,13 @@ function StepButton({
           </span>
         </span>
         <span className="mt-0.5 block text-[11px] leading-snug text-muted">{subtitle}</span>
+        {status === "running" ? (
+          <span className="mt-2 block h-px overflow-hidden rounded bg-white/[0.07]">
+            <span className="block h-full w-1/3 animate-pulse bg-amber/70" />
+          </span>
+        ) : null}
       </span>
-    </button>
+    </motion.button>
   );
 }
 
@@ -110,6 +127,28 @@ export type StorefrontProps = {
   onDispute: () => Promise<void>;
   onReset: () => void;
 };
+
+function StepRailMarker({ status }: { status: StepStatus }) {
+  return (
+    <span
+      aria-hidden
+      className={cn(
+        "num grid h-6 w-6 shrink-0 place-items-center rounded border",
+        NUMBER_BOX[status],
+      )}
+    >
+      {status === "success" ? (
+        <Check size={12} aria-hidden />
+      ) : status === "error" ? (
+        <AlertTriangle size={12} aria-hidden />
+      ) : status === "running" ? (
+        <span className="h-2.5 w-2.5 animate-spin rounded-full border border-current border-t-transparent" />
+      ) : (
+        <span className="text-[10.5px]">·</span>
+      )}
+    </span>
+  );
+}
 
 /** The buyer side of the demo: a mock SaaS checkout plus three sequential steps. */
 export function Storefront({ state, onCheckout, onUsage, onDispute, onReset }: StorefrontProps) {
@@ -130,6 +169,36 @@ export function Storefront({ state, onCheckout, onUsage, onDispute, onReset }: S
         : state.checkoutStatus === "error"
           ? onCheckout
           : null;
+
+  const steps = [
+    {
+      key: "checkout",
+      index: 1,
+      title: "Checkout $99 Pro plan",
+      subtitle: "PayPal Orders v2 · Subscriptions v1 · ToS captured",
+      status: state.checkoutStatus,
+      canRun: canCheckout,
+      run: onCheckout,
+    },
+    {
+      key: "usage",
+      index: 2,
+      title: "Simulate usage",
+      subtitle: "15 logins · 42k AI tokens · signed ZIP export",
+      status: state.usageStatus,
+      canRun: canUsage,
+      run: onUsage,
+    },
+    {
+      key: "dispute",
+      index: 3,
+      title: "File friendly-fraud dispute",
+      subtitle: "SNAD · INQUIRY · internal channel · $99 claim",
+      status: state.disputeStatus,
+      canRun: canDispute,
+      run: onDispute,
+    },
+  ];
 
   return (
     <Panel className="flex min-h-[660px] flex-col overflow-hidden">
@@ -180,41 +249,40 @@ export function Storefront({ state, onCheckout, onUsage, onDispute, onReset }: S
           </div>
         </div>
 
-        <div className="space-y-2">
+        <div className="space-y-2.5">
           <div className="flex items-center justify-between">
-            <span className="kicker">Judge flow</span>
+            <FieldLabel>Judge flow</FieldLabel>
             <span className="text-[10px] text-dim">Sequential · each step unlocks the next</span>
           </div>
-          <StepButton
-            index={1}
-            title="Checkout $99 Pro plan"
-            subtitle="PayPal Orders v2 · Subscriptions v1 · ToS captured"
-            status={state.checkoutStatus}
-            disabled={!canCheckout}
-            onRun={() => {
-              void onCheckout();
-            }}
-          />
-          <StepButton
-            index={2}
-            title="Simulate usage"
-            subtitle="15 logins · 42k AI tokens · signed ZIP export"
-            status={state.usageStatus}
-            disabled={!canUsage}
-            onRun={() => {
-              void onUsage();
-            }}
-          />
-          <StepButton
-            index={3}
-            title="File friendly-fraud dispute"
-            subtitle="SNAD · INQUIRY · internal channel · $99 claim"
-            status={state.disputeStatus}
-            disabled={!canDispute}
-            onRun={() => {
-              void onDispute();
-            }}
-          />
+          <ol className="space-y-1.5">
+            {steps.map((step, position) => (
+              <li key={step.key} className="flex gap-3">
+                <span aria-hidden className="flex w-6 flex-col items-center">
+                  <StepRailMarker status={step.status} />
+                  {position < steps.length - 1 ? (
+                    <span
+                      className={cn(
+                        "mt-1 w-px flex-1",
+                        step.status === "success" ? "bg-emerald/50" : "bg-white/[0.08]",
+                      )}
+                    />
+                  ) : null}
+                </span>
+                <div className="min-w-0 flex-1 pb-0.5">
+                  <StepButton
+                    index={step.index}
+                    title={step.title}
+                    subtitle={step.subtitle}
+                    status={step.status}
+                    disabled={!step.canRun}
+                    onRun={() => {
+                      void step.run();
+                    }}
+                  />
+                </div>
+              </li>
+            ))}
+          </ol>
         </div>
 
         {state.error ? (

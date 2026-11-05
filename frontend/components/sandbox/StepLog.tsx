@@ -13,7 +13,7 @@ const LEVEL: Record<LogLevel, { tag: string; className: string }> = {
   error: { tag: "ERR", className: "text-rose" },
 };
 
-/** Terminal-style live log: every call, latency and chain head, timestamped. */
+/** Monospace instrument readout: every call, latency and chain head, timestamped. */
 export function StepLog({ logs }: { logs: LogEntry[] }) {
   const listRef = useRef<HTMLOListElement | null>(null);
 
@@ -23,11 +23,21 @@ export function StepLog({ logs }: { logs: LogEntry[] }) {
   }, [logs.length]);
 
   return (
-    <div className="border-t border-hairline bg-[#070b0f]">
+    <div className="border-t border-hairline bg-sunken">
       <div className="flex items-center justify-between border-b border-hairline px-4 py-2">
-        <span className="kicker">Step log</span>
+        <span className="flex items-center gap-2">
+          <span
+            aria-hidden
+            className={cn(
+              "h-1.5 w-1.5 rounded-full",
+              logs.length > 0 ? "live-dot bg-emerald" : "bg-white/25",
+            )}
+          />
+          <span className="kicker">Step log</span>
+        </span>
         <span className="font-mono text-[10px] text-dim">stdout · {logs.length} lines</span>
       </div>
+      <div aria-hidden className="instrument-ticks h-[3px] opacity-50" />
       <ol
         ref={listRef}
         role="log"
@@ -40,11 +50,17 @@ export function StepLog({ logs }: { logs: LogEntry[] }) {
             Waiting for step 1. Each call logs its route, latency, ids and chain head here.
           </li>
         ) : (
-          logs.map((entry) => {
+          logs.map((entry, position) => {
             const level = LEVEL[entry.level];
             return (
-              <li key={entry.id} className="flex gap-2">
-                <span className="shrink-0 text-dim">{formatClock(entry.at)}</span>
+              <li
+                key={entry.id}
+                className={cn(
+                  "flex gap-2 rounded px-1 py-px",
+                  position % 2 === 1 && "bg-white/[0.018]",
+                )}
+              >
+                <span className="num shrink-0 text-dim">{formatClock(entry.at)}</span>
                 <span className={cn("shrink-0 font-medium", level.className)}>
                   [{level.tag}]
                 </span>

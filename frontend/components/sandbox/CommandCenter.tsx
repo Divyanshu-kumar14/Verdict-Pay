@@ -12,6 +12,13 @@ import {
   Zap,
 } from "lucide-react";
 
+import { LiquidGlass } from "@/components/premium/LiquidGlass";
+import { FieldLabel } from "@/components/premium/FieldLabel";
+import {
+  SafeNumberTicker,
+  SafeStagger,
+  SafeStaggerItem,
+} from "@/components/sandbox/SafeMotion";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -19,6 +26,7 @@ import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { Panel } from "@/components/ui/Panel";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { Skeleton, SkeletonLines } from "@/components/ui/Skeleton";
+import { CustodyChain } from "@/components/sandbox/CustodyChain";
 import { api, toApiError, type ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { describeContainment, parseContainment } from "@/lib/containment";
@@ -66,7 +74,15 @@ const CONTAINMENT_PANEL: Record<Tone, string> = {
   neutral: "border-hairline bg-white/[0.02]",
 };
 
-function EvCard({
+const VERDICT_ACCENT: Record<Tone, "ice" | "emerald" | "amber" | "rose" | "none"> = {
+  emerald: "emerald",
+  amber: "amber",
+  rose: "rose",
+  sky: "ice",
+  neutral: "ice",
+};
+
+function EvPath({
   label,
   value,
   note,
@@ -83,33 +99,115 @@ function EvCard({
 }) {
   const fraction = maxAbs > 0 ? Math.abs(value) / maxAbs : 0;
   return (
-    <div
-      className={cn(
-        "rounded-md border px-3 py-2.5",
-        best ? "border-emerald/35 bg-emerald/[0.06]" : "border-hairline bg-white/[0.015]",
-      )}
-    >
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-dim">
-          {label}
-        </span>
-        {best ? (
-          <span className="text-[8.5px] font-semibold uppercase tracking-[0.12em] text-emerald">
-            Best EV
+    <div className={cn("relative", best && "bg-emerald/[0.05]")}>
+      {best ? <div aria-hidden className="absolute inset-x-0 top-0 h-[2px] bg-emerald" /> : null}
+      <div className="px-3.5 py-3">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-dim">
+            {label}
           </span>
-        ) : null}
+          {best ? (
+            <span className="rounded-sm border border-emerald/30 bg-emerald/10 px-1 py-px text-[8.5px] font-semibold uppercase tracking-[0.12em] text-emerald">
+              Best EV
+            </span>
+          ) : null}
+        </div>
+        <div className="num mt-1 text-[20px] font-medium tracking-[-0.02em] text-ink">
+          {formatUsd(value)}
+        </div>
+        <ProgressBar
+          value={fraction}
+          tone={tone}
+          label={`${label} expected value relative to the largest loss`}
+          className="mt-2 h-1"
+        />
+        <div className="mt-1.5 text-[9.5px] leading-snug text-muted">{note}</div>
       </div>
-      <div className="num mt-1 text-[16px] font-medium tracking-[-0.02em] text-ink">
-        {formatUsd(value)}
-      </div>
-      <ProgressBar
-        value={fraction}
-        tone={tone}
-        label={`${label} expected value relative to the largest loss`}
-        className="mt-2 h-1"
-      />
-      <div className="mt-1.5 text-[9.5px] leading-snug text-muted">{note}</div>
     </div>
+  );
+}
+
+function VerdictCard({
+  detail,
+  allowedAction,
+  primaryAction,
+  canAct,
+  acting,
+  blockedReason,
+  onExecute,
+}: {
+  detail: DisputeDetail;
+  allowedAction: { allowed: boolean; reason: string | null; fee_usd: number } | undefined;
+  primaryAction: DisputeAction | null;
+  canAct: boolean;
+  acting: boolean;
+  blockedReason: string | null;
+  onExecute: () => void;
+}) {
+  const recMeta = RECOMMENDATION_META[detail.recommended_action];
+  const status = STATUS_META[detail.status];
+
+  return (
+    <LiquidGlass depth={3} accent={VERDICT_ACCENT[recMeta.tone]} grid>
+      <div className="p-4 sm:p-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <FieldLabel rule tone="ice" className="min-w-40 flex-1">
+            Live verdict
+          </FieldLabel>
+          <Badge tone={status.tone} dot>
+            {status.short}
+          </Badge>
+        </div>
+
+        <div className="mt-3 grid gap-5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge tone={recMeta.tone} size="sm">
+                {recMeta.label}
+              </Badge>
+              <span className="font-mono text-[10px] text-dim">
+                {detail.recommended_action}
+              </span>
+            </div>
+            <p className="mt-2 max-w-md text-[12px] leading-relaxed text-muted">
+              {primaryAction
+                ? `${ACTION_META[primaryAction].description} ${
+                    allowedAction ? `PayPal fee ${formatUsd(allowedAction.fee_usd)}.` : ""
+                  }`
+                : blockedReason}
+            </p>
+            {primaryAction && blockedReason ? (
+              <p className="mt-1 max-w-md text-[11px] leading-snug text-amber">{blockedReason}</p>
+            ) : null}
+            <div className="mt-3 max-w-xs">
+              <Button
+                variant="primary"
+                size="lg"
+                block
+                loading={acting}
+                disabled={!canAct}
+                onClick={onExecute}
+                trailingIcon={<ArrowRight size={14} aria-hidden />}
+              >
+                {primaryAction ? recMeta.verb : "Monitor case"}
+              </Button>
+            </div>
+          </div>
+          <div className="sm:min-w-44 sm:text-right">
+            <div className="kicker">Win probability</div>
+            <SafeNumberTicker
+              value={detail.p_win * 100}
+              decimals={1}
+              suffix="%"
+              className="num text-display font-medium tracking-[-0.03em] text-ink"
+            />
+            <div className="num mt-1 text-[11px] text-muted">
+              completeness {formatPercent(detail.telemetry_completeness, 0)}
+            </div>
+          </div>
+        </div>
+      </div>
+    </LiquidGlass>
   );
 }
 
@@ -184,8 +282,14 @@ function TelemetryLedger({
 }) {
   return (
     <section aria-label="Telemetry ledger" className="space-y-2">
+      <FieldLabel rule tone="ice">
+        Telemetry ledger
+      </FieldLabel>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="kicker">Telemetry ledger</span>
+        <span className="font-mono text-[9.5px] text-dim">
+          {events.length} events · append-only · sequence 1..{events.length}
+          {events.length > 8 ? " · showing newest 8" : ""}
+        </span>
         <span className="flex items-center gap-2">
           {chainHead ? (
             <span className="font-mono text-[9.5px] text-dim" title={chainHead}>
@@ -273,12 +377,11 @@ function TelemetryLedger({
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-[9.5px] text-dim">
-        <span>
-          {events.length} events · append-only · sequence 1..{events.length}
-          {events.length > 8 ? ` · showing newest 8` : ""}
-        </span>
         <span className="flex items-center gap-1">
           <Link2 size={9} aria-hidden /> SHA-256 per payer stream
+        </span>
+        <span>
+          {chainHead ? `sealed · ${shortHash(chainHead, 8, 6)}` : "no chain head yet"}
         </span>
       </div>
       {error ? (
@@ -301,8 +404,8 @@ export type CommandCenterProps = {
 };
 
 /**
- * The merchant side of the demo: containment, EV pricing, recommendation and the
- * single PayPal action that recommendation calls for.
+ * The merchant side of the demo: verdict first, then EV, custody, containment
+ * and case facts — with the single PayPal action the recommendation calls for.
  */
 export function CommandCenter({
   activeDisputeId,
@@ -412,13 +515,13 @@ export function CommandCenter({
         ? null
         : "PayPal has not exposed this action for this case.";
 
+  const bestKey: "fight" | "settle" | "offer" | null = detail
+    ? bestEvPath(detail.breakdown)
+    : null;
   const evValues = detail
     ? [detail.breakdown.ev_fight_usd, detail.breakdown.ev_settle_usd, detail.breakdown.ev_offer_usd]
     : [];
   const maxAbs = evValues.length > 0 ? Math.max(...evValues.map((value) => Math.abs(value)), 1) : 1;
-  const bestKey: "fight" | "settle" | "offer" | null = detail
-    ? bestEvPath(detail.breakdown)
-    : null;
 
   return (
     <Panel className="flex min-h-[660px] flex-col overflow-hidden">
@@ -454,7 +557,7 @@ export function CommandCenter({
       <div className="flex-1 overflow-y-auto p-4">
         {!activeDisputeId ? (
           <EmptyState
-            className="h-full min-h-[420px] border-white/10"
+            className="h-full min-h-[420px] border-white/10 bg-sunken"
             icon={<ShieldCheck size={18} aria-hidden />}
             title="No dispute on file"
             description="Run steps 1–3 on the left to open an INQUIRY through the PayPal webhook path. This panel reads live case state — nothing here is mocked."
@@ -475,264 +578,253 @@ export function CommandCenter({
           </div>
         ) : !detail ? (
           <div className="space-y-4" aria-busy="true" aria-label="Loading case">
-            <Skeleton className="h-[92px] w-full" />
-            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-[212px] w-full rounded-[14px]" />
+            <Skeleton className="h-10 w-2/3" />
             <div className="grid gap-2 sm:grid-cols-3">
-              <Skeleton className="h-[112px] w-full" />
-              <Skeleton className="h-[112px] w-full" />
-              <Skeleton className="h-[112px] w-full" />
+              <Skeleton className="h-[104px] w-full" />
+              <Skeleton className="h-[104px] w-full" />
+              <Skeleton className="h-[104px] w-full" />
             </div>
-            <Skeleton className="h-[74px] w-full" />
             <SkeletonLines lines={5} />
           </div>
         ) : (
-          <div className="space-y-4">
+          <SafeStagger step={0.08} className="space-y-5">
             {caseQuery.error ? (
-              <ErrorBanner
-                error={caseQuery.error}
-                context="Showing the last known case state while the API recovers."
-                onRetry={refreshCase}
-              />
+              <SafeStaggerItem>
+                <ErrorBanner
+                  error={caseQuery.error}
+                  context="Showing the last known case state while the API recovers."
+                  onRetry={refreshCase}
+                />
+              </SafeStaggerItem>
             ) : null}
 
-            <CaseSummary detail={detail} now={now} />
-
-            {containmentHeadline ? (
-              <div
-                className={cn(
-                  "flex items-start gap-2.5 rounded-md border px-3 py-2.5",
-                  CONTAINMENT_PANEL[containmentHeadline.tone],
-                )}
-              >
-                <Zap
-                  size={14}
-                  aria-hidden
-                  className={cn("mt-0.5 shrink-0", TONE_TEXT[containmentHeadline.tone])}
-                />
-                <div className="min-w-0">
-                  <p className="text-[12px] font-medium text-ink">{containmentHeadline.text}</p>
-                  <p className="mt-0.5 font-mono text-[10px] text-muted">
-                    {containmentHeadline.detail ?? "circuit breaker · webhook ingest"}
-                  </p>
+            <SafeStaggerItem>
+              <VerdictCard
+                detail={detail}
+                allowedAction={allowedAction}
+                primaryAction={primaryAction}
+                canAct={canAct}
+                acting={acting !== null}
+                blockedReason={blockedReason}
+                onExecute={() => {
+                  if (primaryAction) void runAction(primaryAction);
+                }}
+              />
+              {actionError ? (
+                <div className="mt-2">
+                  <ErrorBanner
+                    error={actionError}
+                    context="The PayPal action did not complete. The case was not changed optimistically."
+                  />
                 </div>
-                <span className="ml-auto shrink-0 font-mono text-[8.5px] uppercase tracking-[0.14em] text-dim">
-                  containment
-                </span>
-              </div>
-            ) : (
-              <div
-                className={cn(
-                  "flex items-start gap-2.5 rounded-md border px-3 py-2.5",
-                  suspendedFallback ? CONTAINMENT_PANEL.emerald : CONTAINMENT_PANEL.neutral,
-                )}
-              >
-                <Zap
-                  size={14}
-                  aria-hidden
-                  className={cn(
-                    "mt-0.5 shrink-0",
-                    suspendedFallback ? "text-emerald" : "text-dim",
-                  )}
-                />
-                <div className="min-w-0">
-                  <p className="text-[12px] font-medium text-ink">
-                    {suspendedFallback
-                      ? "Subscription suspended"
-                      : "Subscription active"}
-                  </p>
-                  <p className="mt-0.5 font-mono text-[10px] text-muted">
-                    containment state synced from the case record
-                  </p>
-                </div>
-              </div>
-            )}
-
-            <section aria-label="Expected value" className="space-y-2">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="kicker">Expected value</span>
-                <span className="font-mono text-[9.5px] text-dim">
-                  USD · net of non-refundable fees · p(win) {formatPercent(detail.p_win)}
-                </span>
-              </div>
-              <div className="grid gap-2 sm:grid-cols-3">
-                <EvCard
-                  label="Fight"
-                  value={detail.breakdown.ev_fight_usd}
-                  note={fightEvNote(detail.breakdown)}
-                  tone="rose"
-                  best={bestKey === "fight"}
-                  maxAbs={maxAbs}
-                />
-                <EvCard
-                  label="Settle"
-                  value={detail.breakdown.ev_settle_usd}
-                  note={settleEvNote(detail.breakdown, detail.stage)}
-                  tone="amber"
-                  best={bestKey === "settle"}
-                  maxAbs={maxAbs}
-                />
-                <EvCard
-                  label="Offer"
-                  value={detail.breakdown.ev_offer_usd}
-                  note={offerEvNote(detail.breakdown)}
-                  tone="sky"
-                  best={bestKey === "offer"}
-                  maxAbs={maxAbs}
-                />
-              </div>
-            </section>
-
-            <section
-              aria-label="Recommendation"
-              className="rounded-lg border border-amber/20 bg-amber/[0.04] p-3.5"
-            >
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="kicker">Recommendation</div>
-                  <div className="mt-1 flex flex-wrap items-center gap-2">
-                    <Badge tone={recMeta.tone} size="sm">
-                      {recMeta.label}
-                    </Badge>
-                    <span className="font-mono text-[10px] text-dim">
-                      {detail.recommended_action}
-                    </span>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <div className="kicker">Completeness</div>
-                  <div className="num mt-1 text-[13px] text-ink">
-                    {formatPercent(detail.telemetry_completeness, 0)}
-                  </div>
-                </div>
-              </div>
-
-              {detail.rationale.length > 0 ? (
-                <ul className="mt-2.5 space-y-1.5">
-                  {detail.rationale.slice(0, 2).map((item) => (
-                    <li key={item.key} className="text-[11.5px] leading-snug text-muted">
-                      <span className="font-medium text-ink">{item.label}</span>
-                      <span className="mx-1 text-dim">·</span>
-                      <span className="line-clamp-2">{item.detail}</span>
-                    </li>
-                  ))}
-                </ul>
               ) : null}
-
-              <div className="mt-3">
-                <Button
-                  variant="primary"
-                  size="lg"
-                  block
-                  loading={acting !== null}
-                  disabled={!canAct}
-                  onClick={() => {
-                    if (primaryAction) void runAction(primaryAction);
-                  }}
-                  trailingIcon={<ArrowRight size={14} aria-hidden />}
+              {actionResult ? (
+                <div
+                  role="status"
+                  className={cn(
+                    "mt-2 flex flex-wrap items-center gap-2 rounded-md border px-3 py-2 text-[11px]",
+                    actionResult.status === "EXECUTED"
+                      ? "border-emerald/25 bg-emerald/[0.06] text-emerald"
+                      : "border-amber/25 bg-amber/[0.06] text-amber",
+                  )}
                 >
-                  {primaryAction ? recMeta.verb : "Monitor case"}
+                  <CircleCheck size={13} aria-hidden />
+                  <span className="font-medium">{actionResult.status}</span>
+                  <span className="text-muted">{ACTION_META[actionResult.action].label}</span>
+                  <span className="num text-dim">· {actionResult.latency_ms}ms</span>
+                  <span className="num text-dim" title={actionResult.action_id}>
+                    · {shortHash(actionResult.action_id, 10, 4)}
+                  </span>
+                </div>
+              ) : null}
+            </SafeStaggerItem>
+
+            <SafeStaggerItem>
+              <section aria-label="Expected value" className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="kicker">Expected value</span>
+                  <span className="font-mono text-[9.5px] text-dim">
+                    USD · net of non-refundable fees · p(win) {formatPercent(detail.p_win)}
+                  </span>
+                </div>
+                <SafeStagger
+                  step={0.06}
+                  className="grid overflow-hidden rounded-lg border border-hairline bg-white/[0.008] sm:grid-cols-3 sm:divide-x sm:divide-white/[0.06]"
+                >
+                  <SafeStaggerItem>
+                    <EvPath
+                      label="Fight"
+                      value={detail.breakdown.ev_fight_usd}
+                      note={fightEvNote(detail.breakdown)}
+                      tone="rose"
+                      best={bestKey === "fight"}
+                      maxAbs={maxAbs}
+                    />
+                  </SafeStaggerItem>
+                  <SafeStaggerItem>
+                    <EvPath
+                      label="Settle"
+                      value={detail.breakdown.ev_settle_usd}
+                      note={settleEvNote(detail.breakdown, detail.stage)}
+                      tone="amber"
+                      best={bestKey === "settle"}
+                      maxAbs={maxAbs}
+                    />
+                  </SafeStaggerItem>
+                  <SafeStaggerItem>
+                    <EvPath
+                      label="Offer"
+                      value={detail.breakdown.ev_offer_usd}
+                      note={offerEvNote(detail.breakdown)}
+                      tone="sky"
+                      best={bestKey === "offer"}
+                      maxAbs={maxAbs}
+                    />
+                  </SafeStaggerItem>
+                </SafeStagger>
+              </section>
+            </SafeStaggerItem>
+
+            <SafeStaggerItem>
+              <CustodyChain
+                chainHead={chainHead}
+                disputeId={detail.dispute_id}
+                actionLabel={primaryAction ? ACTION_META[primaryAction].label : "Monitor"}
+                events={events}
+              />
+            </SafeStaggerItem>
+
+            <SafeStaggerItem>
+              {containmentHeadline ? (
+                <div
+                  className={cn(
+                    "flex items-start gap-2.5 rounded-md border px-3 py-2.5",
+                    CONTAINMENT_PANEL[containmentHeadline.tone],
+                  )}
+                >
+                  <Zap
+                    size={14}
+                    aria-hidden
+                    className={cn("mt-0.5 shrink-0", TONE_TEXT[containmentHeadline.tone])}
+                  />
+                  <div className="min-w-0">
+                    <p className="text-[12px] font-medium text-ink">{containmentHeadline.text}</p>
+                    <p className="mt-0.5 font-mono text-[10px] text-muted">
+                      {containmentHeadline.detail ?? "circuit breaker · webhook ingest"}
+                    </p>
+                  </div>
+                  <span className="ml-auto shrink-0 font-mono text-[8.5px] uppercase tracking-[0.14em] text-dim">
+                    containment
+                  </span>
+                </div>
+              ) : (
+                <div
+                  className={cn(
+                    "flex items-start gap-2.5 rounded-md border px-3 py-2.5",
+                    suspendedFallback ? CONTAINMENT_PANEL.emerald : CONTAINMENT_PANEL.neutral,
+                  )}
+                >
+                  <Zap
+                    size={14}
+                    aria-hidden
+                    className={cn(
+                      "mt-0.5 shrink-0",
+                      suspendedFallback ? "text-emerald" : "text-dim",
+                    )}
+                  />
+                  <div className="min-w-0">
+                    <p className="text-[12px] font-medium text-ink">
+                      {suspendedFallback
+                        ? "Subscription suspended"
+                        : "Subscription active"}
+                    </p>
+                    <p className="mt-0.5 font-mono text-[10px] text-muted">
+                      containment state synced from the case record
+                    </p>
+                  </div>
+                </div>
+              )}
+            </SafeStaggerItem>
+
+            <SafeStaggerItem>
+              <section aria-label="Live case facts" className="space-y-2">
+                <FieldLabel rule tone="neutral">
+                  Live case facts
+                </FieldLabel>
+                <CaseSummary detail={detail} now={now} />
+              </section>
+            </SafeStaggerItem>
+
+            <SafeStaggerItem>
+              <TelemetryLedger
+                events={events}
+                chainValid={chainValid}
+                chainHead={chainHead}
+                loading={timeline.loading}
+                error={timeline.error}
+              />
+            </SafeStaggerItem>
+
+            <SafeStaggerItem>
+              <div className="flex flex-wrap items-center gap-2 border-t border-hairline pt-3">
+                <Link
+                  href={`/disputes/${encodeURIComponent(detail.dispute_id)}`}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-hairline px-2.5 py-1.5 text-[11px] text-muted transition-colors hover:border-white/15 hover:text-ink"
+                >
+                  Full case room
+                  <ArrowRight size={12} aria-hidden />
+                </Link>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  loading={triageLoading}
+                  icon={<RefreshCw size={12} aria-hidden />}
+                  onClick={() => {
+                    void runTriage();
+                  }}
+                >
+                  Re-run triage
                 </Button>
-                <p className="mt-2 text-[10.5px] leading-snug text-muted">
-                  {primaryAction
-                    ? `${ACTION_META[primaryAction].description} ${allowedAction ? `PayPal fee ${formatUsd(allowedAction.fee_usd)}.` : ""}`
-                    : blockedReason}
-                </p>
-                {primaryAction && blockedReason ? (
-                  <p className="mt-1 text-[10.5px] leading-snug text-amber">{blockedReason}</p>
+                {triageNote ? (
+                  <span className="font-mono text-[9.5px] text-emerald">{triageNote}</span>
                 ) : null}
               </div>
-            </section>
-
-            {actionError ? (
-              <ErrorBanner
-                error={actionError}
-                context="The PayPal action did not complete. The case was not changed optimistically."
-              />
-            ) : null}
-
-            {actionResult ? (
-              <div
-                role="status"
-                className={cn(
-                  "flex flex-wrap items-center gap-2 rounded-md border px-3 py-2 text-[11px]",
-                  actionResult.status === "EXECUTED"
-                    ? "border-emerald/25 bg-emerald/[0.06] text-emerald"
-                    : "border-amber/25 bg-amber/[0.06] text-amber",
-                )}
-              >
-                <CircleCheck size={13} aria-hidden />
-                <span className="font-medium">{actionResult.status}</span>
-                <span className="text-muted">{ACTION_META[actionResult.action].label}</span>
-                <span className="num text-dim">· {actionResult.latency_ms}ms</span>
-                <span className="num text-dim" title={actionResult.action_id}>
-                  · {shortHash(actionResult.action_id, 10, 4)}
-                </span>
-              </div>
-            ) : null}
-
-            <TelemetryLedger
-              events={events}
-              chainValid={chainValid}
-              chainHead={chainHead}
-              loading={timeline.loading}
-              error={timeline.error}
-            />
-
-            <div className="flex flex-wrap items-center gap-2 border-t border-hairline pt-3">
-              <Link
-                href={`/disputes/${encodeURIComponent(detail.dispute_id)}`}
-                className="inline-flex items-center gap-1.5 rounded-md border border-hairline px-2.5 py-1.5 text-[11px] text-muted transition-colors hover:border-white/15 hover:text-ink"
-              >
-                Full case room
-                <ArrowRight size={12} aria-hidden />
-              </Link>
-              <Button
-                variant="ghost"
-                size="sm"
-                loading={triageLoading}
-                icon={<RefreshCw size={12} aria-hidden />}
-                onClick={() => {
-                  void runTriage();
-                }}
-              >
-                Re-run triage
-              </Button>
-              {triageNote ? (
-                <span className="font-mono text-[9.5px] text-emerald">{triageNote}</span>
+              {triageError ? (
+                <div className="mt-2">
+                  <ErrorBanner error={triageError} context="Triage recompute failed." />
+                </div>
               ) : null}
-            </div>
-            {triageError ? (
-              <ErrorBanner error={triageError} context="Triage recompute failed." />
-            ) : null}
 
-            {detail.actions.length > 0 ? (
-              <div className="space-y-1.5">
-                <span className="kicker">Action audit</span>
-                <ul className="space-y-1">
-                  {detail.actions.slice(-3).map((record) => (
-                    <li
-                      key={record.action_id}
-                      className="flex flex-wrap items-center gap-2 rounded border border-hairline bg-white/[0.015] px-2.5 py-1.5 font-mono text-[9.5px] text-muted"
-                    >
-                      <span className="text-ink">{ACTION_META[record.action].label}</span>
-                      <span className="text-dim">{record.status}</span>
-                      <span>{record.latency_ms}ms</span>
-                      <span className="ml-auto text-dim" title={record.action_id}>
-                        {shortHash(record.action_id, 8, 4)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
+              {detail.actions.length > 0 ? (
+                <div className="mt-3 space-y-1.5">
+                  <span className="kicker">Action audit</span>
+                  <ul className="space-y-1">
+                    {detail.actions.slice(-3).map((record) => (
+                      <li
+                        key={record.action_id}
+                        className="flex flex-wrap items-center gap-2 rounded border border-hairline bg-white/[0.015] px-2.5 py-1.5 font-mono text-[9.5px] text-muted"
+                      >
+                        <span className="text-ink">{ACTION_META[record.action].label}</span>
+                        <span className="text-dim">{record.status}</span>
+                        <span>{record.latency_ms}ms</span>
+                        <span className="ml-auto text-dim" title={record.action_id}>
+                          {shortHash(record.action_id, 8, 4)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
 
-            {!detail.facts.chain_valid ? (
-              <p className="flex items-center gap-1.5 text-[10.5px] text-rose">
-                <AlertTriangle size={11} aria-hidden />
-                Chain verification failed — evidence generation is unsupported until it is repaired.
-              </p>
-            ) : null}
-          </div>
+              {!detail.facts.chain_valid ? (
+                <p className="mt-3 flex items-center gap-1.5 text-[10.5px] text-rose">
+                  <AlertTriangle size={11} aria-hidden />
+                  Chain verification failed — evidence generation is unsupported until it is repaired.
+                </p>
+              ) : null}
+            </SafeStaggerItem>
+          </SafeStagger>
         )}
       </div>
     </Panel>

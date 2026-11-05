@@ -1,8 +1,9 @@
 import type { ReactNode } from "react";
 
+import { FieldLabel } from "@/components/premium/FieldLabel";
 import { cn } from "@/lib/cn";
 
-/** Page-level masthead: kicker, title, plain-language description and meta rail. */
+/** Page-level instrument masthead: rule, kicker, display title and meta rail. */
 export function PageHeader({
   kicker,
   title,
@@ -21,22 +22,23 @@ export function PageHeader({
   return (
     <header
       className={cn(
-        "flex flex-col gap-4 border-b border-hairline pb-5 lg:flex-row lg:items-end lg:justify-between",
+        "relative border-b border-hairline pb-5 pt-4 lg:flex lg:items-end lg:justify-between lg:gap-10",
         className,
       )}
     >
-      <div className="min-w-0">
-        <div className="kicker">{kicker}</div>
-        <h1 className="mt-1.5 text-[22px] font-semibold leading-[1.27] tracking-[-0.02em] text-ink">
-          {title}
-        </h1>
+      <span aria-hidden className="rule-instrument absolute inset-x-0 top-0 h-px" />
+      <div className="min-w-0 max-w-3xl">
+        <FieldLabel rule>{kicker}</FieldLabel>
+        <h1 className="mt-3 text-hero font-semibold text-ink">{title}</h1>
         {description ? (
-          <p className="mt-2 max-w-3xl text-[12.5px] leading-relaxed text-muted">{description}</p>
+          <p className="mt-2 text-[13px] leading-relaxed text-muted">{description}</p>
         ) : null}
-        {actions ? <div className="mt-3 flex flex-wrap items-center gap-2">{actions}</div> : null}
+        {actions ? <div className="mt-4 flex flex-wrap items-center gap-2">{actions}</div> : null}
       </div>
       {meta ? (
-        <div className="flex shrink-0 flex-wrap items-end gap-x-6 gap-y-3">{meta}</div>
+        <div className="mt-5 flex shrink-0 flex-wrap items-end gap-x-7 gap-y-4 lg:mt-0 lg:border-l lg:border-hairline lg:pl-7">
+          {meta}
+        </div>
       ) : null}
     </header>
   );
@@ -44,9 +46,9 @@ export function PageHeader({
 
 export function PageMeta({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div>
-      <div className="kicker">{label}</div>
-      <div className="num mt-1 text-[12px] text-ink">{value}</div>
+    <div className="min-w-[72px]">
+      <FieldLabel>{label}</FieldLabel>
+      <div className="tnum mt-1.5 font-mono text-[13px] leading-none text-ink">{value}</div>
     </div>
   );
 }

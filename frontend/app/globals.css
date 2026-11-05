@@ -247,3 +247,186 @@
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
 }
+
+/* ===========================================================================
+   PREMIUM LAYER — "Forensic Instrument"
+   ---------------------------------------------------------------------------
+   The subject is adjudication: cryptographic evidence, deterministic pricing,
+   a verdict. So the surface is not a SaaS dashboard, it is a precision
+   instrument in a sealed evidence room. Three rules follow:
+
+   1. Depth is optical, not decorative. Glass is used ONLY where it means
+      "sealed / under inspection" (hero, evidence, verdict). Elsewhere depth is
+      still a luminance step, because stacking blur on every panel is the tell
+      of generated UI.
+   2. One hue, one meaning. Emerald = protected. Amber = a decision is open.
+      Rose = money at risk. Ice = the instrument itself (calibration, measure).
+      Nothing else is allowed to carry colour.
+   3. Motion has mass. Springs, not linear easing; staggered reveals; numbers
+      that resolve. Motion confirms state, it never performs.
+   =========================================================================== */
+
+@theme {
+  /* Deeper, cooler substrate — genuinely black, so glass has something to sit on */
+  --color-abyss: #05070a;
+  --color-void: #070a0e;
+  --color-panel: #0b1118;
+  --color-raised: #101822;
+  --color-chrome: #080d13;
+  --color-sunken: #04060a;
+
+  /* Glass: three stops so a surface can be "sealed" by degree */
+  --color-glass-1: rgba(255, 255, 255, 0.035);
+  --color-glass-2: rgba(255, 255, 255, 0.055);
+  --color-glass-3: rgba(255, 255, 255, 0.085);
+  --color-glass-edge: rgba(255, 255, 255, 0.14);
+  --color-glass-inner: rgba(255, 255, 255, 0.06);
+  --color-glass-shade: rgba(0, 0, 0, 0.55);
+
+  /* Instrument accent — the calibration hue. Never used for meaning. */
+  --color-ice: #7dd3fc;
+  --color-ice-deep: #38bdf8;
+  --color-ice-glow: rgba(125, 211, 252, 0.22);
+
+  /* Refined semantics — brighter, higher chroma, still distinguishable */
+  --color-emerald: #2ee6a8;
+  --color-emerald-deep: #10b981;
+  --color-emerald-glow: rgba(46, 230, 168, 0.2);
+  --color-amber: #ffb224;
+  --color-amber-glow: rgba(255, 178, 36, 0.2);
+  --color-rose: #ff5c78;
+  --color-rose-glow: rgba(255, 92, 120, 0.2);
+
+  /* Type — display scale for statements, micro for structure */
+  --text-display: 44px;
+  --text-display--line-height: 1.04;
+  --text-display--letter-spacing: -0.035em;
+  --text-hero: 32px;
+  --text-hero--line-height: 1.08;
+  --text-hero--letter-spacing: -0.03em;
+
+  /* Motion — springs expressed as durations for CSS, physics in JS */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --duration-fast: 140ms;
+  --duration-base: 240ms;
+  --duration-slow: 420ms;
+
+  /* Optical elevation — a glass surface casts one soft, wide shade */
+  --shadow-glass: 0 1px 0 0 rgba(255, 255, 255, 0.05) inset,
+    0 32px 64px -32px rgba(0, 0, 0, 0.9);
+  --shadow-lift: 0 24px 48px -24px rgba(0, 0, 0, 0.8);
+  --shadow-glow-emerald: 0 0 0 1px rgba(46, 230, 168, 0.25),
+    0 12px 40px -12px rgba(46, 230, 168, 0.3);
+}
+
+@layer components {
+  /* --- Glass: the "sealed evidence" surface ------------------------------ */
+  .glass {
+    position: relative;
+    background: linear-gradient(
+      160deg,
+      var(--color-glass-2) 0%,
+      var(--color-glass-1) 42%,
+      var(--color-glass-shade) 100%
+    );
+    backdrop-filter: blur(20px) saturate(150%);
+    -webkit-backdrop-filter: blur(20px) saturate(150%);
+    border: 1px solid var(--color-glass-edge);
+    box-shadow: var(--shadow-glass);
+  }
+
+  /* Specular highlight along the top edge — reads as a lit bevel, not a border */
+  .glass::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      var(--color-glass-inner) 18%,
+      rgba(255, 255, 255, 0.28) 50%,
+      var(--color-glass-inner) 82%,
+      transparent
+    );
+    pointer-events: none;
+  }
+
+  .glass-quiet {
+    background: var(--color-glass-1);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid var(--color-hairline);
+  }
+
+  /* --- Instrument substrate: calibration grid + tick marks ---------------- */
+  .instrument-grid {
+    background-image:
+      linear-gradient(to right, rgba(255, 255, 255, 0.028) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(255, 255, 255, 0.028) 1px, transparent 1px);
+    background-size: 56px 56px;
+  }
+
+  .instrument-ticks {
+    background-image: repeating-linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.14) 0 1px,
+      transparent 1px 8px
+    );
+  }
+
+  /* Fine film grain kills the flat "digital" look of large dark fields */
+  .grain::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.28;
+    mix-blend-mode: overlay;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+  }
+
+  /* Hairline instrument rule with a bright origin point */
+  .rule-instrument {
+    height: 1px;
+    background: linear-gradient(
+      90deg,
+      var(--color-ice) 0,
+      rgba(125, 211, 252, 0.35) 6%,
+      var(--color-hairline) 22%,
+      var(--color-hairline) 100%
+    );
+  }
+
+  /* Numerals must never wobble as they update */
+  .tnum {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+  }
+
+  /* Gradient text for the one display statement per view */
+  .ink-gradient {
+    background: linear-gradient(180deg, #ffffff 0%, #9fb0c0 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .ice-gradient {
+    background: linear-gradient(100deg, var(--color-ice) 0%, var(--color-emerald) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}

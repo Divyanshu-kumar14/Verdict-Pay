@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { CalendarClock } from "lucide-react";
+import { CalendarClock, TriangleAlert } from "lucide-react";
 
 import { PageHeader, PageMeta } from "@/components/PageHeader";
 import { Badge } from "@/components/ui/Badge";
@@ -18,6 +18,7 @@ import {
   formatClock,
   formatDayLabel,
   formatDueIn,
+  formatPercent,
   formatUsd,
   formatWeekday,
   isoToMs,
@@ -43,50 +44,47 @@ type Urgency = {
 
 function urgencyFor(daysLeft: number): Urgency {
   if (daysLeft <= 0) return { label: "overdue", tone: "rose" };
-  if (daysLeft <= 3) return { label: "≤ 3 days", tone: "amber" };
-  if (daysLeft <= 7) return { label: "≤ 7 days", tone: "sky" };
-  return { label: "> 7 days", tone: "emerald" };
+  if (daysLeft <= 3) return { label: "3 days or less", tone: "amber" };
+  if (daysLeft <= 7) return { label: "7 days or less", tone: "sky" };
+  return { label: "more than 7 days", tone: "emerald" };
 }
 
 const LEGEND: Urgency[] = [
   { label: "Overdue", tone: "rose" },
-  { label: "≤ 3 days", tone: "amber" },
-  { label: "≤ 7 days", tone: "sky" },
-  { label: "> 7 days", tone: "emerald" },
+  { label: "3 days or less", tone: "amber" },
+  { label: "7 days or less", tone: "sky" },
+  { label: "More than 7 days", tone: "emerald" },
 ];
 
 function DayHeader({ now }: { now: number | null }) {
   return (
-    <div className="grid grid-cols-[240px_minmax(0,1fr)] border-b border-hairline bg-[#0b1117]">
+    <div className="grid grid-cols-[240px_minmax(0,1fr)] border-b border-hairline bg-chrome">
       <div className="flex items-center gap-2 px-3 py-2">
         <CalendarClock size={12} className="text-dim" aria-hidden />
         <span className="kicker">Case · seller response deadline</span>
       </div>
       <div
         className="relative grid"
-        style={{ gridTemplateColumns: `repeat(${WINDOW_DAYS}, minmax(0, 1fr))` }}
+        style={{ gridTemplateColumns: "repeat(" + String(WINDOW_DAYS) + ", minmax(0, 1fr))" }}
       >
         {Array.from({ length: WINDOW_DAYS }, (_, index) => {
           const day = now === null ? null : new Date(now + index * DAY_MS);
+          const isToday = index === 0;
           return (
             <div
               key={index}
               className={cn(
-                "border-l border-hairline px-1.5 py-1.5",
-                index === 0 && "bg-emerald/[0.035]",
+                "border-l border-hairline px-1.5 pb-1 pt-1.5",
+                isToday ? "border-l-ice/60 bg-ice/[0.05]" : "border-l-hairline",
               )}
             >
-              <div className="font-mono text-[9px] uppercase tracking-[0.08em] text-dim">
-                {index === 0 ? "Today" : day ? formatWeekday(day) : "—"}
+              <div className={cn("font-mono text-[9px] uppercase tracking-[0.08em]", isToday ? "text-ice" : "text-dim")}>
+                {isToday ? "Today" : day ? formatWeekday(day) : "--"}
               </div>
-              <div
-                className={cn(
-                  "font-mono text-[9.5px]",
-                  index === 0 ? "text-emerald" : "text-muted",
-                )}
-              >
-                {day ? formatDayLabel(day) : "—"}
+              <div className={cn("num font-mono text-[9.5px]", isToday ? "text-ice" : "text-muted")}>
+                {day ? formatDayLabel(day) : "--"}
               </div>
+              <div aria-hidden className="instrument-ticks mt-1 h-[3px] w-full opacity-70" />
             </div>
           );
         })}
@@ -102,10 +100,10 @@ function LaneGrid() {
         <span
           key={index}
           className="absolute inset-y-0 border-l border-hairline/70"
-          style={{ left: `${(index / WINDOW_DAYS) * 100}%` }}
+          style={{ left: (index / WINDOW_DAYS) * 100 + "%" }}
         />
       ))}
-      <span className="absolute inset-y-0 left-0 w-px bg-emerald/40" />
+      <span className="absolute inset-y-0 left-0 w-[2px] bg-ice/70" />
     </div>
   );
 }
@@ -124,9 +122,9 @@ function TimelineRow({ dispute, now }: { dispute: DisputeSummary; now: number })
 
   return (
     <Link
-      href={`/disputes/${encodeURIComponent(dispute.dispute_id)}`}
-      className="grid grid-cols-[240px_minmax(0,1fr)] border-b border-hairline/70 transition-colors last:border-b-0 hover:bg-white/[0.02] focus-visible:bg-white/[0.03]"
-      aria-label={`Open case ${dispute.dispute_id}, ${urgency?.label ?? "no deadline"}`}
+      href={"/disputes/" + encodeURIComponent(dispute.dispute_id)}
+      className="group grid grid-cols-[240px_minmax(0,1fr)] border-b border-hairline/70 transition-colors last:border-b-0 hover:bg-white/[0.02] focus-visible:bg-white/[0.03]"
+      aria-label={"Open case " + dispute.dispute_id + ", " + (urgency ? urgency.label : "no deadline")}
     >
       <div className="min-w-0 border-r border-hairline/70 px-3 py-2">
         <div className="flex items-center justify-between gap-2">
@@ -141,9 +139,15 @@ function TimelineRow({ dispute, now }: { dispute: DisputeSummary; now: number })
           <Badge tone={reason.tone} title={reason.label}>
             {reason.short}
           </Badge>
+          {overdue ? (
+            <span className="inline-flex items-center gap-1 text-[9px] font-semibold tracking-[0.08em] text-rose">
+              <TriangleAlert size={9} aria-hidden />
+              OVERDUE
+            </span>
+          ) : null}
           <span
             className={cn(
-              "truncate font-mono text-[9px]",
+              "num truncate font-mono text-[9px]",
               overdue ? "text-rose" : "text-dim",
             )}
             title={formatAbsolute(dispute.seller_response_due_date)}
@@ -158,27 +162,32 @@ function TimelineRow({ dispute, now }: { dispute: DisputeSummary; now: number })
         {dueMs !== null && urgency ? (
           <span
             className="absolute top-1/2 -translate-y-1/2"
-            style={{ left: 0, width: `${width}%` }}
-            title={`${dispute.dispute_id} · due ${formatAbsolute(dispute.seller_response_due_date)}`}
+            style={{ left: 0, width: width + "%" }}
+            title={dispute.dispute_id + " · due " + formatAbsolute(dispute.seller_response_due_date)}
           >
             <span
               className={cn(
                 "block h-[9px] rounded-full",
                 TONE_BAR[urgency.tone],
-                overdue ? "opacity-80" : "opacity-70",
+                overdue ? "opacity-85" : "opacity-70",
               )}
             />
             <span
+              aria-hidden
               className={cn(
-                "absolute -right-[3px] top-1/2 h-[13px] w-[3px] -translate-y-1/2 rounded-full",
+                "absolute top-1/2 h-[11px] w-[11px] -translate-y-1/2 rotate-45 rounded-[2px] border border-void",
                 TONE_DOT[urgency.tone],
               )}
+              style={{ right: -5 }}
             />
             {beyondWindow ? (
               <span className="absolute -right-3 top-1/2 -translate-y-1/2 font-mono text-[9px] text-dim">
-                ›
+                +
               </span>
             ) : null}
+            <span className="num pointer-events-none absolute left-0 top-[-20px] hidden whitespace-nowrap rounded border border-hairline bg-sunken px-1.5 py-0.5 font-mono text-[9px] text-muted opacity-0 shadow-lift transition-opacity group-hover:block group-hover:opacity-100 group-focus-visible:block group-focus-visible:opacity-100">
+              due {formatAbsolute(dispute.seller_response_due_date)} · p(win) {formatPercent(dispute.p_win)}
+            </span>
           </span>
         ) : (
           <span className="absolute left-2 top-1/2 -translate-y-1/2 font-mono text-[9px] text-dim">
@@ -229,11 +238,11 @@ export function TimelineBoard() {
       <PageHeader
         kicker="SLA command board · Aurora Analytics"
         title="Seller response deadlines"
-        description="Bryntum-shaped data model — drop-in scheduler swap documented in docs/. Bars run from now to each case's seller_response_due_date across a 14-day forward window."
+        description="Bryntum-shaped data model — drop-in scheduler swap documented in docs/. Bars run from now to each case&#39;s seller_response_due_date across a 14-day forward window."
         meta={
           <>
             <PageMeta label="Open cases" value={open.length} />
-            <PageMeta label="Due ≤ 72h" value={atRisk.length} />
+            <PageMeta label="Due in 72h or less" value={atRisk.length} />
             <PageMeta
               label="Next breach"
               value={
@@ -259,18 +268,18 @@ export function TimelineBoard() {
               value={open.length}
               sub={
                 query.data
-                  ? `${query.data.meta.total} total cases on file`
+                  ? query.data.meta.total + " total cases on file"
                   : "Queue unavailable"
               }
             />
             <StatTile
-              label="Due ≤ 72h"
+              label="Due in 72h or less"
               value={atRisk.length}
               sub="Includes overdue cases"
               tone="amber"
             />
             <StatTile
-              label="Exposure ≤ 72h"
+              label="Exposure in 72h or less"
               value={formatUsd(atRiskExposure)}
               sub="Claim value approaching deadline"
               tone="rose"
@@ -295,7 +304,7 @@ export function TimelineBoard() {
       <Panel className="overflow-hidden">
         <PanelHeader
           kicker="Scheduler model"
-          title="Resources × events"
+          title="Resources and events"
           description="Each row is a resource (case) and one event from now to its deadline. Rendering is CSS grid, no scheduler runtime."
           actions={
             <div className="flex flex-wrap items-center gap-2">
@@ -317,7 +326,7 @@ export function TimelineBoard() {
 
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-hairline px-3 py-2 font-mono text-[9.5px] text-dim">
           <span>
-            as of {now === null ? "—" : formatClock(now)} · {formatDayLabel(referenceNow)} →{" "}
+            as of {now === null ? "--" : formatClock(now)} · {formatDayLabel(referenceNow)} →{" "}
             {formatDayLabel(referenceNow + WINDOW_DAYS * DAY_MS)}
           </span>
           <span className="flex items-center gap-1.5">
@@ -352,6 +361,7 @@ export function TimelineBoard() {
           <div className="overflow-x-auto">
             <div className="min-w-[980px]">
               <DayHeader now={now} />
+              <div className="border-t border-ice/25" aria-hidden />
               {dated.map((dispute) => (
                 <TimelineRow
                   key={dispute.dispute_id}
@@ -368,14 +378,14 @@ export function TimelineBoard() {
         <Panel>
           <PanelHeader
             kicker="Unscheduleable"
-            title={`${undated.length} open cases without a deadline`}
+            title={undated.length + " open cases without a deadline"}
             description="PayPal has not returned seller_response_due_date for these cases. They are excluded from the 14-day window rather than guessed."
           />
           <ul className="divide-y divide-white/[0.045]">
             {undated.map((dispute) => (
               <li key={dispute.dispute_id}>
                 <Link
-                  href={`/disputes/${encodeURIComponent(dispute.dispute_id)}`}
+                  href={"/disputes/" + encodeURIComponent(dispute.dispute_id)}
                   className="flex flex-wrap items-center gap-2 px-3 py-2.5 text-[11px] transition-colors hover:bg-white/[0.02]"
                 >
                   <span className="num text-ink">{shortHash(dispute.dispute_id, 12, 4)}</span>
@@ -383,8 +393,8 @@ export function TimelineBoard() {
                     {REASON_META[dispute.reason_code].short}
                   </Badge>
                   <span className="num text-muted">{formatUsd(dispute.amount_usd)}</span>
-                  <span className="ml-auto font-mono text-[9.5px] text-dim">
-                    no seller_response_due_date
+                  <span className="num ml-auto font-mono text-[9.5px] text-dim">
+                    p(win) {formatPercent(dispute.p_win)} · no seller_response_due_date
                   </span>
                 </Link>
               </li>
@@ -393,7 +403,7 @@ export function TimelineBoard() {
         </Panel>
       ) : null}
 
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-hairline bg-white/[0.012] px-3 py-2.5 font-mono text-[9.5px] text-dim">
+      <div className="num flex flex-wrap items-center justify-between gap-2 rounded-lg border border-hairline bg-white/[0.012] px-3 py-2.5 font-mono text-[9.5px] text-dim">
         <span className="min-w-0 truncate">
           resources: [{"{"} id, name, stage {"}"}] · events: [{"{"} id, resourceId, startDate,
           endDate, color {"}"}]
