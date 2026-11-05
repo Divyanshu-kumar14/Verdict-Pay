@@ -4,7 +4,7 @@ PY := uv run --directory backend
 API_PORT ?= 8000
 WEB_PORT ?= 3000
 
-.PHONY: help install env api web seed stack reset-db test lint format typecheck check verify verify-live demo e2e docker-build docker-up docker-down clean
+.PHONY: help install env api web seed stack reset-db test test-backend test-frontend test-sdk test-e2e lint format typecheck check verify verify-live demo e2e docker-build docker-up docker-down clean
 E2E_PORT ?= 8199
 
 help: ## Show available targets
@@ -31,8 +31,19 @@ seed: ## Seed the demo merchant, history and sample disputes
 reset-db: ## Delete the local SQLite database
 	rm -f backend/verdictpay.db backend/verdictpay.db-wal backend/verdictpay.db-shm
 
-test: ## Run backend test suite
+test: test-backend test-frontend test-sdk ## Run every offline suite (no server needed)
+
+test-backend: ## Backend unit + integration suite
 	$(PY) pytest -q
+
+test-frontend: ## Frontend unit + component suite (vitest, jsdom)
+	pnpm -C frontend test --run
+
+test-sdk: ## TypeScript SDK suite (vitest)
+	pnpm -C packages/verdictpay-sdk test
+
+test-e2e: ## Frontend HTTP contract + judge-flow suite (needs a running API)
+	pnpm -C frontend test:e2e
 
 lint: ## Ruff lint backend, eslint frontend
 	$(PY) ruff check app tests scripts
@@ -54,6 +65,7 @@ verify: ## Full quality gate (run before every demo)
 	$(PY) pytest -q
 	pnpm -C frontend lint
 	pnpm -C frontend typecheck
+	pnpm -C frontend test --run
 	pnpm -C frontend build
 	pnpm -C packages/verdictpay-sdk test
 	pnpm -C packages/verdictpay-sdk build
