@@ -2,9 +2,10 @@
 
 Implements the frozen EV specification: fight, settle and offer are derived from
 the same deterministic formula, unit-tested to the cent. Every public function is
-pure: identical inputs always produce identical outputs (ADR-003). Money is Decimal and converted to cents with ROUND_HALF_UP at the
-boundary; probabilities arrive as float and are converted through their
-shortest decimal representation so the arithmetic is reproducible.
+pure: identical inputs always produce identical outputs (ADR-003). Money is
+Decimal, quantized to cents with ROUND_HALF_UP at the boundary; probabilities
+arrive as float and are converted through their shortest decimal representation
+so the arithmetic is reproducible.
 """
 
 from __future__ import annotations
