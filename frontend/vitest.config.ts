@@ -14,6 +14,9 @@ export default defineConfig({
       "components/sandbox/__tests__/**/*.test.tsx",
     ],
   },
+  esbuild: {
+    jsx: "automatic",
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "."),
