@@ -1,20 +1,48 @@
-# VerdictPay Render Blueprint.
+# VerdictPay Render Blueprint — two Docker web services, no PayPal account needed.
 #
-# Two Docker web services + an optional static docs site. The API runs the
-# simulator gateway by default, so a deploy needs no PayPal account. The demo
-# SQLite database lives on the container filesystem and is ephemeral on
-# Render's free plan; that is acceptable for a judge demo and explicitly not a
-# production database. Point DATABASE_URL at Postgres (postgresql+asyncpg://...)
-# for anything durable.
+#   Dashboard: New + > Blueprint > connect this repo > Apply.
 #
-# Before the first deploy, set the sync:false secrets in the Render dashboard:
-#   verdictpay-api  VERDICTPAY_API_KEY, PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET,
-#                   PAYPAL_WEBHOOK_ID, OPENAI_API_KEY (last one optional)
-#   verdictpay-web  NEXT_PUBLIC_VERDICTPAY_API_KEY  (must equal VERDICTPAY_API_KEY)
+# WHAT THIS FIXES vs the first draft
+#   1. The API now SEEDS ON BOOT. The image CMD runs uvicorn only, so a fresh
+#      deploy previously came up with an empty database and the UI showed no
+#      cases. dockerCommand seeds first, then execs the server.
+#   2. Secrets are shared through one env group. The web service needs the same
+#      VERDICTPAY_SIGNING_SECRET as the API, otherwise the server-side SDK route
+#      signs telemetry with a different key and every ingest is rejected.
+#      generateValue inside a group is generated once and shared by both.
+#   3. CORS reads the web service's real public URL instead of a hardcoded host.
+#      Render appends a suffix when a name is taken, which would otherwise make
+#      ALLOWED_ORIGINS wrong and block every browser request.
 #
-# NEXT_PUBLIC_* values are compiled into the Next.js bundle, so Render must pass
-# them to the Docker build (our Dockerfiles declare them as ARG) as well as at
-# runtime.
+# THE ONE THING YOU MUST CHECK
+#   NEXT_PUBLIC_* is compiled into the browser bundle at BUILD time, so the web
+#   service cannot discover the API URL at runtime. Keep the default service
+#   names below and the value is correct. If Render reports either name as taken
+#   it will append a suffix (for example verdictpay-api-a1b2), and you must:
+#     - update NEXT_PUBLIC_API_BASE_URL  to the API's real https URL, and
+#     - redeploy the web service (a restart is not enough; it must rebuild).
+#
+# STORAGE
+#   Free plan has no persistent disk, so the SQLite file lives on the container
+#   filesystem and resets on every deploy or restart. That is deliberate for a
+#   judge demo: every visit starts from a freshly seeded, deterministic dataset.
+#   For durable data, attach a paid disk mounted at /app/data, or point
+#   DATABASE_URL at Postgres (add asyncpg to backend/pyproject.toml first —
+#   it is not currently a dependency).
+
+envVarGroups:
+  - name: verdictpay-shared
+    envVars:
+      # Set this once in the dashboard; both services inherit it. Must NOT be
+      # empty: the API refuses to boot in production with an empty or dev-prefixed
+      # secret, by design.
+      - key: VERDICTPAY_API_KEY
+        sync: false
+      # Generated once here and shared, so the API and the web signing route agree.
+      - key: VERDICTPAY_SIGNING_SECRET
+        generateValue: true
+      - key: VERDICTPAY_WEBHOOK_SECRET
+        generateValue: true
 
 services:
   - type: web
@@ -26,7 +54,13 @@ services:
     dockerContext: .
     healthCheckPath: /api/v1/health
     autoDeploy: true
+    # Seed the deterministic demo dataset, then hand over to the server. The seed
+    # is idempotent; a failure is logged and the API still starts.
+    dockerCommand: >-
+      sh -c "python scripts/seed_demo.py || echo '[boot] seed skipped';
+      exec uvicorn app.main:app --host 0.0.0.0 --port 8000"
     envVars:
+      - fromGroup: verdictpay-shared
       - key: APP_ENV
         value: production
       - key: DEMO_MODE
@@ -39,16 +73,12 @@ services:
         value: template
       - key: ALLOW_UNSIGNED_WEBHOOKS
         value: "false"
-      # The web service is deployed at https://<name>.onrender.com; keep this in
-      # sync if you rename either service.
+      # The web service's real public URL, whatever suffix Render gave it.
       - key: ALLOWED_ORIGINS
-        value: https://verdictpay-web.onrender.com
-      - key: VERDICTPAY_API_KEY
-        sync: false
-      - key: VERDICTPAY_SIGNING_SECRET
-        generateValue: true
-      - key: VERDICTPAY_WEBHOOK_SECRET
-        generateValue: true
+        fromService:
+          name: verdictpay-web
+          type: web
+          envVarKey: RENDER_EXTERNAL_URL
       - key: PAYPAL_CLIENT_ID
         sync: false
       - key: PAYPAL_CLIENT_SECRET
@@ -68,22 +98,13 @@ services:
     healthCheckPath: /
     autoDeploy: true
     envVars:
+      - fromGroup: verdictpay-shared
+      # Build-time value (see the note at the top). Runtime value for the
+      # server-side signing route, which prefers VERDICTPAY_API_BASE_URL.
       - key: NEXT_PUBLIC_API_BASE_URL
         value: https://verdictpay-api.onrender.com
+      - key: VERDICTPAY_API_BASE_URL
+        value: https://verdictpay-api.onrender.com
+      # The browser sends this as X-API-Key. It is public by design for the demo.
       - key: NEXT_PUBLIC_VERDICTPAY_API_KEY
         sync: false
-
-# Optional third service: a static docs site. The repository's docs are Markdown
-# and there is no static-site generator in the build, so uncommenting this block
-# would publish raw Markdown. Add a real generator (for example a tiny md-to-html
-# step) before enabling it; do not claim a docs site that does not render.
-#
-#  - type: web
-#    name: verdictpay-docs
-#    runtime: static
-#    plan: free
-#    buildCommand: ""
-#    staticPublishPath: ./docs
-#    envVars:
-#      - key: API_BASE_URL
-#        value: https://verdictpay-api.onrender.com

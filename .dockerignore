@@ -39,5 +39,8 @@ artifacts
 # Not needed by either image
 docs
 postman
-packages
 .github
+
+# packages/verdictpay-sdk IS needed: the frontend depends on it through a file:
+# path and the image builds it before installing the web app. Do not exclude it.
+# (**/dist stays excluded — the SDK is compiled inside the image.)
