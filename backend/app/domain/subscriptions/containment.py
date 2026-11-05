@@ -5,7 +5,8 @@ files a friendly-fraud claim, the merchant's recurring revenue is the collateral
 We suspend the subscription and revoke the API key, but neither may ever block
 triage or raise into the request path.
 
-Budget: the whole attempt is bounded by timeout_seconds (default 1s) so a hung
+Budget: the whole attempt is bounded by timeout_seconds (default 0.5s, wired from
+config.action_latency_budget_ms at the call site) so a hung
 PayPal call costs at most that before the dispute flow continues.
 """
 
@@ -60,7 +61,7 @@ async def contain_subscription(
     subscription_id: str | None,
     reason: str,
     merchant_hook: Callable[[str], Awaitable[None]] | None = None,
-    timeout_seconds: float = 1.0,
+    timeout_seconds: float = 0.5,
 ) -> ContainmentResult:
     """Suspend a subscription and run the merchant hook; never raises.
 

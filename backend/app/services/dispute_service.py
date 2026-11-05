@@ -866,6 +866,7 @@ class DisputeService:
                 self.gateway,
                 subscription_id=case.paypal_subscription_id,
                 reason=f"dispute_opened:{case.dispute_id}",
+                timeout_seconds=self.settings.action_latency_budget_ms / 1000,
             )
         except Exception as exc:  # defensive: the circuit breaker never blocks intake
             logger.error(
