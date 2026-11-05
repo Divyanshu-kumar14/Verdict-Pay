@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import {
   type CellKeyDownEvent,
   type ColDef,
@@ -8,7 +7,7 @@ import {
   type RowClickedEvent,
 } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
-import { ArrowRight, FileText } from "lucide-react";
+import { FileText } from "lucide-react";
 import { useMemo } from "react";
 
 import { Badge } from "@/components/ui/Badge";
@@ -194,21 +193,6 @@ function DossierCell({ params }: { params: ICellRendererParams<DisputeSummary> }
   );
 }
 
-function OpenCell({ params }: { params: ICellRendererParams<DisputeSummary> }) {
-  const data = params.data;
-  if (!data) return null;
-  return (
-    <Link
-      href={`/disputes/${encodeURIComponent(data.dispute_id)}`}
-      aria-label={`Open case ${data.dispute_id}`}
-      className="inline-flex items-center gap-1 rounded text-[10.5px] text-dim transition-colors hover:text-emerald"
-    >
-      Open
-      <ArrowRight size={11} aria-hidden />
-    </Link>
-  );
-}
-
 /** AG Grid Community triage queue. Default sort is seller response due date ascending. */
 export function DisputesGrid({
   rows,
@@ -221,33 +205,37 @@ export function DisputesGrid({
     const idColumn: ColDef<DisputeSummary> = {
       headerName: "Dispute",
       field: "dispute_id",
-      minWidth: 148,
-      flex: 1,
+      width: 118,
+      minWidth: 110,
       cellRenderer: (params: ICellRendererParams<DisputeSummary>) => <IdCell params={params} />,
     };
     const queueColumns: ColDef<DisputeSummary>[] = [
       {
         headerName: "Payer",
         field: "payer_id",
-        minWidth: 118,
+        width: 82,
+        minWidth: 78,
         cellRenderer: (params: ICellRendererParams<DisputeSummary>) => <PayerCell params={params} />,
       },
       {
         headerName: "Reason",
         field: "reason_code",
-        minWidth: 96,
+        width: 84,
+        minWidth: 78,
         cellRenderer: (params: ICellRendererParams<DisputeSummary>) => <ReasonCell params={params} />,
       },
       {
         headerName: "Stage",
         field: "stage",
-        minWidth: 116,
+        width: 88,
+        minWidth: 82,
         cellRenderer: (params: ICellRendererParams<DisputeSummary>) => <StageCell params={params} />,
       },
       {
         headerName: "Channel",
         field: "channel",
-        minWidth: 104,
+        width: 91,
+        minWidth: 84,
         cellRenderer: (params: ICellRendererParams<DisputeSummary>) => (
           <ChannelCell params={params} />
         ),
@@ -255,7 +243,8 @@ export function DisputesGrid({
       {
         headerName: "Amount",
         field: "amount_usd",
-        minWidth: 108,
+        width: 86,
+        minWidth: 80,
         type: "numericColumn",
         cellStyle: { textAlign: "right" },
         headerClass: "ag-right-aligned-header",
@@ -264,7 +253,8 @@ export function DisputesGrid({
       {
         headerName: "p(win)",
         field: "p_win",
-        minWidth: 124,
+        width: 96,
+        minWidth: 90,
         cellRenderer: (params: ICellRendererParams<DisputeSummary>) => (
           <WinProbCell params={params} />
         ),
@@ -272,7 +262,8 @@ export function DisputesGrid({
       {
         headerName: "EV fight",
         field: "ev_fight_usd",
-        minWidth: 104,
+        width: 88,
+        minWidth: 82,
         cellStyle: { textAlign: "right" },
         cellRenderer: (params: ICellRendererParams<DisputeSummary>) => (
           <EvCell params={params} field="ev_fight_usd" />
@@ -281,7 +272,8 @@ export function DisputesGrid({
       {
         headerName: "EV settle",
         field: "ev_settle_usd",
-        minWidth: 104,
+        width: 98,
+        minWidth: 90,
         cellStyle: { textAlign: "right" },
         cellRenderer: (params: ICellRendererParams<DisputeSummary>) => (
           <EvCell params={params} field="ev_settle_usd" />
@@ -290,7 +282,8 @@ export function DisputesGrid({
       {
         headerName: "EV offer",
         field: "ev_offer_usd",
-        minWidth: 104,
+        width: 92,
+        minWidth: 86,
         cellStyle: { textAlign: "right" },
         cellRenderer: (params: ICellRendererParams<DisputeSummary>) => (
           <EvCell params={params} field="ev_offer_usd" />
@@ -299,6 +292,7 @@ export function DisputesGrid({
       {
         headerName: "Recommendation",
         field: "recommended_action",
+        width: 146,
         minWidth: 132,
         cellRenderer: (params: ICellRendererParams<DisputeSummary>) => (
           <RecommendationCell params={params} />
@@ -307,7 +301,8 @@ export function DisputesGrid({
       {
         headerName: "Due",
         field: "seller_response_due_date",
-        minWidth: 148,
+        width: 104,
+        minWidth: 96,
         sort: "asc",
         comparator: (left: string | null, right: string | null) => {
           const leftMs = isoToMs(left) ?? Number.POSITIVE_INFINITY;
@@ -319,9 +314,10 @@ export function DisputesGrid({
         ),
       },
       {
-        headerName: "Dossier",
+        headerName: "PDF",
         field: "dossier_available",
-        minWidth: 82,
+        width: 60,
+        minWidth: 54,
         sortable: false,
         cellRenderer: (params: ICellRendererParams<DisputeSummary>) => (
           <DossierCell params={params} />
@@ -340,20 +336,7 @@ export function DisputesGrid({
       ].filter((column): column is ColDef<DisputeSummary> => Boolean(column));
     }
 
-    return [
-      idColumn,
-      ...queueColumns,
-      {
-        headerName: "",
-        field: "dispute_id",
-        minWidth: 62,
-        maxWidth: 62,
-        sortable: false,
-        filter: false,
-        resizable: false,
-        cellRenderer: (params: ICellRendererParams<DisputeSummary>) => <OpenCell params={params} />,
-      },
-    ];
+    return [idColumn, ...queueColumns];
   }, [compact, now]);
 
   return (

@@ -211,7 +211,7 @@ make e2e         # three-button flow against a running API
 | **PayPal** | Disputes v1 (get, list, send-message, make-offer, accept-claim, provide-evidence, require-evidence), Subscriptions v1 suspend, Orders v2, Reporting v1 transactions, webhook signature verification. Live client + protocol-identical simulator. |
 | **AG Grid** | Community grid powers the triage queue, analytics table, custom badges/EV cells, sorting, filtering. |
 | **APIMatic** | The PayPal integration is modelled on the official PayPal OpenAPI schema; request/response models are validated by Pydantic and documented in `backend/app/integrations/paypal/`. |
-| **Elastic** | Optional adapter (`ELASTIC_URL`): mirrors documents via `_bulk`; SQL remains authoritative and the app runs with Elastic disabled. |
+| **Elastic** | A complete optional `SearchIndex` adapter (`ELASTIC_URL`) that indexes NDJSON via `_bulk`, with a no-op default. SQL is authoritative and the judge demo never requires it; the adapter is selected at startup and is intended as a drop-in integration point rather than an active mirror. |
 | **Postman** | `postman/` collection + environment covering telemetry, webhook, dispute and evidence calls. |
 | **Render** | `render.yaml` blueprint for api + web with health checks. |
 | **Bryntum / AG Studio** | Not licensed for redistribution. The SLA board uses a **Bryntum-shaped events/resources model** (swap documented in `docs/sponsors.md`), and the analytics canvas is built on AG Grid Community. We say this instead of faking a license. |

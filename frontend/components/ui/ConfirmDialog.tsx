@@ -100,11 +100,17 @@ export function ConfirmDialog({
         </div>
         {children ? <div className="px-4 py-3.5">{children}</div> : null}
         <div className="flex items-center justify-end gap-2 border-t border-hairline px-4 py-3">
-          <Button variant="ghost" size="sm" onClick={onCancel} disabled={loading}>
+          <Button
+            autoFocus={tone === "rose"}
+            variant="ghost"
+            size="sm"
+            onClick={onCancel}
+            disabled={loading}
+          >
             {cancelLabel}
           </Button>
           <Button
-            autoFocus
+            autoFocus={tone !== "rose"}
             variant={tone === "rose" ? "danger" : "primary"}
             size="sm"
             loading={loading}

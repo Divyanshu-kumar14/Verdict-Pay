@@ -234,7 +234,7 @@
 /* AG Grid: 10px tracked uppercase headers, tabular numerals, right-aligned money heads. */
 .ag-header-cell-text {
   text-transform: uppercase;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.1em;
   font-size: 10px;
   font-weight: 600;
 }
