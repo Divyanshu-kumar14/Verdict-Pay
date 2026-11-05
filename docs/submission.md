@@ -133,7 +133,7 @@ filed 36 probes, found 2 HIGH bugs, and those two now have regression tests
 | 1:55–2:08 | Click **Deflect inquiry**; result chip `EXECUTED · Send message · 1ms` | "A zero-fee, evidence-backed inquiry deflection through PayPal's send-message endpoint. The HATEOAS guard means we cannot call an action PayPal would reject." |
 | 2:08–2:22 | Case room, download **dossier.pdf**; PDF pages scroll: chain table, ToS snapshot, usage ledger, CE 3.0 exhibit | "The dossier is ReportLab, built from the locked facts. Three pages, payer id and chain head printed, no secrets. That is the prove-it artifact." |
 | 2:22–2:36 | `/analytics`: queue 6, open exposure $596.00, fees avoided $60.00, ratio 3.00% vs 1.50% | "Six cases, $596 exposure, $60 of fees avoided, and the ratio that decides whether the next dispute costs $15 or $30." |
-| 2:36–2:52 | Terminal: `git clone … && cd verdict-pay && make install && make stack`, then `make web` — green assertions | "Clone it, make install, make stack, make web. Twenty-six assertions, zero API keys. Everything you just saw runs on your laptop in under a minute." |
+| 2:36–2:52 | Terminal: `git clone … && cd Verdict-Pay && make install && make stack`, then `make web` — green assertions | "Clone it, make install, make stack, make web. Twenty-six assertions, zero API keys. Everything you just saw runs on your laptop in under a minute." |
 
 **Production checklist**
 
@@ -202,7 +202,7 @@ Latency and timestamps are the only moving values; EV and p(win) are determinist
 | Public open-source repo, license visible in About | [LICENSE](../LICENSE) (MIT) at repo root; repo URL in §1 |
 | Demo video under 3 minutes on YouTube, showing it working | §4 script; video itself is `[ADD YOUTUBE LINK]` |
 | Judging: Technological Implementation | 291 backend tests, 26 E2E assertions, 24 SDK tests, adversarial QA with regressions |
-| Judging: Design | [frontend/app/page.tsx](../frontend/app/page.tsx), [components/sandbox](../frontend/components/sandbox/SandboxWorkspace.tsx), AG Grid queue, EV cards, case room |
+| Judging: Design | [frontend/app/page.tsx](../frontend/app/page.tsx), [SandboxWorkspace.tsx](../frontend/components/sandbox/SandboxWorkspace.tsx), AG Grid queue, EV cards, case room |
 | Judging: Potential Impact | EV model + fee-cliff penalty in [ev.py](../backend/app/domain/disputes/ev.py); $15/$30 fees, 1.5% threshold |
 | Judging: Innovation / Idea | Pre-dispute chain as system of record, action priced before the fee, air-gapped narrative |
 | Judging: Presentation | [demo.md](demo.md) 60-second script; §4 video script |
