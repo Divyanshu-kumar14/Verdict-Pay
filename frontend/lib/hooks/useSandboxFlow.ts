@@ -179,7 +179,7 @@ export function useSandboxFlow(): SandboxFlow {
         .join(" · ");
       if (totals.length > 0) appendLog("info", `totals · ${totals}`);
     } catch (caught) {
-      if (attempt !== attemptRef.current) return;
+      if (attempt !== attemptRef.current || signal.aborted) return;
       const apiError = toApiError(caught);
       setState((prev) => ({ ...prev, usageStatus: "error", error: apiError }));
       appendLog("error", `usage ingest failed · ${errorLine(apiError)}`);

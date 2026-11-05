@@ -36,12 +36,12 @@ const DEFAULT_DEVICE_FINGERPRINT = "fp_89a7c6d5e4f3";
 const DEFAULT_EXPORT_NAME = "q3_financial_model.xlsx";
 
 /** Server-only defaults match backend/app/config.py; override both in deployment. */
-const API_KEY = process.env.VERDICTPAY_API_KEY ?? "vp_demo_sk_local";
+const API_KEY = process.env.VERDICTPAY_API_KEY || "vp_demo_sk_local";
 const SIGNING_SECRET =
-  process.env.VERDICTPAY_SIGNING_SECRET ?? "dev-signing-secret-change-me";
+  process.env.VERDICTPAY_SIGNING_SECRET || "dev-signing-secret-change-me";
 const API_BASE_URL = (
-  process.env.VERDICTPAY_API_BASE_URL ??
-  process.env.NEXT_PUBLIC_API_BASE_URL ??
+  process.env.VERDICTPAY_API_BASE_URL ||
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
   "http://127.0.0.1:8000"
 ).replace(/\/+$/, "");
 

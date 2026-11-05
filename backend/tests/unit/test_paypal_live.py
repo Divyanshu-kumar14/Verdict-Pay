@@ -529,7 +529,8 @@ async def test_search_transactions_chunks_a_365_day_window(
     assert windows[0][0] == start
     assert windows[-1][1] == end
     for previous, current in pairwise(windows):
-        assert current[0] == previous[1]
+        # Windows are contiguous with 1s gap to avoid duplicate boundary timestamp.
+        assert current[0] == previous[1] + timedelta(seconds=1)
 
 
 @respx.mock

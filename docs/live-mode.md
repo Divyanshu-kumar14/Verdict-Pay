@@ -65,7 +65,7 @@ now handles all four constraints:
    `transaction_details` by `payer_info.payer_id` client-side.
 3. **31-day window limit.** Any range greater than 31 days returns
    `400 Date range is greater than 31 days`; exactly 31 days is allowed. CE 3.0 lookbacks of
-   120-365 days are therefore split into contiguous windows of at most 31 days and merged.
+   120-365 days are therefore split into contiguous windows of at most 31 days (with 1s gap between windows to avoid duplicate boundary timestamps) and merged.
 4. **Pagination.** `page_size` is capped at 500. The client follows `total_pages` (bounded to 10
    pages per window as a safety cap) and deduplicates the merged result by `transaction_id`.
 

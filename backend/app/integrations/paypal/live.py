@@ -397,14 +397,14 @@ class LivePayPalGateway:
             raise UpstreamError("invalid_transaction_window")
 
         window = timedelta(days=TRANSACTION_WINDOW_DAYS)
-        expected_payer = payer.upper()
+        expected_payer = payer.strip()
         records: list[PayPalTransactionRecord] = []
         seen: set[str] = set()
         chunk_start = begin
         while chunk_start <= finish:
             chunk_end = min(chunk_start + window, finish)
             for record in await self._search_transaction_window(chunk_start, chunk_end):
-                if record.payer_id.strip().upper() != expected_payer:
+                if record.payer_id.strip() != expected_payer:
                     continue
                 transaction_id = record.transaction_id.strip()
                 if transaction_id:
@@ -414,7 +414,7 @@ class LivePayPalGateway:
                 records.append(record)
             if chunk_end >= finish:
                 break
-            chunk_start = chunk_end
+            chunk_start = chunk_end + timedelta(seconds=1)
         return records
 
     # ----------------------------------------------------------------- webhooks

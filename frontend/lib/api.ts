@@ -159,9 +159,16 @@ async function requestUrl<S extends z.ZodTypeAny>(
   const payload: unknown = await response.json();
   const parsed = options.schema.safeParse(payload);
   if (!parsed.success) {
+    let displayPath = url;
+    try {
+      const parsedUrl = new URL(url);
+      displayPath = parsedUrl.pathname + parsedUrl.search;
+    } catch {
+      // url is already a path (e.g. "/api/sdk/usage")
+    }
     throw new ApiError({
       code: "invalid_response",
-      message: `The API response for ${url} did not match the frozen contract.`,
+      message: `The API response for ${displayPath} did not match the frozen contract.`,
       requestId,
       details: parsed.error.issues.map((issue) => ({
         field: issue.path.join(".") || null,
