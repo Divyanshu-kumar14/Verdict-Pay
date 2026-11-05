@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+backend/verdictpay.db
+backend/verdictpay.db-wal
+backend/verdictpay.db-shm
+backend/.env
+
+# Node
+node_modules/
+.next/
+out/
+dist/
+.turbo/
+*.tsbuildinfo
+pnpm-lock.yaml.bak
+
+# Env
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Generated artifacts
+artifacts/
+*.pdf
+!docs/**/*.pdf
