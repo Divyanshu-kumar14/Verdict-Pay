@@ -33,7 +33,7 @@ F1 belongs to backend/app/main.py (RequestContextMiddleware only inspects the Co
 
 - Normal oversized request with Content-Length: 300,000-byte body returned HTTP 413 with error.code=payload_too_large (this part is correct; see the passing checks table).
 - Chunked request (no Content-Length): HTTP 200, accepted=1, the ledger appended the event (event_count 5 -> 6). The middleware's cap is header-based, and FastAPI then read the full 300 KB body.
-- Impact: the documented ingestion cap in IMPLEMENTATION_PLAN.md section 10 ("Ingestion: 256 KB body cap") is bypassable by any client that streams a request; this is a memory/CPU/DoS surface and breaks the stated contract.
+- Impact: the documented ingestion cap in the README security model ("Ingestion: 256 KB body cap") is bypassable by any client that streams a request; this is a memory/CPU/DoS surface and breaks the stated contract.
 - Suggested fix: enforce the cap on bytes actually read, not only on the header. For example wrap the ASGI receive channel (or read the body with a hard limit and return 413) so chunked bodies are counted; add a regression test that posts a 300 KB chunked body and expects 413. The test must use a transport that omits Content-Length (httpx async generator or a raw socket). Owner: backend-api.
 
 ### F2 — Concurrent idempotency-key race: duplicate gateway call + 500 (high)

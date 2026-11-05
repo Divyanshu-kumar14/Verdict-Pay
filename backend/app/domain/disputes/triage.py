@@ -1,8 +1,7 @@
 """Deterministic triage policy on top of the EV engine and state machine.
 
-First match wins (IMPLEMENTATION_PLAN.md section 5). Every recommendation is
-then degraded to a PayPal-legal action: DEFLECT_INQUIRY -> MAKE_OFFER ->
-ACCEPT_CLAIM -> MONITOR.
+First match wins. Every recommendation is then degraded to a PayPal-legal
+action: DEFLECT_INQUIRY -> MAKE_OFFER -> ACCEPT_CLAIM -> MONITOR.
 """
 
 from __future__ import annotations

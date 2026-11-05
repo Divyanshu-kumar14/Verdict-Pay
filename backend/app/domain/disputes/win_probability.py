@@ -1,7 +1,7 @@
 """Deterministic win-probability scoring from telemetry signals.
 
-Implements IMPLEMENTATION_PLAN.md section 6 verbatim: the weights and reason
-multipliers below are frozen, and identical signals always score identically.
+Implements the frozen win-probability weights and reason multipliers: they are
+constants below, and identical signals always score identically.
 """
 
 from __future__ import annotations

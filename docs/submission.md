@@ -221,11 +221,15 @@ Latency and timestamps are the only moving values; EV and p(win) are determinist
    roster and enter it.
 4. **YouTube link — ACTION REQUIRED.** `[ADD YOUTUBE LINK]` is a placeholder. Record per §4, upload,
    verify the public URL plays and the duration reads under 3:00, then replace the placeholder in §1.
-5. **License in About — VERIFIED.** `LICENSE` is at the repo root and the GitHub API reports
-   `license: MIT`, so the About panel renders the MIT badge. Confirm visually in a logged-out
-   browser, and set a repository description + topics for clarity.
+5. **License in About — VERIFIED, one visual check left.** `LICENSE` is at the repo root and the
+   public GitHub API reports `license.spdx_id: MIT`
+   (https://api.github.com/repos/Divyanshu-kumar14/Verdict-Pay), so the About panel renders the MIT
+   badge. Open the repo logged out and screenshot it for the submission.
 6. **Submission window — UNVERIFIED locally.** The stated period is October 1 to November 12, 2026.
    Confirm the deadline and timezone on the Devpost page, and submit with margin.
+7. **Repo sync — ACTION REQUIRED.** The public repo's last push is 2026-11-05T21:19Z, while this
+   working tree still has uncommitted changes and `docs/submission.md` is untracked. Commit and
+   push everything judges need (code, docs, LICENSE, this file), then re-read the GitHub page.
 
 ## 7. FAQ for judges
 

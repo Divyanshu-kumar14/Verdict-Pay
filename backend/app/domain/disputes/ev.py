@@ -1,8 +1,8 @@
 """Deterministic expected-value engine for PayPal dispute actions.
 
-Implements the frozen specification in IMPLEMENTATION_PLAN.md section 5. Every
-public function is pure: identical inputs always produce identical outputs
-(ADR-003). Money is Decimal and converted to cents with ROUND_HALF_UP at the
+Implements the frozen EV specification: fight, settle and offer are derived from
+the same deterministic formula, unit-tested to the cent. Every public function is
+pure: identical inputs always produce identical outputs (ADR-003). Money is Decimal and converted to cents with ROUND_HALF_UP at the
 boundary; probabilities arrive as float and are converted through their
 shortest decimal representation so the arithmetic is reproducible.
 """

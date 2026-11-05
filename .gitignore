@@ -36,6 +36,10 @@ pnpm-lock.yaml.bak
 .vscode/
 *.swp
 
+# Internal documents kept locally but not published in the public repo
+IMPLEMENTATION_PLAN.md
+verdictpay.md
+
 # Generated artifacts
 artifacts/
 *.pdf
