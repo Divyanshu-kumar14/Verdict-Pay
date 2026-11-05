@@ -58,6 +58,22 @@ make demo     # seed, boot, run the 26 assertions, shut down
 make verify   # the full gate
 ```
 
+### Live PayPal sandbox (optional)
+
+The demo never needs credentials. To exercise the same gateway against a real PayPal sandbox
+account, put them in a gitignored `.env` and run the live check — it forces `PAYPAL_MODE=live`
+for that command only, so `make stack` stays deterministic:
+
+```bash
+make env                      # copy the template, then fill in the two values
+# PAYPAL_CLIENT_ID=...  PAYPAL_CLIENT_SECRET=...
+make verify-live              # OAuth, dispute read, Reporting v1 lookback
+```
+
+Never commit `.env`; it is ignored by git and by the Docker build context. Reporting v1 caps a
+query at 31 days and rejects `payer_id` as a filter, so the live client chunks the CE 3.0
+lookback and filters locally — see [docs/live-mode.md](docs/live-mode.md).
+
 ## The 60-second demo
 
 Two panes: a buyer storefront on the left, the merchant command center on the right. Seed, boot, open `http://localhost:3000` and click in order. Every value on the right is served by the API; none of it is a static panel.

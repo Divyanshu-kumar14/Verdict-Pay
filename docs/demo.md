@@ -51,7 +51,7 @@ at the bottom, because it files an INR dispute while the UI button files SNAD.
 |---|---|---|
 | 0:00–0:08 | Open **http://localhost:3000** | "This is a $99/month SaaS product sold through PayPal. The buyer is about to commit friendly fraud." |
 | 0:08–0:20 | **1 · Checkout $99 Pro plan** (left) | "PayPal Orders v2 creates the order and subscription, and the SDK binds the payer id to the exact Terms-of-Service hash the buyer saw." |
-| 0:20–0:35 | **2 · Simulate usage** | "Four signed lifecycle events — ToS, login, delivery and metered usage — land in an append-only SHA-256 chain. A judge can verify that chain, not just trust it." |
+| 0:20–0:35 | **2 · Simulate usage** | "Four signed lifecycle events — ToS, login, delivery and metered usage via <code>@verdictpay/sdk</code> (server-side <code>/api/sdk/usage</code>) — land in an append-only SHA-256 chain. A judge can verify that chain, not just trust it." |
 | 0:35–0:50 | **3 · File friendly-fraud dispute** | "The buyer files a SNAD claim through the real PayPal webhook path. VerdictPay suspends the subscription, locks the fact pack and prices the dispute." |
 | 0:50–0:58 | **Deflect inquiry** (button under Recommendation) | "The cheapest correct action is the zero-fee inquiry deflection. It goes through PayPal's HATEOAS guard, so we can never call an action the API would reject." |
 | 0:58–1:00 | Point at the EV cards | "Fighting this claim costs more than offering, and the high-volume fee makes it worse. That is the whole product." |

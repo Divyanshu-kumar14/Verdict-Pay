@@ -9,6 +9,7 @@ import type { LogEntry, LogLevel } from "@/lib/hooks/useSandboxFlow";
 const LEVEL: Record<LogLevel, { tag: string; className: string }> = {
   info: { tag: "···", className: "text-dim" },
   ok: { tag: "OK", className: "text-emerald" },
+  warn: { tag: "WARN", className: "text-amber" },
   error: { tag: "ERR", className: "text-rose" },
 };
 

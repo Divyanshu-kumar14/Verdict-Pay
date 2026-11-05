@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import base64
 import json
-from datetime import UTC, datetime
+import math
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from itertools import pairwise
 
 import httpx
 import pytest
@@ -82,6 +84,30 @@ def _token_ok() -> httpx.Response:
 def _decode_jwt_part(part: str) -> dict[str, object]:
     padded = part + "=" * (-len(part) % 4)
     return json.loads(base64.urlsafe_b64decode(padded))
+
+
+def _transaction(
+    transaction_id: str,
+    *,
+    payer_id: str = "YRZ829104KLA",
+    amount: str = "99.00",
+) -> dict[str, object]:
+    return {
+        "transaction_info": {
+            "transaction_id": transaction_id,
+            "transaction_amount": {"currency_code": "USD", "value": amount},
+            "transaction_status": "COMPLETED",
+            "transaction_initiation_date": "2025-01-01T00:00:00Z",
+        },
+        "payer_info": {"payer_id": payer_id},
+    }
+
+
+def _reporting_date(value: str) -> datetime:
+    """Parse the compact UTC form PayPal accepts, asserting it is that form."""
+    assert len(value) == 24, value
+    assert value.endswith("+0000"), value
+    return datetime.strptime(value, "%Y-%m-%dT%H:%M:%S+0000").replace(tzinfo=UTC)
 
 
 @respx.mock
@@ -372,7 +398,7 @@ async def test_create_sandbox_dispute_sends_auth_assertion(
 @respx.mock
 async def test_create_order_parses_approval_link(live: LivePayPalGateway) -> None:
     respx.post(TOKEN_URL).mock(return_value=_token_ok())
-    route = respx.post(f"{BASE}/v1/checkout/orders").mock(
+    route = respx.post(f"{BASE}/v2/checkout/orders").mock(
         return_value=httpx.Response(
             201,
             json={
@@ -401,6 +427,7 @@ async def test_create_order_parses_approval_link(live: LivePayPalGateway) -> Non
     assert order.amount == Decimal("99.00")
     assert order.currency == "USD"
     assert order.created_at.tzinfo is UTC
+    assert route.calls[0].request.url.path == "/v2/checkout/orders"
     assert json.loads(route.calls[0].request.content) == {
         "intent": "CAPTURE",
         "purchase_units": [
@@ -414,6 +441,24 @@ async def test_create_order_parses_approval_link(live: LivePayPalGateway) -> Non
 
 
 @respx.mock
+async def test_create_order_falls_back_to_sandbox_checkout_url(
+    live: LivePayPalGateway,
+) -> None:
+    respx.post(TOKEN_URL).mock(return_value=_token_ok())
+    route = respx.post(f"{BASE}/v2/checkout/orders").mock(
+        return_value=httpx.Response(201, json={"id": "ORDER-NO-LINKS"})
+    )
+
+    order = await live.create_order(payer_id="YRZ829104KLA", amount=Decimal("1.00"))
+
+    assert route.calls[0].request.url.path == "/v2/checkout/orders"
+    assert order.order_id == "ORDER-NO-LINKS"
+    assert order.approval_url == (
+        "https://www.sandbox.paypal.com/checkoutnow?token=ORDER-NO-LINKS"
+    )
+
+
+@respx.mock
 async def test_search_transactions_parses_reporting_payload(
     live: LivePayPalGateway,
 ) -> None:
@@ -422,26 +467,14 @@ async def test_search_transactions_parses_reporting_payload(
         return_value=httpx.Response(
             200,
             json={
-                "transaction_details": [
-                    {
-                        "transaction_info": {
-                            "transaction_id": "TXN-LIVE-1",
-                            "transaction_amount": {
-                                "currency_code": "USD",
-                                "value": "99.00",
-                            },
-                            "transaction_status": "COMPLETED",
-                            "transaction_initiation_date": "2025-01-01T00:00:00Z",
-                        },
-                        "payer_info": {"payer_id": "YRZ829104KLA"},
-                    }
-                ]
+                "transaction_details": [_transaction("TXN-LIVE-1")],
+                "total_pages": 1,
             },
         )
     )
 
-    start = datetime(2024, 1, 1, tzinfo=UTC)
-    end = datetime(2026, 1, 1, tzinfo=UTC)
+    start = datetime(2024, 12, 25, tzinfo=UTC)
+    end = datetime(2025, 1, 5, tzinfo=UTC)
     records = await live.search_transactions(
         payer_id="YRZ829104KLA", start=start, end=end
     )
@@ -454,6 +487,131 @@ async def test_search_transactions_parses_reporting_payload(
     assert records[0].payer_id == "YRZ829104KLA"
     assert records[0].created_at == datetime(2025, 1, 1, tzinfo=UTC)
     params = route.calls[0].request.url.params
-    assert params["payer_id"] == "YRZ829104KLA"
-    assert params["start_date"] == "2024-01-01T00:00:00+00:00"
-    assert params["end_date"] == "2026-01-01T00:00:00+00:00"
+    assert "payer_id" not in params
+    assert params["start_date"] == "2024-12-25T00:00:00+0000"
+    assert params["end_date"] == "2025-01-05T00:00:00+0000"
+    assert params["fields"] == "transaction_info,payer_info"
+    assert params["page_size"] == "500"
+    assert params["page"] == "1"
+
+
+@respx.mock
+async def test_search_transactions_chunks_a_365_day_window(
+    live: LivePayPalGateway,
+) -> None:
+    respx.post(TOKEN_URL).mock(return_value=_token_ok())
+    route = respx.get(f"{BASE}/v1/reporting/transactions").mock(
+        return_value=httpx.Response(
+            200, json={"transaction_details": [], "total_pages": 1}
+        )
+    )
+
+    start = datetime(2024, 1, 1, tzinfo=UTC)
+    end = start + timedelta(days=365)
+    records = await live.search_transactions(
+        payer_id="YRZ829104KLA", start=start, end=end
+    )
+
+    assert records == []
+    expected_chunks = math.ceil(365 / 31)
+    assert route.call_count == expected_chunks == 12
+    windows: list[tuple[datetime, datetime]] = []
+    for call in route.calls:
+        params = call.request.url.params
+        assert "payer_id" not in params
+        assert params["page"] == "1"
+        assert params["page_size"] == "500"
+        first = _reporting_date(params["start_date"])
+        last = _reporting_date(params["end_date"])
+        assert timedelta(0) <= last - first <= timedelta(days=31)
+        windows.append((first, last))
+
+    assert windows[0][0] == start
+    assert windows[-1][1] == end
+    for previous, current in pairwise(windows):
+        assert current[0] == previous[1]
+
+
+@respx.mock
+async def test_search_transactions_follows_pagination_and_dedupes(
+    live: LivePayPalGateway,
+) -> None:
+    respx.post(TOKEN_URL).mock(return_value=_token_ok())
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        page = int(request.url.params["page"])
+        if page == 1:
+            details = [_transaction("TXN-1"), _transaction("TXN-2")]
+        else:
+            details = [_transaction("TXN-2"), _transaction("TXN-3")]
+        return httpx.Response(
+            200, json={"transaction_details": details, "total_pages": 2}
+        )
+
+    route = respx.get(f"{BASE}/v1/reporting/transactions").mock(side_effect=handler)
+
+    records = await live.search_transactions(
+        payer_id="YRZ829104KLA",
+        start=datetime(2025, 1, 1, tzinfo=UTC),
+        end=datetime(2025, 1, 10, tzinfo=UTC),
+    )
+
+    assert route.call_count == 2
+    assert [call.request.url.params["page"] for call in route.calls] == ["1", "2"]
+    assert [record.transaction_id for record in records] == [
+        "TXN-1",
+        "TXN-2",
+        "TXN-3",
+    ]
+
+
+@respx.mock
+async def test_search_transactions_dedupes_across_windows(
+    live: LivePayPalGateway,
+) -> None:
+    respx.post(TOKEN_URL).mock(return_value=_token_ok())
+    route = respx.get(f"{BASE}/v1/reporting/transactions").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "transaction_details": [_transaction("TXN-DUP")],
+                "total_pages": 1,
+            },
+        )
+    )
+
+    start = datetime(2025, 1, 1, tzinfo=UTC)
+    records = await live.search_transactions(
+        payer_id="YRZ829104KLA", start=start, end=start + timedelta(days=45)
+    )
+
+    assert route.call_count == 2
+    assert [record.transaction_id for record in records] == ["TXN-DUP"]
+
+
+@respx.mock
+async def test_search_transactions_filters_payer_client_side(
+    live: LivePayPalGateway,
+) -> None:
+    respx.post(TOKEN_URL).mock(return_value=_token_ok())
+    route = respx.get(f"{BASE}/v1/reporting/transactions").mock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "transaction_details": [
+                    _transaction("TXN-KEEP", payer_id="YRZ829104KLA"),
+                    _transaction("TXN-DROP", payer_id="SOMEONE-ELSE"),
+                ],
+                "total_pages": 1,
+            },
+        )
+    )
+
+    records = await live.search_transactions(
+        payer_id="YRZ829104KLA",
+        start=datetime(2025, 1, 1, tzinfo=UTC),
+        end=datetime(2025, 1, 10, tzinfo=UTC),
+    )
+
+    assert [record.transaction_id for record in records] == ["TXN-KEEP"]
+    assert all("payer_id" not in call.request.url.params for call in route.calls)

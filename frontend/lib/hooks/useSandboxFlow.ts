@@ -16,7 +16,7 @@ import { formatCompactInteger, formatLatency, formatPercent, formatUsd, shortHas
 import type { CheckoutResponse, DisputeSimulationResponse, UsageResponse } from "../types";
 
 export type StepStatus = "idle" | "running" | "success" | "error";
-export type LogLevel = "info" | "ok" | "error";
+export type LogLevel = "info" | "ok" | "warn" | "error";
 
 export type LogEntry = {
   id: number;
@@ -140,21 +140,33 @@ export function useSandboxFlow(): SandboxFlow {
       dispute: null,
       error: null,
     }));
-    appendLog("info", "POST /api/v1/sandbox/usage · 15 logins · 42,000 tokens · ZIP export");
+    appendLog(
+      "info",
+      "POST /api/sdk/usage · @verdictpay/sdk server-side · 15 logins · 42,000 tokens · ZIP export",
+    );
 
     const started = performance.now();
+    const input = {
+      payer_id: checkout.payer_id,
+      order_id: checkout.order_id,
+      ...(checkout.subscription_id ? { subscription_id: checkout.subscription_id } : {}),
+      logins: 15,
+      tokens: 42_000,
+      export_name: DEMO_EXPORT_NAME,
+    };
     try {
-      const result = await api.sandboxUsage(
-        {
-          payer_id: checkout.payer_id,
-          order_id: checkout.order_id,
-          ...(checkout.subscription_id ? { subscription_id: checkout.subscription_id } : {}),
-          logins: 15,
-          tokens: 42_000,
-          export_name: DEMO_EXPORT_NAME,
-        },
-        signal,
-      );
+      let result: UsageResponse;
+      try {
+        result = await api.sdkUsage(input, signal);
+      } catch (caught) {
+        if (attempt !== attemptRef.current || signal.aborted) return;
+        const sdkError = toApiError(caught);
+        appendLog(
+          "warn",
+          `SDK route unavailable — ${errorLine(sdkError)} · falling back to /api/v1/sandbox/usage`,
+        );
+        result = await api.sandboxUsage(input, signal);
+      }
       if (attempt !== attemptRef.current) return;
       const latency = Math.round(performance.now() - started);
       setState((prev) => ({ ...prev, usage: result, usageStatus: "success" }));

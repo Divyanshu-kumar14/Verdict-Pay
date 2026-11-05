@@ -4,7 +4,7 @@ PY := uv run --directory backend
 API_PORT ?= 8000
 WEB_PORT ?= 3000
 
-.PHONY: help install api web seed stack reset-db test lint format typecheck check verify verify-live demo e2e docker-build docker-up docker-down clean
+.PHONY: help install env api web seed stack reset-db test lint format typecheck check verify verify-live demo e2e docker-build docker-up docker-down clean
 E2E_PORT ?= 8199
 
 help: ## Show available targets
@@ -20,6 +20,10 @@ api: ## Run FastAPI on :$(API_PORT)
 
 web: ## Run Next.js on :$(WEB_PORT)
 	pnpm -C frontend dev
+
+env: ## Create .env from the template if it does not exist
+	test -f .env || cp .env.example .env
+	@echo ".env ready (gitignored)"
 
 seed: ## Seed the demo merchant, history and sample disputes
 	$(PY) python scripts/seed_demo.py
@@ -55,8 +59,8 @@ verify: ## Full quality gate (run before every demo)
 	pnpm -C packages/verdictpay-sdk build
 	$(PY) python scripts/run_demo.py --port $(E2E_PORT)
 
-verify-live: ## Prove real PayPal sandbox credentials work (PAYPAL_MODE=live)
-	$(PY) python scripts/verify_paypal_live.py
+verify-live: ## Prove real PayPal sandbox credentials work (forces live mode)
+	PAYPAL_MODE=live $(PY) python scripts/verify_paypal_live.py
 
 e2e: ## Run the three-button judge flow against an API you already started
 	$(PY) python scripts/e2e_demo.py

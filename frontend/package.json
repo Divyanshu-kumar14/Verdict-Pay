@@ -12,6 +12,7 @@
     "format": "prettier --write ."
   },
   "dependencies": {
+    "@verdictpay/sdk": "file:../packages/verdictpay-sdk",
     "ag-grid-community": "34.3.1",
     "ag-grid-react": "34.3.1",
     "geist": "1.9.1",

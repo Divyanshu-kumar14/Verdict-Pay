@@ -134,12 +134,12 @@ async function readError(response: Response): Promise<ApiError> {
 }
 
 /** Typed JSON request with envelope-aware failures and strict response parsing. */
-export async function request<S extends z.ZodTypeAny>(
-  path: string,
+async function requestUrl<S extends z.ZodTypeAny>(
+  url: string,
   options: RequestOptions<S>,
 ): Promise<z.output<S>> {
   const method: HttpMethod = options.method ?? "GET";
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await fetch(url, {
     method,
     headers: {
       Accept: "application/json",
@@ -161,7 +161,7 @@ export async function request<S extends z.ZodTypeAny>(
   if (!parsed.success) {
     throw new ApiError({
       code: "invalid_response",
-      message: `The API response for ${path} did not match the frozen contract.`,
+      message: `The API response for ${url} did not match the frozen contract.`,
       requestId,
       details: parsed.error.issues.map((issue) => ({
         field: issue.path.join(".") || null,
@@ -172,6 +172,32 @@ export async function request<S extends z.ZodTypeAny>(
     });
   }
   return parsed.data;
+}
+
+/** Typed JSON request against the VerdictPay API root. */
+export async function request<S extends z.ZodTypeAny>(
+  path: string,
+  options: RequestOptions<S>,
+): Promise<z.output<S>> {
+  return requestUrl(`${API_BASE_URL}${path}`, options);
+}
+
+/**
+ * Typed JSON request against a same-origin Next.js route handler.
+ *
+ * Used for /api/sdk/usage, which keeps the HMAC signing secret on the server
+ * and returns the same frozen UsageResponse envelope as the backend.
+ */
+async function requestSdkUsage(
+  input: UsageRequestInput,
+  signal?: AbortSignal,
+): Promise<UsageResponse> {
+  return requestUrl("/api/sdk/usage", {
+    method: "POST",
+    body: input,
+    schema: UsageResponseSchema,
+    signal,
+  });
 }
 
 /** PDF fetch that keeps the API key on an authenticated request (not in a URL). */
@@ -240,6 +266,9 @@ export const api = {
       signal,
     });
   },
+
+  /** POST /api/sdk/usage — same-origin route that runs @verdictpay/sdk server-side. */
+  sdkUsage: requestSdkUsage,
 
   /** POST /sandbox/dispute — opens an INQUIRY through the real webhook path. */
   sandboxDispute(

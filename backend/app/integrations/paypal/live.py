@@ -15,7 +15,7 @@ import json
 import time
 import uuid
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from urllib.parse import quote
@@ -43,9 +43,23 @@ RETRY_DELAYS = (0.2, 0.4)
 MAX_RETRY_AFTER_SECONDS = 2.0
 TOKEN_REFRESH_MARGIN_SECONDS = 60.0
 RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
-CHECKOUT_FALLBACK = "https://sandbox.paypal.com/checkoutnow?token="
+CHECKOUT_FALLBACK_SANDBOX = "https://www.sandbox.paypal.com/checkoutnow?token="
+CHECKOUT_FALLBACK_PRODUCTION = "https://www.paypal.com/checkoutnow?token="
 NOTE_MAX_CHARS = 2000
 PAGE_SIZE_MAX = 50
+ORDERS_PATH = "/v2/checkout/orders"
+TRANSACTIONS_PATH = "/v1/reporting/transactions"
+TRANSACTION_FIELDS = "transaction_info,payer_info"
+# PayPal's Reporting API rejects windows greater than 31 days; exactly 31 is
+# accepted, so every request window is capped at this many days and merged.
+TRANSACTION_WINDOW_DAYS = 31
+# Reporting v1 caps page_size at 500; the cap below stops a corrupt total_pages
+# value from turning one window into an unbounded number of requests.
+REPORTING_PAGE_SIZE_MAX = 500
+REPORTING_MAX_PAGES = 10
+# PayPal rejects datetime.isoformat() ("+00:00") with HTTP 400. It accepts this
+# compact, second-precision UTC form (and the equivalent "...Z" suffix).
+REPORTING_DATE_FORMAT = "%Y-%m-%dT%H:%M:%S+0000"
 
 
 class LivePayPalGateway:
@@ -310,35 +324,98 @@ class LivePayPalGateway:
         )
 
     # ----------------------------------------------------------------- reporting
+    @staticmethod
+    def _reporting_date(value: datetime) -> str:
+        """Render a Reporting v1 timestamp in PayPal's compact UTC form."""
+        return wire.ensure_utc(value).strftime(REPORTING_DATE_FORMAT)
+
+    @staticmethod
+    def _total_pages(body: Mapping[str, Any]) -> int | None:
+        """Read total_pages defensively; None when PayPal omitted or mangled it."""
+        raw = body.get("total_pages")
+        if raw is None or isinstance(raw, bool):
+            return None
+        try:
+            total = int(raw)
+        except (TypeError, ValueError):
+            return None
+        return total if total >= 1 else None
+
+    async def _search_transaction_window(
+        self, begin: datetime, finish: datetime
+    ) -> list[PayPalTransactionRecord]:
+        """Fetch one <=31-day window, following Reporting API pagination."""
+        records: list[PayPalTransactionRecord] = []
+        page = 1
+        while page <= REPORTING_MAX_PAGES:
+            response = await self._request(
+                "GET",
+                TRANSACTIONS_PATH,
+                params={
+                    "start_date": self._reporting_date(begin),
+                    "end_date": self._reporting_date(finish),
+                    "fields": TRANSACTION_FIELDS,
+                    "page_size": REPORTING_PAGE_SIZE_MAX,
+                    "page": page,
+                },
+            )
+            details = response.body.get("transaction_details")
+            if not isinstance(details, list) or not details:
+                break
+            records.extend(
+                wire.parse_transaction(item)
+                for item in details
+                if isinstance(item, Mapping)
+            )
+            total_pages = self._total_pages(response.body)
+            if total_pages is not None:
+                if page >= total_pages:
+                    break
+            elif len(details) < REPORTING_PAGE_SIZE_MAX:
+                break
+            page += 1
+        return records
+
     async def search_transactions(
         self, *, payer_id: str, start: datetime, end: datetime
     ) -> list[PayPalTransactionRecord]:
-        """GET /v1/reporting/transactions for the CE 3.0 lookback window."""
+        """Merge Reporting v1 transactions across <=31-day windows and pages.
+
+        PayPal constraints handled here:
+        - timestamps must use the compact "...+0000" form, not "+00:00";
+        - payer_id is not a valid reporting query parameter (HTTP 400), so the
+          filter is applied to parsed records after the response;
+        - a window may not exceed 31 days, so long CE 3.0 lookbacks are chunked;
+        - a page holds at most 500 records, so pages are followed (bounded).
+        """
         payer = self._require_text(payer_id, "payer_id_required")
         if not isinstance(start, datetime) or not isinstance(end, datetime):
             raise UpstreamError("invalid_transaction_window")
-        begin = wire.ensure_utc(start)
-        finish = wire.ensure_utc(end)
+        begin = wire.ensure_utc(start).replace(microsecond=0)
+        finish = wire.ensure_utc(end).replace(microsecond=0)
         if begin > finish:
             raise UpstreamError("invalid_transaction_window")
-        response = await self._request(
-            "GET",
-            "/v1/reporting/transactions",
-            params={
-                "payer_id": payer,
-                "start_date": begin.isoformat(),
-                "end_date": finish.isoformat(),
-                "fields": "transaction_info,payer_info",
-            },
-        )
-        details = response.body.get("transaction_details")
-        if not isinstance(details, list):
-            return []
-        return [
-            wire.parse_transaction(item)
-            for item in details
-            if isinstance(item, Mapping)
-        ]
+
+        window = timedelta(days=TRANSACTION_WINDOW_DAYS)
+        expected_payer = payer.upper()
+        records: list[PayPalTransactionRecord] = []
+        seen: set[str] = set()
+        chunk_start = begin
+        while chunk_start <= finish:
+            chunk_end = min(chunk_start + window, finish)
+            for record in await self._search_transaction_window(chunk_start, chunk_end):
+                if record.payer_id.strip().upper() != expected_payer:
+                    continue
+                transaction_id = record.transaction_id.strip()
+                if transaction_id:
+                    if transaction_id in seen:
+                        continue
+                    seen.add(transaction_id)
+                records.append(record)
+            if chunk_end >= finish:
+                break
+            chunk_start = chunk_end
+        return records
 
     # ----------------------------------------------------------------- webhooks
     async def verify_webhook(
@@ -397,7 +474,7 @@ class LivePayPalGateway:
         currency: str = "USD",
         description: str = "VerdictPay demo plan",
     ) -> SandboxOrder:
-        """POST /v1/checkout/orders."""
+        """POST /v2/checkout/orders (the v1 path rejects purchase_units)."""
         payer = self._require_text(payer_id, "payer_id_required")
         order_amount = wire.parse_decimal(amount)
         if order_amount <= 0:
@@ -406,7 +483,7 @@ class LivePayPalGateway:
         text = self._require_text(description, "description_required")
         response = await self._request(
             "POST",
-            "/v1/checkout/orders",
+            ORDERS_PATH,
             json_body={
                 "intent": "CAPTURE",
                 "purchase_units": [
@@ -422,10 +499,15 @@ class LivePayPalGateway:
         if not isinstance(order_id, str) or not order_id:
             raise UpstreamError("PayPal order response did not include an order id.")
         links = wire.parse_links(response.body.get("links"))
+        fallback = (
+            CHECKOUT_FALLBACK_SANDBOX
+            if "sandbox" in self._settings.paypal_api_base.lower()
+            else CHECKOUT_FALLBACK_PRODUCTION
+        )
         approval_url = (
             links.get("approve")
             or links.get("payer-action")
-            or f"{CHECKOUT_FALLBACK}{order_id}"
+            or f"{fallback}{order_id}"
         )
         subscription_id = response.body.get("subscription_id")
         return SandboxOrder(
