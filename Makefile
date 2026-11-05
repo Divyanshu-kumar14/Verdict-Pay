@@ -4,7 +4,7 @@ PY := uv run --directory backend
 API_PORT ?= 8000
 WEB_PORT ?= 3000
 
-.PHONY: help install env api web seed stack reset-db test test-backend test-frontend test-sdk test-e2e lint format typecheck check verify verify-live demo e2e docker-build docker-up docker-down clean
+.PHONY: help install env api web serve seed stack reset-db test test-backend test-frontend test-sdk test-e2e lint format typecheck check verify verify-live demo e2e docker-build docker-up docker-down clean
 E2E_PORT ?= 8199
 
 help: ## Show available targets
@@ -18,8 +18,16 @@ install: ## Install backend + frontend + SDK dependencies
 api: ## Run FastAPI on :$(API_PORT)
 	$(PY) uvicorn app.main:app --host 0.0.0.0 --port $(API_PORT) --reload
 
-web: ## Run Next.js on :$(WEB_PORT)
+web: ## Run Next.js dev server on :$(WEB_PORT) (hot reload)
 	pnpm -C frontend dev
+
+# Never run "pnpm build" while "pnpm start" is serving the same .next directory:
+# a rebuild swaps the hashed CSS/JS assets and the live server keeps serving HTML
+# that points at files which no longer exist, so the page renders unstyled.
+# This target builds and starts in one step instead.
+serve: ## Build then serve the production UI atomically on :$(WEB_PORT)
+	pnpm -C frontend build
+	pnpm -C frontend start --port $(WEB_PORT)
 
 env: ## Create .env from the template if it does not exist
 	test -f .env || cp .env.example .env
