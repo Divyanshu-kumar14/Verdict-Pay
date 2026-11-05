@@ -1,0 +1,615 @@
+{
+  "info": {
+    "_postman_id": "9d2b7a8e-5c1f-4a55-9d65-1a2b3c4d5e6f",
+    "name": "VerdictPay API",
+    "description": "End-to-end tour of the VerdictPay API against the local simulator: health, sandbox checkout/usage/dispute, triage, evidence, reporting and a signed PayPal webhook. Run the requests top to bottom. Requires the API on {{baseUrl}} with the demo API key in {{apiKey}}.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "auth": {
+    "type": "apikey",
+    "apikey": [
+      {
+        "key": "key",
+        "value": "X-API-Key",
+        "type": "string"
+      },
+      {
+        "key": "value",
+        "value": "{{apiKey}}",
+        "type": "string"
+      },
+      {
+        "key": "in",
+        "value": "header",
+        "type": "string"
+      }
+    ]
+  },
+  "item": [
+    {
+      "name": "Health",
+      "item": [
+        {
+          "name": "Health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"health payload matches the frozen contract\", function () {",
+                  "  const body = pm.response.json();",
+                  "  pm.expect(body.status).to.eql(\"ok\");",
+                  "  pm.expect(body.mode).to.be.a(\"string\");",
+                  "  pm.expect(body.version).to.be.a(\"string\").and.not.empty;",
+                  "  pm.expect(body.database).to.be.a(\"string\");",
+                  "  pm.expect(body.uptime_seconds).to.be.a(\"number\").and.at.least(0);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/health",
+            "description": "Liveness/readiness. Never touches PayPal or the network."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Sandbox",
+      "item": [
+        {
+          "name": "Sandbox checkout",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "const body = pm.response.json();",
+                  "pm.test(\"checkout returns the $99 Pro order\", function () {",
+                  "  pm.expect(body.order_id).to.be.a(\"string\").and.not.empty;",
+                  "  pm.expect(body.payer_id).to.be.a(\"string\").and.not.empty;",
+                  "  pm.expect(body.amount_usd).to.eql(\"99.00\");",
+                  "  pm.expect(body.currency).to.eql(\"USD\");",
+                  "  pm.expect(body.approval_url).to.include(\"sandbox.paypal.com\");",
+                  "});",
+                  "pm.environment.set(\"payerId\", body.payer_id);",
+                  "pm.environment.set(\"orderId\", body.order_id);",
+                  "pm.environment.set(\"subscriptionId\", body.subscription_id || \"\");"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/sandbox/checkout",
+            "description": "Creates a deterministic PayPal sandbox order + subscription through the simulator gateway and returns the payer id used by the telemetry stream.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"plan\": \"pro\",\n  \"email\": \"judge@verdictpay.demo\",\n  \"tos_version\": \"v2.4-2026-01\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Sandbox usage",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "const body = pm.response.json();",
+                  "pm.test(\"four chained telemetry events land\", function () {",
+                  "  pm.expect(body.events).to.be.an(\"array\").with.length(4);",
+                  "  pm.expect(body.totals.tokens).to.eql(42000);",
+                  "  pm.expect(body.totals.logins).to.eql(15);",
+                  "  pm.expect(body.chain.valid).to.eql(true);",
+                  "  pm.expect(body.chain.event_count).to.eql(4);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/sandbox/usage",
+            "description": "Emits the four hash-chained lifecycle events (ToS, login, delivery, metered tokens) for the payer from the checkout request.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payer_id\": \"{{payerId}}\",\n  \"order_id\": \"{{orderId}}\",\n  \"subscription_id\": \"{{subscriptionId}}\",\n  \"logins\": 15,\n  \"tokens\": 42000,\n  \"export_name\": \"export_q3_financial_model.xlsx\",\n  \"client_ip\": \"203.0.113.42\",\n  \"device_fingerprint\": \"fp_89a7c6d5e4f3\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Sandbox dispute (chargeback)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "const body = pm.response.json();",
+                  "pm.test(\"a case is created with a deterministic recommendation\", function () {",
+                  "  pm.expect(body.dispute.dispute_id).to.be.a(\"string\").and.not.empty;",
+                  "  pm.expect(body.dispute.stage).to.eql(\"CHARGEBACK\");",
+                  "  pm.expect(body.dispute.recommended_action).to.eql(\"PROVIDE_EVIDENCE\");",
+                  "  pm.expect(body.webhook_event_id).to.be.a(\"string\").and.not.empty;",
+                  "  pm.expect(body.triage_triggered).to.eql(true);",
+                  "});",
+                  "pm.environment.set(\"disputeId\", body.dispute.dispute_id);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/sandbox/dispute",
+            "description": "Opens a CHARGEBACK in the simulator, then drives it through the real signed-webhook path. CHARGEBACK is used so provide-evidence is a legal HATEOAS action later in this collection.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"payer_id\": \"{{payerId}}\",\n  \"order_id\": \"{{orderId}}\",\n  \"reason_code\": \"MERCHANDISE_OR_SERVICE_NOT_RECEIVED\",\n  \"stage\": \"CHARGEBACK\",\n  \"channel\": \"INTERNAL\",\n  \"amount_usd\": \"99.00\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Telemetry",
+      "item": [
+        {
+          "name": "Telemetry batch",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Build the body here so the signed bytes are exactly the bytes sent.",
+                  "const payload = {",
+                  "  events: [{",
+                  "    event_id: \"postman-\" + Date.now(),",
+                  "    event_type: \"USAGE_METERED\",",
+                  "    paypal_payer_id: pm.environment.get(\"payerId\") || \"YRZ829104KLA\",",
+                  "    paypal_order_id: pm.environment.get(\"orderId\") || \"5O190127TN364715T\",",
+                  "    client_ip: \"203.0.113.42\",",
+                  "    device_fingerprint: \"fp_89a7c6d5e4f3\",",
+                  "    resource_id: \"postman_export.xlsx\",",
+                  "    resource_sha256: \"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08\",",
+                  "    units_consumed: 1450,",
+                  "    metadata: { source: \"postman\" }",
+                  "  }]",
+                  "};",
+                  "const rawBody = JSON.stringify(payload);",
+                  "pm.request.body.raw = rawBody;",
+                  "const secret = pm.environment.get(\"signingSecret\");",
+                  "const timestamp = Math.floor(Date.now() / 1000).toString();",
+                  "let cryptoLib;",
+                  "try {",
+                  "  cryptoLib = (typeof CryptoJS !== \"undefined\") ? CryptoJS : require(\"crypto-js\");",
+                  "} catch (error) {",
+                  "  throw new Error(\"This request needs Postman's built-in crypto-js. Use Postman Desktop, or set REQUIRE_SIGNED_TELEMETRY=false on a local API only.\");",
+                  "}",
+                  "const signature = cryptoLib.HmacSHA256(timestamp + \".\" + rawBody, secret).toString();",
+                  "pm.request.headers.upsert({ key: \"X-VerdictPay-Timestamp\", value: timestamp });",
+                  "pm.request.headers.upsert({ key: \"X-VerdictPay-Signature\", value: signature });"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "const body = pm.response.json();",
+                  "pm.test(\"batch is appended to the hash chain\", function () {",
+                  "  pm.expect(body.accepted).to.be.at.least(1);",
+                  "  pm.expect(body.events[0].event_type).to.eql(\"USAGE_METERED\");",
+                  "  pm.expect(body.events[0].prev_hash).to.have.length(64);",
+                  "  pm.expect(body.events[0].chain_hash).to.have.length(64);",
+                  "  pm.expect(body.chain.valid).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/telemetry/events",
+            "description": "Direct ingest of a signed telemetry batch. The pre-request script builds the body, signs the exact bytes with HMAC-SHA256 over \"<unixSeconds>.<body>\" using {{signingSecret}}, and sends X-VerdictPay-Timestamp / X-VerdictPay-Signature. The API rejects unsigned ingest by default. @verdictpay/sdk does this automatically.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"events\": [\n    {\n      \"event_id\": \"{{$guid}}\",\n      \"event_type\": \"USAGE_METERED\",\n      \"paypal_payer_id\": \"{{payerId}}\",\n      \"paypal_order_id\": \"{{orderId}}\",\n      \"client_ip\": \"203.0.113.42\",\n      \"device_fingerprint\": \"fp_89a7c6d5e4f3\",\n      \"resource_id\": \"postman_export.xlsx\",\n      \"resource_sha256\": \"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08\",\n      \"units_consumed\": 1450,\n      \"metadata\": {\n        \"source\": \"postman\"\n      }\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Disputes",
+      "item": [
+        {
+          "name": "List disputes",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "const body = pm.response.json();",
+                  "pm.test(\"triage queue is paginated\", function () {",
+                  "  pm.expect(body.data).to.be.an(\"array\");",
+                  "  pm.expect(body.meta.total).to.be.a(\"number\").and.at.least(1);",
+                  "  pm.expect(body.meta.page).to.eql(1);",
+                  "  pm.expect(body.meta.per_page).to.eql(20);",
+                  "  pm.expect(body.data[0].ev_fight_usd).to.be.a(\"string\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/disputes?page=1&per_page=20",
+            "description": "Paginated triage queue, newest case first. Supports stage/status/action filters."
+          }
+        },
+        {
+          "name": "Dispute detail",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "const body = pm.response.json();",
+                  "pm.test(\"case room exposes EV and HATEOAS actions\", function () {",
+                  "  pm.expect(body.dispute_id).to.eql(pm.environment.get(\"disputeId\"));",
+                  "  pm.expect(body.breakdown.ev_fight_usd).to.be.a(\"string\");",
+                  "  pm.expect(body.breakdown.ev_offer_usd).to.be.a(\"string\");",
+                  "  pm.expect(body.win_probability.score).to.be.a(\"number\");",
+                  "  pm.expect(body.allowed_actions).to.be.an(\"array\").with.length(4);",
+                  "  pm.expect(body.facts.chain_valid).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/disputes/{{disputeId}}",
+            "description": "Full case room payload: EV breakdown, win-probability signals, allowed actions."
+          }
+        },
+        {
+          "name": "Triage",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "const body = pm.response.json();",
+                  "pm.test(\"triage is deterministic\", function () {",
+                  "  pm.expect(body.dispute_id).to.eql(pm.environment.get(\"disputeId\"));",
+                  "  pm.expect(body.recommended_action).to.eql(\"PROVIDE_EVIDENCE\");",
+                  "  pm.expect(body.breakdown.p_win).to.be.above(0.54);",
+                  "  pm.expect(body.rationale).to.be.an(\"array\").and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/disputes/{{disputeId}}/triage",
+            "description": "Recomputes win probability, EV and the recommended action from the locked fact pack."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Evidence",
+      "item": [
+        {
+          "name": "Provide evidence",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 202\", function () {",
+                  "  pm.response.to.have.status(202);",
+                  "});",
+                  "const body = pm.response.json();",
+                  "pm.test(\"evidence action is audited\", function () {",
+                  "  pm.expect(body.action).to.eql(\"PROVIDE_EVIDENCE\");",
+                  "  pm.expect(body.dispute_id).to.eql(pm.environment.get(\"disputeId\"));",
+                  "  pm.expect([\"EXECUTED\", \"FAILED\", \"SKIPPED\"]).to.include(body.status);",
+                  "  pm.expect(body.latency_ms).to.be.a(\"number\").and.at.least(0);",
+                  "  pm.expect(body.action_id).to.be.a(\"string\").and.not.empty;",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/disputes/{{disputeId}}/actions/PROVIDE_EVIDENCE",
+            "description": "Builds the deterministic PDF dossier, uploads it via multipart/related and records the action. Returns 202 because the dossier is an asynchronous artifact.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Telemetry-backed seller protection evidence generated by VerdictPay.\",\n  \"idempotency_key\": \"postman-evidence-{{disputeId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "name": "Dossier PDF",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "pm.test(\"dossier is a PDF attachment\", function () {",
+                  "  pm.expect(pm.response.headers.get(\"Content-Type\")).to.include(\"application/pdf\");",
+                  "  pm.expect(pm.response.headers.get(\"Content-Disposition\")).to.include(\"VerdictPay_Dossier_\");",
+                  "  pm.expect(pm.response.responseSize).to.be.above(1000);",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/disputes/{{disputeId}}/dossier.pdf",
+            "description": "Streams the deterministic seller-protection dossier for the case."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reporting",
+      "item": [
+        {
+          "name": "Reporting summary",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "const body = pm.response.json();",
+                  "pm.test(\"reporting summary is populated\", function () {",
+                  "  pm.expect(body.total_cases).to.be.a(\"number\").and.at.least(1);",
+                  "  pm.expect(body.total_exposure_usd).to.be.a(\"string\");",
+                  "  pm.expect(body.fees_avoided_usd).to.be.a(\"string\");",
+                  "  pm.expect(body.high_volume).to.have.property(\"threshold\", 0.015);",
+                  "  pm.expect(body.win_rate_estimate).to.be.a(\"number\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/reporting/summary",
+            "description": "Exposure, win-rate estimate, fees avoided and the high-volume fee-cliff status."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Webhooks",
+      "item": [
+        {
+          "name": "Signed webhook example",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// Build the body here so the signed bytes are exactly the bytes sent.",
+                  "const payload = {",
+                  "  id: \"WH-POSTMAN-\" + Date.now(),",
+                  "  event_type: \"CUSTOMER.DISPUTE.CREATED\",",
+                  "  resource_type: \"dispute\",",
+                  "  summary: \"A customer dispute has been created (Postman signed example).\",",
+                  "  resource: {",
+                  "    dispute_id: \"PP-D-99001\",",
+                  "    reason: \"MERCHANDISE_OR_SERVICE_NOT_RECEIVED\",",
+                  "    dispute_life_cycle_stage: \"INQUIRY\",",
+                  "    dispute_channel: \"INTERNAL\",",
+                  "    status: \"OPEN\",",
+                  "    dispute_amount: { currency_code: \"USD\", value: \"99.00\" },",
+                  "    payer: { payer_id: pm.environment.get(\"payerId\") || \"YRZ829104KLA\" },",
+                  "    seller_transaction_id: pm.environment.get(\"orderId\") || \"5O190127TN364715T\",",
+                  "    create_time: new Date().toISOString(),",
+                  "    seller_response_due_date: new Date(Date.now() + 10 * 86400000).toISOString(),",
+                  "    links: []",
+                  "  }",
+                  "};",
+                  "const rawBody = JSON.stringify(payload);",
+                  "pm.request.body.raw = rawBody;",
+                  "const secret = pm.environment.get(\"webhookSecret\");",
+                  "const timestamp = Math.floor(Date.now() / 1000).toString();",
+                  "let cryptoLib;",
+                  "try {",
+                  "  cryptoLib = (typeof CryptoJS !== \"undefined\") ? CryptoJS : require(\"crypto-js\");",
+                  "} catch (error) {",
+                  "  throw new Error(\"This request needs Postman's built-in crypto-js. Use Postman Desktop, or set ALLOW_UNSIGNED_WEBHOOKS=true and delete the signature headers for a local-only test.\");",
+                  "}",
+                  "const signature = cryptoLib.HmacSHA256(timestamp + \".\" + rawBody, secret).toString();",
+                  "pm.request.headers.upsert({ key: \"X-VerdictPay-Timestamp\", value: timestamp });",
+                  "pm.request.headers.upsert({ key: \"X-VerdictPay-Signature\", value: signature });"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status is 200\", function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "const body = pm.response.json();",
+                  "pm.test(\"signed webhook is accepted and replay-safe\", function () {",
+                  "  pm.expect(body.received).to.eql(true);",
+                  "  pm.expect(body.event_id).to.be.a(\"string\").and.not.empty;",
+                  "  pm.expect(body.dispute_id).to.eql(\"PP-D-99001\");",
+                  "});"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/v1/webhooks/paypal",
+            "description": "Posts a PayPal-style CUSTOMER.DISPUTE.CREATED event signed with X-VerdictPay-Signature = hex(HMAC-SHA256(webhookSecret, '<unixSeconds>.<exactBody>')). The pre-request script builds the body and signs the exact bytes it sends.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"replaced-by-the-pre-request-script\",\n  \"event_type\": \"CUSTOMER.DISPUTE.CREATED\",\n  \"resource_type\": \"dispute\",\n  \"summary\": \"A customer dispute has been created (Postman signed example).\",\n  \"resource\": {\n    \"dispute_id\": \"PP-D-99001\",\n    \"reason\": \"MERCHANDISE_OR_SERVICE_NOT_RECEIVED\",\n    \"dispute_life_cycle_stage\": \"INQUIRY\",\n    \"dispute_channel\": \"INTERNAL\",\n    \"status\": \"OPEN\",\n    \"dispute_amount\": {\n      \"currency_code\": \"USD\",\n      \"value\": \"99.00\"\n    },\n    \"payer\": {\n      \"payer_id\": \"{{payerId}}\"\n    },\n    \"seller_transaction_id\": \"{{orderId}}\",\n    \"create_time\": \"2026-01-01T00:00:00.000Z\",\n    \"seller_response_due_date\": \"2026-01-11T00:00:00.000Z\",\n    \"links\": []\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8000"
+    },
+    {
+      "key": "apiKey",
+      "value": "vp_demo_sk_local"
+    },
+    {
+      "key": "payerId",
+      "value": "YRZ829104KLA"
+    },
+    {
+      "key": "orderId",
+      "value": "5O190127TN364715T"
+    },
+    {
+      "key": "subscriptionId",
+      "value": "I-BW452GLLEP1G"
+    },
+    {
+      "key": "disputeId",
+      "value": "PP-D-40001"
+    },
+    {
+      "key": "signingSecret",
+      "value": "dev-signing-secret-change-me"
+    }
+  ]
+}

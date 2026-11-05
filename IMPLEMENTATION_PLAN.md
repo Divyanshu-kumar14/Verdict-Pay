@@ -123,7 +123,7 @@ Each phase ends at a **gate** that must be green before the next starts. Gates a
 |---|---|---|---|
 | 0.1 | Repo skeleton, Makefile, .env.example, .gitignore | root files | make help lists targets |
 | 0.2 | Backend package + pyproject (uv, Python 3.12), config, JSON logging, error envelope | app/config.py, app/errors.py | python -c "from app.config import settings" |
-| 0.3 | DB schema: merchants, telemetry_ledger, dispute_cases, dispute_actions, webhook_events | app/db/models.py | init_db creates 5 tables |
+| 0.3 | DB schema: merchants, telemetry_ledger, paypal_transactions, dispute_cases, dispute_actions, webhook_events | app/db/models.py | init_db creates 6 tables |
 | 0.4 | Frozen enums, gateway/LLM/index protocols, Pydantic response schemas | app/domain/enums.py, app/api/schemas.py | ruff check; imports resolve |
 | 0.5 | App factory with routers mounted, CORS, request-id middleware, exception handlers | app/main.py | curl :8000/api/v1/health -> {"status":"ok"} |
 
@@ -192,7 +192,7 @@ Each phase ends at a **gate** that must be green before the next starts. Gates a
 
 | # | Task | Deliverable | Verify |
 |---|---|---|---|
-| 5.1 | E2E script for the full three-button flow, asserting every promise | scripts/e2e_demo.py | make demo exits 0, prints per-step OK |
+| 5.1 | E2E script for the full three-button flow, asserting every promise, plus a boot wrapper | scripts/e2e_demo.py, scripts/run_demo.py | make demo exits 0, prints per-step OK |
 | 5.2 | Docker: multi-stage, non-root, healthchecks; one-command compose | backend/Dockerfile, frontend/Dockerfile, docker-compose.yml | docker compose config + build |
 | 5.3 | Postman collection + environment (webhook, telemetry, dispute, evidence) | postman/*.json | newman run (optional CI job) |
 | 5.4 | TypeScript SDK with batching, retry, HMAC signing + vitest suite | packages/verdictpay-sdk | pnpm test && pnpm build |
@@ -216,11 +216,13 @@ Fees: standard Fs = 15 (refunded on win); high-volume Fh = 30 (never refunded, o
 
     ratio_before  = D / max(S, 1)
     ratio_after   = (D + 1) / max(S, 1)
-    crosses_cliff = high_volume and ratio_after > tau
+    high_volume   = S >= 100 and ratio_after >= tau     # spec: 100+ sales over 3 months
+    crosses_cliff = high_volume and ratio_before < tau <= ratio_after
     penalty_ratio = Fh * 3  if crosses_cliff else 0    # risk of $30 on the next 3 disputes
 
     ev_fight  =  p * (-Fh) + (1 - p) * (-A - Fs - Fh - penalty_ratio)
-    ev_settle = -(A + Fs)                              # claim fee already attached
+    ev_settle = -(A + Fs)  if claim_fee_attached       # CHARGEBACK / PRE_ARBITRATION
+                  else -A                           # still INQUIRY: no claim fee yet
     ev_offer  = -(offer_ratio * A)                     # offer_ratio default 0.30
 
 **Recommendation (first match wins)**
@@ -228,10 +230,16 @@ Fees: standard Fs = 15 (refunded on win); high-volume Fh = 30 (never refunded, o
 | Condition | Action |
 |---|---|
 | INQUIRY + INTERNAL + completeness >= 0.6 + p >= 0.55 | DEFLECT_INQUIRY (send-message, $0 fee) |
-| INQUIRY + ev_offer > max(ev_fight, 0) | MAKE_OFFER (avoid claim escalation) |
+| INQUIRY + make-offer allowed + ev_offer > ev_fight | MAKE_OFFER (settle cheaper than fighting) |
+| INQUIRY + send-message allowed | DEFLECT_INQUIRY (free evidence-backed message) |
 | CHARGEBACK or PRE_ARBITRATION + ev_fight > ev_settle + p >= 0.35 | PROVIDE_EVIDENCE |
 | CHARGEBACK or PRE_ARBITRATION + ev_fight <= ev_settle | ACCEPT_CLAIM |
 | otherwise | MONITOR |
+
+Rationale for the INQUIRY rows: every EV is negative in absolute terms, so the comparison must be
+**between actions** (offer vs fight), never against zero. An INQUIRY cannot attract the claim fee,
+so sending the free evidence message dominates accepting; offering 30% is chosen when fighting is
+projected to cost more than the offer.
 
 Tie-break: higher EV wins; then the cheaper-fee action; then the earlier row. Every branch is a unit test.
 
@@ -270,11 +278,14 @@ PayPal's returned links[] is authoritative; our table is the guard that produces
 
 ## 8. Data model
 
+Six tables (portable SQL, no vendor types):
+
 1. merchants — id, name, api_key_hash, created_at.
-2. telemetry_ledger — append-only; unique (merchant_id, payer_id, sequence); prev_hash, chain_hash, canonical payload JSON, typed IP/device/resource/units columns. No updates or deletes (enforced by service + test).
-3. dispute_cases — dispute id PK, stage/channel/reason/status, amounts, p_win, ev_fight/settle/offer, recommended_action, action_rationale JSON, subscription_suspended, dossier_pdf_url, due_date, facts_snapshot JSON.
-4. dispute_actions — audit log: action, status, idempotency key (unique), request/response JSON, latency.
-5. webhook_events — event_id unique (replay-safe), type, verified flag, payload, received_at.
+2. telemetry_ledger — append-only; unique (merchant_id, payer_id, sequence) and (merchant_id, event_id); prev_hash, chain_hash, canonical payload JSON, typed IP/device/resource/units columns. ORM before_update/before_delete guards + a service-level test.
+3. paypal_transactions — CE 3.0 lookback cache: transaction_id, payer_id, amount, status, IP, device, source, created_at.
+4. dispute_cases — dispute id PK, stage/channel/reason/status, amounts, p_win, ev_fight/settle/offer, recommended_action, action_rationale JSON, subscription_suspended, dossier_pdf_url, due_date, facts_snapshot JSON, paypal_links JSON.
+5. dispute_actions — audit log: action, status, idempotency key (unique), request/response JSON, latency.
+6. webhook_events — event_id unique (replay-safe), type, verified flag, payload, received_at.
 
 ---
 
@@ -332,3 +343,43 @@ Error envelope is always {"error": {"code", "message", "details"?, "request_id"}
 - [ ] README quickstart works verbatim with Node 20+/Python 3.12+/Docker.
 - [ ] Sponsor claims are accurate; unimplementable proprietary runtimes are named, not faked.
 - [ ] docs/demo.md is a 60-second script anyone can read aloud.
+
+---
+
+## 13. Implementation record (what actually shipped)
+
+Post-implementation review notes, kept because they change how the frozen spec should be read.
+
+### Frozen-spec amendments made during the build
+
+| # | Change | Why |
+|---|---|---|
+| 1 | **Six** tables, not five: added `paypal_transactions` | Visa CE 3.0 lookbacks and the 3-month sales/dispute ratio need a durable transaction cache; the simulator also exposes the same rows through `synthetic_transactions`. |
+| 2 | `RecommendedAction.SEND_MESSAGE` removed | It duplicated `DEFLECT_INQUIRY` and collided with the `DisputeAction` of the same name; a recommendation is not an action. |
+| 3 | INQUIRY make-offer branch is `ev_offer > ev_fight`, not `> max(ev_fight, 0)` | Every EV is negative; comparing to zero made the branch unreachable. An INQUIRY cannot attract the claim fee, so send-message dominates accepting. |
+| 4 | `ev_settle = -(A + Fs)` only when a claim fee has attached | Accepting during INQUIRY costs the amount, not the amount plus a fee that does not exist yet. |
+| 5 | High-volume fee applies only when `high_volume` is true; `crosses_cliff = high_volume and ratio_before < tau <= ratio_after` | The $30 fee is a high-volume-merchant fee; a small merchant never pays it. The penalty only applies to the dispute that crosses the cliff. |
+| 6 | `disputes_3mo` counts **prior** disputes (excluding the case under triage) | The EV engine applies its own `D + 1`; counting the current case doubled the increment. |
+| 7 | Telemetry ingest **requires** the SDK HMAC signature (`require_signed_telemetry`) | The plan claimed it; the first implementation only checked the API key. |
+| 8 | ASGI body cap counts bytes, not just `Content-Length` | A chunked 300 KB upload bypassed the header check. |
+| 9 | Per-credential rate limiting middleware added | The plan and README promised a token bucket; `SlidingWindowLimiter` was otherwise dead code. |
+| 10 | Simulator hydrates from `dispute_cases` at startup | The simulator is in-memory; without hydration a restart listed cases it could not act on. |
+| 11 | Triage state machine: stage matrix is primary; PayPal `links[]` gate only the INQUIRY `require-evidence` trap | Documented deviation. The simulator always returns complete links, so the demo is unaffected; live mode still relies on PayPal rejecting illegal calls. |
+
+### Verification snapshot
+
+| Gate | Result |
+|---|---|
+| `uv run pytest -q` | 282+ passed, 0 failed |
+| `uv run ruff check app tests scripts` | clean |
+| `pnpm lint` / `tsc --noEmit` / `next build` | clean, six routes |
+| SDK `vitest` | 24 passed |
+| `scripts/e2e_demo.py` | 26 assertions passed against a live simulator |
+| Adversarial QA | 36 checks; 2 HIGH bugs found (both fixed with regressions) |
+
+### Judge-demo numbers (seeded DB, simulator)
+
+- Seeded queue: 5 disputes (`PP-D-40001..40005`), 215 cached transactions, 200 of them recent sales.
+- UI third button files SNAD ($99): p(win) 0.90, EV_fight -$41.40, EV_settle -$99.00, EV_offer -$29.70.
+- `make demo` asserts the INR variant: p(win) 0.95, EV_fight -$35.70, dossier 7 KB, 26/26 checks.
+- The $30 high-volume fee appears once the rolling ratio crosses 1.5% (third dispute with 200 sales): fee 30.00, penalty 90.00.

@@ -1,0 +1,43 @@
+# Build context hygiene: nothing here belongs in either image.
+
+# VCS / editor
+.git
+.gitignore
+.idea
+.vscode
+.DS_Store
+
+# Python
+**/__pycache__
+**/*.py[cod]
+**/.venv
+**/.pytest_cache
+**/.ruff_cache
+**/.mypy_cache
+**/htmlcov
+**/.coverage
+**/*.egg-info
+backend/verdictpay.db
+backend/verdictpay.db-wal
+backend/verdictpay.db-shm
+
+# Node
+**/node_modules
+**/.next
+**/out
+**/dist
+**/.turbo
+**/*.tsbuildinfo
+
+# Secrets and local state
+.env
+.env.*
+!.env.example
+backend/artifacts
+artifacts
+
+# Not needed by either image
+docs
+postman
+packages
+.github

@@ -1,0 +1,79 @@
+# One-command judge stack: FastAPI (simulator gateway) + Next.js command center.
+#   cp .env.example .env   # optional; every value below has a safe demo default
+#   docker compose up --build
+# No PayPal account, Elastic cluster, Supabase project or LLM key is required.
+name: verdictpay
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: verdictpay/api:local
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      APP_ENV: ${APP_ENV:-local}
+      DEMO_MODE: ${DEMO_MODE:-true}
+      # Inside the container the DB must live on the mounted volume, not in /app.
+      DATABASE_URL: sqlite+aiosqlite:////app/data/verdictpay.db
+      PAYPAL_MODE: ${PAYPAL_MODE:-simulator}
+      LLM_MODE: ${LLM_MODE:-template}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
+      ALLOW_UNSIGNED_WEBHOOKS: ${ALLOW_UNSIGNED_WEBHOOKS:-false}
+      VERDICTPAY_API_KEY: ${VERDICTPAY_API_KEY:-vp_demo_sk_local}
+      VERDICTPAY_SIGNING_SECRET: ${VERDICTPAY_SIGNING_SECRET:-dev-signing-secret-change-me}
+      VERDICTPAY_WEBHOOK_SECRET: ${VERDICTPAY_WEBHOOK_SECRET:-dev-webhook-secret-change-me}
+      PAYPAL_CLIENT_ID: ${PAYPAL_CLIENT_ID:-}
+      PAYPAL_CLIENT_SECRET: ${PAYPAL_CLIENT_SECRET:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    command:
+      - /bin/sh
+      - -c
+      - |
+        # Idempotent: seeds five demo disputes on first boot, no-op afterwards.
+        python scripts/seed_demo.py || echo "[compose] seed step skipped; API will start anyway"
+        exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    volumes:
+      # Named volumes inherit the image's uid 10001 ownership, so the non-root
+      # user can write PDFs. A bind mount to ./backend/artifacts would be owned
+      # by the host user and make dossier generation fail; see docs/demo.md.
+      - verdictpay-artifacts:/app/artifacts
+      - verdictpay-data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  web:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+      args:
+        # NEXT_PUBLIC_* is baked into the client bundle at build time.
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
+        NEXT_PUBLIC_VERDICTPAY_API_KEY: ${VERDICTPAY_API_KEY:-vp_demo_sk_local}
+    image: verdictpay/web:local
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
+      NEXT_PUBLIC_VERDICTPAY_API_KEY: ${VERDICTPAY_API_KEY:-vp_demo_sk_local}
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+volumes:
+  verdictpay-artifacts:
+  verdictpay-data:

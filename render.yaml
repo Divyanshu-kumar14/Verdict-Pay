@@ -1,0 +1,89 @@
+# VerdictPay Render Blueprint.
+#
+# Two Docker web services + an optional static docs site. The API runs the
+# simulator gateway by default, so a deploy needs no PayPal account. The demo
+# SQLite database lives on the container filesystem and is ephemeral on
+# Render's free plan; that is acceptable for a judge demo and explicitly not a
+# production database. Point DATABASE_URL at Postgres (postgresql+asyncpg://...)
+# for anything durable.
+#
+# Before the first deploy, set the sync:false secrets in the Render dashboard:
+#   verdictpay-api  VERDICTPAY_API_KEY, PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET,
+#                   PAYPAL_WEBHOOK_ID, OPENAI_API_KEY (last one optional)
+#   verdictpay-web  NEXT_PUBLIC_VERDICTPAY_API_KEY  (must equal VERDICTPAY_API_KEY)
+#
+# NEXT_PUBLIC_* values are compiled into the Next.js bundle, so Render must pass
+# them to the Docker build (our Dockerfiles declare them as ARG) as well as at
+# runtime.
+
+services:
+  - type: web
+    name: verdictpay-api
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/v1/health
+    autoDeploy: true
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DEMO_MODE
+        value: "true"
+      - key: DATABASE_URL
+        value: sqlite+aiosqlite:////app/data/verdictpay.db
+      - key: PAYPAL_MODE
+        value: simulator
+      - key: LLM_MODE
+        value: template
+      - key: ALLOW_UNSIGNED_WEBHOOKS
+        value: "false"
+      # The web service is deployed at https://<name>.onrender.com; keep this in
+      # sync if you rename either service.
+      - key: ALLOWED_ORIGINS
+        value: https://verdictpay-web.onrender.com
+      - key: VERDICTPAY_API_KEY
+        sync: false
+      - key: VERDICTPAY_SIGNING_SECRET
+        generateValue: true
+      - key: VERDICTPAY_WEBHOOK_SECRET
+        generateValue: true
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+
+  - type: web
+    name: verdictpay-web
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./frontend/Dockerfile
+    dockerContext: .
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: NEXT_PUBLIC_API_BASE_URL
+        value: https://verdictpay-api.onrender.com
+      - key: NEXT_PUBLIC_VERDICTPAY_API_KEY
+        sync: false
+
+# Optional third service: a static docs site. The repository's docs are Markdown
+# and there is no static-site generator in the build, so uncommenting this block
+# would publish raw Markdown. Add a real generator (for example a tiny md-to-html
+# step) before enabling it; do not claim a docs site that does not render.
+#
+#  - type: web
+#    name: verdictpay-docs
+#    runtime: static
+#    plan: free
+#    buildCommand: ""
+#    staticPublishPath: ./docs
+#    envVars:
+#      - key: API_BASE_URL
+#        value: https://verdictpay-api.onrender.com

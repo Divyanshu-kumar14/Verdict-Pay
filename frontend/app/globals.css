@@ -1,0 +1,249 @@
+@import "tailwindcss";
+
+@theme {
+  /* Surfaces — depth is a hex step, never a shadow. */
+  --color-void: #080b0f;
+  --color-panel: #0e141b;
+  --color-raised: #121a23;
+  --color-chrome: #0b1117;
+  --color-sunken: #06090c;
+  --color-row-alt: #0c1219;
+  --color-overlay: rgba(8, 11, 15, 0.72);
+
+  /* Borders */
+  --color-hairline: rgba(255, 255, 255, 0.07);
+  --color-hairline-strong: rgba(255, 255, 255, 0.12);
+  --color-line: #1b2430;
+  --color-border: rgba(255, 255, 255, 0.07);
+  --color-border-strong: #5a6b7f;
+
+  /* Text */
+  --color-ink: #e6edf3;
+  --color-muted: #8b98a5;
+  --color-dim: #74869b;
+  --color-inverse: #080b0f;
+
+  /* Accents — one meaning per hue. */
+  --color-emerald: #34d399;
+  --color-amber: #fbbf24;
+  --color-rose: #fb7185;
+  --color-sky: #7dd3fc;
+  --color-positive: #34d399;
+  --color-warning: #fbbf24;
+  --color-critical: #fb7185;
+  --color-danger: #fb7185;
+  --color-info: #7dd3fc;
+  --color-focus: #a7b6c6;
+
+  /* Radii — child never larger than parent. */
+  --radius-chip: 4px;
+  --radius-control: 6px;
+  --radius-inner: 8px;
+  --radius-panel: 10px;
+  --radius-pill: 999px;
+
+  /* Elevation — used only on raised popovers. */
+  --shadow-raised: 0 24px 60px -32px rgba(0, 0, 0, 0.85);
+
+  /* Stacking */
+  --z-sticky: 10;
+  --z-overlay: 30;
+  --z-modal: 40;
+  --z-toast: 50;
+
+  /* Type */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo,
+    monospace;
+
+  --text-2xs: 10px;
+  --text-2xs--line-height: 1.4;
+  --text-2xs--letter-spacing: 0.16em;
+  --text-xs: 11px;
+  --text-xs--line-height: 1.45;
+  --text-sm: 12px;
+  --text-sm--line-height: 1.5;
+  --text-base: 13px;
+  --text-base--line-height: 1.55;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-lg--line-height: 1.45;
+  --text-lg--letter-spacing: -0.01em;
+  --text-xl: 18px;
+  --text-2xl: 22px;
+  --text-2xl--line-height: 1.25;
+  --text-2xl--letter-spacing: -0.02em;
+  --text-3xl: 28px;
+  --text-3xl--line-height: 1.2;
+  --text-3xl--letter-spacing: -0.02em;
+
+  /* Motion */
+  --default-transition-duration: 120ms;
+  --default-transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
+}
+
+@layer base {
+  html {
+    color-scheme: dark;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background-color: var(--color-void);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 13px;
+    line-height: 1.5;
+  }
+
+  ::selection {
+    background: rgba(52, 211, 153, 0.24);
+    color: #f5fffb;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+    border-radius: 3px;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #263340 transparent;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: #263340;
+    border: 2px solid var(--color-void);
+    border-radius: 999px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #33445a;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  .panel {
+    border: 1px solid var(--color-hairline);
+    border-radius: var(--radius-panel);
+    background-color: var(--color-panel);
+  }
+
+  .panel-flat {
+    border: 1px solid var(--color-hairline);
+    background-color: rgba(255, 255, 255, 0.015);
+    border-radius: 8px;
+  }
+
+  .kicker {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    line-height: 1.2;
+    text-transform: uppercase;
+    color: var(--color-dim);
+  }
+
+  .num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
+    letter-spacing: -0.01em;
+  }
+
+  .divider {
+    height: 1px;
+    width: 100%;
+    background-color: var(--color-hairline);
+  }
+
+  .skeleton {
+    position: relative;
+    overflow: hidden;
+    border-radius: 4px;
+    background-color: rgba(255, 255, 255, 0.045);
+  }
+
+  .skeleton::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    transform: translateX(-100%);
+    background-image: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0) 0,
+      rgba(255, 255, 255, 0.05) 50%,
+      rgba(255, 255, 255, 0) 100%
+    );
+    animation: vp-shimmer 1.6s ease-in-out infinite;
+  }
+
+  .bg-grid {
+    background-image:
+      linear-gradient(rgba(255, 255, 255, 0.022) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
+    background-size: 48px 48px;
+    background-position: center top;
+  }
+}
+
+@keyframes vp-shimmer {
+  100% {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes vp-pulse-ring {
+  0% {
+    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.35);
+  }
+  70% {
+    box-shadow: 0 0 0 6px rgba(52, 211, 153, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0);
+  }
+}
+
+.live-dot {
+  animation: vp-pulse-ring 2.4s ease-out infinite;
+}
+/* AG Grid: 10px tracked uppercase headers, tabular numerals, right-aligned money heads. */
+.ag-header-cell-text {
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.ag-right-aligned-header .ag-header-cell-label {
+  justify-content: flex-end;
+}
+
+.ag-cell {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}

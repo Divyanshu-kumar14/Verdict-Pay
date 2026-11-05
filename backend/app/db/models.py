@@ -11,6 +11,7 @@ Design notes:
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import (
@@ -24,6 +25,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    event,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -43,11 +45,13 @@ class TelemetryLedger(Base):
     __tablename__ = "telemetry_ledger"
     __table_args__ = (
         UniqueConstraint("merchant_id", "payer_id", "sequence", name="uq_telemetry_stream_seq"),
+        UniqueConstraint("merchant_id", "event_id", name="uq_telemetry_event_id"),
         Index("ix_telemetry_payer_created", "merchant_id", "payer_id", "created_at"),
         Index("ix_telemetry_event_type", "event_type"),
     )
 
     id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: new_id("tel_"))
+    event_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     merchant_id: Mapped[str] = mapped_column(String(40), ForeignKey("merchants.id"), nullable=False)
     payer_id: Mapped[str] = mapped_column(String(64), nullable=False)
     order_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -71,16 +75,14 @@ class PaypalTransaction(Base):
     """Historical transaction cache / simulator ledger used for Visa CE 3.0 lookbacks."""
 
     __tablename__ = "paypal_transactions"
-    __table_args__ = (
-        Index("ix_txn_payer_created", "merchant_id", "payer_id", "created_at"),
-    )
+    __table_args__ = (Index("ix_txn_payer_created", "merchant_id", "payer_id", "created_at"),)
 
     id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: new_id("txn_"))
     merchant_id: Mapped[str] = mapped_column(String(40), ForeignKey("merchants.id"), nullable=False)
     transaction_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
     payer_id: Mapped[str] = mapped_column(String(64), nullable=False)
     order_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    amount_usd: Mapped[Any] = mapped_column(Numeric(12, 2), nullable=False)
+    amount_usd: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
     currency: Mapped[str] = mapped_column(String(8), nullable=False, default="USD")
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     client_ip: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -106,14 +108,18 @@ class DisputeCase(Base):
     dispute_channel: Mapped[str] = mapped_column(String(32), nullable=False)
     status: Mapped[str] = mapped_column(String(48), nullable=False)
     currency: Mapped[str] = mapped_column(String(8), nullable=False, default="USD")
-    amount_usd: Mapped[Any] = mapped_column(Numeric(12, 2), nullable=False)
-    p_win: Mapped[Any] = mapped_column(Numeric(6, 4), nullable=False, default=0)
-    ev_fight_usd: Mapped[Any] = mapped_column(Numeric(12, 2), nullable=False, default=0)
-    ev_settle_usd: Mapped[Any] = mapped_column(Numeric(12, 2), nullable=False, default=0)
-    ev_offer_usd: Mapped[Any] = mapped_column(Numeric(12, 2), nullable=False, default=0)
-    telemetry_completeness: Mapped[Any] = mapped_column(Numeric(6, 4), nullable=False, default=0)
+    amount_usd: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    p_win: Mapped[Decimal] = mapped_column(Numeric(6, 4), nullable=False, default=0)
+    ev_fight_usd: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    ev_settle_usd: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    ev_offer_usd: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False, default=0)
+    telemetry_completeness: Mapped[Decimal] = mapped_column(
+        Numeric(6, 4), nullable=False, default=0
+    )
     recommended_action: Mapped[str] = mapped_column(String(32), nullable=False, default="MONITOR")
-    action_rationale: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
+    action_rationale: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSON, nullable=False, default=list
+    )
     facts_snapshot: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     subscription_suspended: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     dossier_pdf_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
@@ -159,3 +165,19 @@ class WebhookEventRecord(Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+# --------------------------------------------------------------------------- append-only guard
+# The ledger is a system of record: once written a row must never change or vanish.
+# A DB trigger would be vendor-specific, so the guard lives at the ORM boundary and the
+# service layer adds the perimeter check covered by its unit tests.
+
+
+@event.listens_for(TelemetryLedger, "before_update")
+def _forbid_ledger_update(mapper: object, connection: object, target: TelemetryLedger) -> None:
+    raise RuntimeError("telemetry_ledger is append-only: updates are forbidden")
+
+
+@event.listens_for(TelemetryLedger, "before_delete")
+def _forbid_ledger_delete(mapper: object, connection: object, target: TelemetryLedger) -> None:
+    raise RuntimeError("telemetry_ledger is append-only: deletes are forbidden")

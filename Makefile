@@ -4,7 +4,8 @@ PY := uv run --directory backend
 API_PORT ?= 8000
 WEB_PORT ?= 3000
 
-.PHONY: help install api web seed reset-db test lint format typecheck check verify demo e2e docker-build docker-up docker-down clean
+.PHONY: help install api web seed stack reset-db test lint format typecheck check verify demo e2e docker-build docker-up docker-down clean
+E2E_PORT ?= 8199
 
 help: ## Show available targets
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -52,14 +53,18 @@ verify: ## Full quality gate (run before every demo)
 	pnpm -C frontend build
 	pnpm -C packages/verdictpay-sdk test
 	pnpm -C packages/verdictpay-sdk build
+	$(PY) python scripts/run_demo.py --port $(E2E_PORT)
+
+e2e: ## Run the three-button judge flow against an API you already started
 	$(PY) python scripts/e2e_demo.py
 
-e2e: ## Run the three-button judge flow end to end against a throwaway API
-	$(PY) python scripts/e2e_demo.py
-
-demo: ## Boot API on :$(API_PORT), seed, run the E2E judge flow
-	@echo "==> booting VerdictPay API on :$(API_PORT) (simulator mode)"
+demo: ## Verify the full judge flow: seed, boot, assert 26 checks, shut down
+	@echo "==> verifying the VerdictPay judge flow on :$(API_PORT) (simulator mode)"
 	@$(PY) python scripts/run_demo.py --port $(API_PORT)
+
+stack: ## Seed + boot the API and KEEP it running (then run: make web)
+	@echo "==> starting the VerdictPay demo stack on :$(API_PORT)"
+	@$(PY) python scripts/run_demo.py --port $(API_PORT) --keep
 
 docker-build: ## Build api + web images
 	docker compose build

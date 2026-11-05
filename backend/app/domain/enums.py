@@ -6,6 +6,8 @@ from enum import StrEnum
 
 
 class TelemetryEventType(StrEnum):
+    # The spec's SQL comment calls the usage event AI_TOKENS_USED; USAGE_METERED is the
+    # canonical name across SDK/API/DB and maps 1:1 to that concept.
     TOS_ACCEPTED = "TOS_ACCEPTED"
     SESSION_AUTH = "SESSION_AUTH"
     ASSET_DELIVERED = "ASSET_DELIVERED"
@@ -42,7 +44,6 @@ class DisputeStatus(StrEnum):
 
 class RecommendedAction(StrEnum):
     DEFLECT_INQUIRY = "DEFLECT_INQUIRY"
-    SEND_MESSAGE = "SEND_MESSAGE"
     MAKE_OFFER = "MAKE_OFFER"
     ACCEPT_CLAIM = "ACCEPT_CLAIM"
     PROVIDE_EVIDENCE = "PROVIDE_EVIDENCE"

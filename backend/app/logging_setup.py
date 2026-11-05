@@ -57,9 +57,7 @@ def configure_logging(level: str = "INFO") -> None:
 
 
 def get_logger(name: str) -> logging.Logger:
-    logger = logging.getLogger(name)
-    logger.setLevel(logging.INFO)
-    return logger
+    return logging.getLogger(name)
 
 
 def log_context(**fields: Any) -> MutableMapping[str, Any]:

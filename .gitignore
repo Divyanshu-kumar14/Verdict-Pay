@@ -13,6 +13,7 @@ backend/verdictpay.db
 backend/verdictpay.db-wal
 backend/verdictpay.db-shm
 backend/.env
+backend/.demo/
 
 # Node
 node_modules/

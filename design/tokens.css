@@ -1,0 +1,210 @@
+/* =============================================================================
+   VerdictPay design tokens - dark only
+   -----------------------------------------------------------------------------
+   Ground #080B0F  |  chrome #0B1117  |  panel #0E141B  |  raised #121A23
+   Ink #E6EDF3 / #8B98A5 / #74869B
+   emerald #34D399 (value preserved) | amber #FBBF24 (decision open)
+   rose #FB7185 (money at risk)     | sky #7DD3FC (system fact)
+   Every var() reference used in this file is defined in this file.
+
+   TAILWIND V4 MAPPING
+   -------------------
+   Paste the body of :root into an @theme { ... } block (or keep :root and
+   reference the variables directly). The namespaces below become utilities:
+
+     --color-*      -> bg-*, text-*, border-*, ring-*, fill-*, stroke-*, from-*
+                       e.g. bg-panel, text-muted, border-border, ring-emerald
+     --font-*       -> font-sans, font-mono
+     --font-weight-*-> font-regular, font-medium, font-semibold
+     --text-*       -> text-body, text-h1, text-label (with the
+                       --text-*--line-height / --letter-spacing / --font-weight
+                       companions applied automatically)
+     --radius-*     -> rounded-sm, rounded-lg
+     --spacing-*    -> p-1..p-24, m-*, gap-*, size-*, inset-* (4 px base)
+     --shadow-*     -> shadow-panel, shadow-raised, shadow-focus
+
+   Not generated as utilities (plain custom properties): --z-*, --focus-ring-*,
+   --duration-*, --ease-*, --color-*-soft. Reach them through arbitrary values:
+   z-[var(--z-modal)], shadow-[var(--shadow-focus)].
+
+   Example:
+     @theme {
+       --color-void: #080b0f;
+       --color-panel: #0e141b;
+       --radius-lg: 10px;
+       --spacing-4: 1rem;
+       --text-body: 13px;
+       --text-body--line-height: 20px;
+       --shadow-panel: 0 1px 0 0 rgba(255, 255, 255, 0.03);
+       --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+     }
+   ========================================================================== */
+
+:root {
+  color-scheme: dark;
+
+  /* --- Surfaces: three opaque steps plus chrome ----------------------- */
+  --color-void: #080b0f;        /* app canvas */
+  --color-chrome: #0b1117;      /* top bar, sidebar, table header */
+  --color-panel: #0e141b;       /* cards, panels, grid body */
+  --color-raised: #121a23;      /* popovers, menus, nested cards */
+  --color-row-alt: #0c1219;     /* even-row stripe (depth cue only) */
+  --color-sunken: #06090c;      /* wells, code blocks */
+  --color-overlay: rgba(8, 11, 15, 0.72); /* scrim behind modals */
+
+  /* --- Borders and hairlines ------------------------------------------ */
+  --color-border: rgba(255, 255, 255, 0.07);      /* every 1 px hairline */
+  --color-border-strong: #5a6b7f;                 /* input edges, focusable
+                                                     control boundaries, table
+                                                     frame: 3.39:1 on panel */
+  --color-line: #1b2430;                          /* solid decorative rule */
+  --color-hairline: var(--color-border);          /* alias kept for the shell */
+  --color-hairline-strong: rgba(255, 255, 255, 0.12);
+
+  /* --- Text ------------------------------------------------------------ */
+  --color-ink: #e6edf3;         /* primary text, wordmark */
+  --color-muted: #8b98a5;       /* secondary text, column heads */
+  --color-dim: #74869b;         /* micro labels, timestamps */
+  --color-inverse: #080b0f;     /* text on an emerald fill */
+
+  /* --- Accents: primitives --------------------------------------------- */
+  --color-emerald: #34d399;
+  --color-amber: #fbbf24;
+  --color-rose: #fb7185;
+  --color-sky: #7dd3fc;
+  --color-focus: #a7b6c6;       /* steel, never emerald: see brand.md */
+
+  --color-emerald-soft: rgba(52, 211, 153, 0.12);
+  --color-amber-soft: rgba(251, 191, 36, 0.12);
+  --color-rose-soft: rgba(251, 113, 133, 0.12);
+  --color-sky-soft: rgba(125, 211, 252, 0.12);
+
+  /* --- Accents: semantic aliases (prefer these in components) ---------- */
+  --color-bg: var(--color-void);
+  --color-surface: var(--color-panel);
+  --color-surface-raised: var(--color-raised);
+  --color-text: var(--color-ink);
+  --color-text-muted: var(--color-muted);
+  --color-text-dim: var(--color-dim);
+  --color-accent: var(--color-emerald);
+  --color-positive: var(--color-emerald);
+  --color-warning: var(--color-amber);
+  --color-danger: var(--color-rose);
+  --color-critical: var(--color-rose);
+  --color-info: var(--color-sky);
+
+  /* --- Type families ---------------------------------------------------- */
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+  --font-display: var(--font-sans);
+
+  --font-weight-regular: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* --- Type roles (the scale components should use) --------------------- */
+  --text-display: 28px;
+  --text-display--line-height: 32px;
+  --text-display--letter-spacing: -0.02em;
+  --text-display--font-weight: 600;
+  --text-h1: 22px;
+  --text-h1--line-height: 28px;
+  --text-h1--letter-spacing: -0.015em;
+  --text-h1--font-weight: 600;
+  --text-h2: 16px;
+  --text-h2--line-height: 24px;
+  --text-h2--letter-spacing: -0.01em;
+  --text-h2--font-weight: 600;
+  --text-h3: 13.5px;
+  --text-h3--line-height: 20px;
+  --text-h3--letter-spacing: -0.005em;
+  --text-h3--font-weight: 600;
+  --text-body: 13px;
+  --text-body--line-height: 20px;
+  --text-body--letter-spacing: 0em;
+  --text-body--font-weight: 400;
+  --text-body-sm: 12px;
+  --text-body-sm--line-height: 18px;
+  --text-body-sm--letter-spacing: 0em;
+  --text-body-sm--font-weight: 400;
+  --text-label: 10px;
+  --text-label--line-height: 12px;
+  --text-label--letter-spacing: 0.16em;
+  --text-label--font-weight: 600;
+  --text-micro: 11px;
+  --text-micro--line-height: 16px;
+  --text-micro--letter-spacing: 0.01em;
+  --text-micro--font-weight: 500;
+  --text-numeric: 12px;
+  --text-numeric--line-height: 16px;
+  --text-numeric--letter-spacing: -0.01em;
+  --text-numeric--font-weight: 500;
+
+  /* --- Type: standard Tailwind aliases ---------------------------------- */
+  --text-xs: 11px;
+  --text-xs--line-height: 16px;
+  --text-sm: 12px;
+  --text-sm--line-height: 18px;
+  --text-base: 13px;
+  --text-base--line-height: 20px;
+  --text-lg: 16px;
+  --text-lg--line-height: 24px;
+  --text-xl: 22px;
+  --text-xl--line-height: 28px;
+  --text-2xl: 28px;
+  --text-2xl--line-height: 32px;
+
+  /* --- Radii ------------------------------------------------------------ */
+  --radius-xs: 2px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-pill: 999px;
+
+  /* --- Spacing (4 px base) --------------------------------------------- */
+  --spacing: 0.25rem;
+  --spacing-0: 0px;
+  --spacing-px: 1px;
+  --spacing-1: 0.25rem;
+  --spacing-2: 0.5rem;
+  --spacing-3: 0.75rem;
+  --spacing-4: 1rem;
+  --spacing-5: 1.25rem;
+  --spacing-6: 1.5rem;
+  --spacing-8: 2rem;
+  --spacing-10: 2.5rem;
+  --spacing-12: 3rem;
+  --spacing-16: 4rem;
+  --spacing-20: 5rem;
+  --spacing-24: 6rem;
+  --spacing-32: 8rem;
+
+  /* --- Shadows (depth comes from vignette, never from light) ------------ */
+  --shadow-inset-hairline: inset 0 1px 0 0 rgba(255, 255, 255, 0.04);
+  --shadow-panel: 0 1px 0 0 rgba(255, 255, 255, 0.03), 0 18px 40px -24px rgba(0, 0, 0, 0.8);
+  --shadow-raised: 0 24px 60px -32px rgba(0, 0, 0, 0.85);
+  --shadow-focus: 0 0 0 var(--focus-ring-offset) var(--color-void),
+    0 0 0 calc(var(--focus-ring-offset) + var(--focus-ring-width)) var(--focus-ring-color);
+
+  /* --- Focus ring: steel, 2 px + 2 px offset ---------------------------- */
+  --focus-ring-color: var(--color-focus);
+  --focus-ring-width: 2px;
+  --focus-ring-offset: 2px;
+
+  /* --- Motion ------------------------------------------------------------ */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --duration-slow: 320ms;
+
+  /* --- Z-index ------------------------------------------------------------ */
+  --z-base: 0;
+  --z-sticky: 10;
+  --z-dropdown: 20;
+  --z-overlay: 30;
+  --z-modal: 40;
+  --z-toast: 50;
+  --z-tooltip: 60;
+}
