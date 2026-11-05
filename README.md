@@ -1,48 +1,62 @@
 <div align="center">
 
-<img src="docs/assets/logo-mark.png" width="76" height="76" alt="VerdictPay mark" />
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/mark-ink.svg" />
+  <img src="docs/assets/mark-void.svg" width="56" height="56" alt="" />
+</picture>
 
 <h1>VerdictPay</h1>
 
-<p><strong>Win the dispute before the fee attaches.</strong></p>
+<p><strong>Hash-chained proof, deterministic pricing, and an AI that cannot invent a number.</strong></p>
 
-<p>Pre-dispute telemetry, deterministic dispute pricing and an AI rebuttal that cannot
-invent a number, built for PayPal digital-goods merchants.</p>
+<p>Pre-dispute telemetry for PayPal digital-goods disputes.<br/>
+Runs locally: no PayPal account, no model key, no cloud.</p>
 
-<p><code>291 backend tests</code> &nbsp;·&nbsp; <code>26 end-to-end assertions</code> &nbsp;·&nbsp;
-<code>zero API keys to run the demo</code></p>
+<p><sub>291 backend tests &nbsp;·&nbsp; 26 end-to-end assertions &nbsp;·&nbsp; MIT licensed</sub></p>
 
 <p>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-34D399?style=flat-square" alt="MIT license" /></a>
-  <img src="https://img.shields.io/badge/PayPal-Disputes%20v1%20%C2%B7%20Orders%20v2%20%C2%B7%20Subscriptions%20v1-0070BA?style=flat-square" alt="PayPal APIs: Disputes v1, Orders v2, Subscriptions v1" />
-  <img src="https://img.shields.io/badge/AI-OpenAI--compatible%20%2B%20local%20Ollama-34D399?style=flat-square" alt="AI: OpenAI-compatible or local Ollama" />
-  <img src="https://img.shields.io/badge/python-3.12%2B-3776AB?style=flat-square" alt="Python 3.12+" />
-  <img src="https://img.shields.io/badge/Next.js-15-000000?style=flat-square" alt="Next.js 15" />
-  <img src="https://img.shields.io/badge/tests-291%20passing-34D399?style=flat-square" alt="291 tests passing" />
+  <img src="https://img.shields.io/badge/PayPal-Disputes%20v1%20%C2%B7%20Orders%20v2%20%C2%B7%20Subscriptions%20v1-1B2430?style=flat-square&labelColor=0E141B" alt="PayPal APIs: Disputes v1, Orders v2, Subscriptions v1" />
+  <img src="https://img.shields.io/badge/AI-OpenAI--compatible%20%2B%20local%20Ollama-1B2430?style=flat-square&labelColor=0E141B" alt="AI: OpenAI-compatible or local Ollama" />
+  <img src="https://img.shields.io/badge/Python-3.12%2B-1B2430?style=flat-square&labelColor=0E141B" alt="Python 3.12 or newer" />
+  <img src="https://img.shields.io/badge/Next.js-15-1B2430?style=flat-square&labelColor=0E141B" alt="Next.js 15" />
+  <img src="https://img.shields.io/badge/tests-291%20passing-34D399?style=flat-square&labelColor=0E141B" alt="291 tests passing" />
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-34D399?style=flat-square&labelColor=0E141B" alt="License: MIT" /></a>
 </p>
+
+<img src="docs/assets/og-card.png" width="760" alt="VerdictPay card: the headline Win the dispute before the fee attaches, the shield mark, and three chips reading 0-fee deflection, $15/$30 fee-cliff EV, and SHA-256 chain of custody." />
 
 </div>
 
-A working prototype, not a hosted service. It runs on a laptop with no PayPal credentials, no model
-key and no cloud account, and the demo path is the tested path.
+**Jump to:** [quickstart](#quickstart) · [the demo](#the-60-second-demo) ·
+[why this exists](#why-this-exists) · [how it works](#how-it-works) ·
+[the AI air-gap](#the-ai-air-gap) · [API](#api-surface) · [limitations](#honest-limitations)
 
-**Jump to:** [why this exists](#why-this-exists) · [the demo](#the-60-second-demo) ·
-[how it works](#how-it-works) · [quickstart](#quickstart) · [API](#api-surface) ·
-[verification](#verification) · [limitations](#honest-limitations)
+## Quickstart
 
-## Why this exists
+Requires Python 3.12+, Node 20+, `uv` and `pnpm`. SQLite, seed data and the PayPal simulator are local.
 
-PayPal's January 2026 seller-protection rules assume the seller ships a box. SaaS, digital goods and metered AI products ship bytes and API calls, so the standard evidence packet has nothing to attach to.
+```bash
+git clone https://github.com/Divyanshu-kumar14/Verdict-Pay
+cd Verdict-Pay
+make install
+make stack      # seeds the database, boots the API on :8000, asserts the flow, stays up
+make web        # second terminal -> http://localhost:3000
+```
 
-| Gap | What the rule asks for | What it costs the merchant |
-|---|---|---|
-| **SNAD is outside seller protection** | A receipt proves payment, not that the product was consumed | No evidence route at all for a delivered download or an API call |
-| **INR and UNAUTHORIZED need a system of record** | IP, device, delivery time and access proof | The merchant reconstructs that history after the claim has already landed |
-| **Card-funded chargebacks follow Visa CE 3.0** | Two or more prior undisputed transactions sharing an IP or device | History most subscription products never keep in an admissible shape |
-| **The $15 / $30 fee cliff** | A fee attaches when a claim escalates; the $30 high-volume fee is never refunded, even on a win | A cheap claim can cost more to defend than to refund |
-| **Subscription bleed** | An open chargeback on a live subscription | A second chargeback within 30 days, with access still provisioned |
+The API docs are at `http://localhost:8000/docs`. Docker is equivalent:
 
-Fight a $25 claim, win it, and the high-volume fee still lands: +$25 released, -$30 fee, net -$5. With 200 sales in the trailing 90 days, the third dispute moves the rolling ratio from 1.0% to 1.5%, exactly onto PayPal's high-volume threshold; the seeded queue then sits at 2.5–3.0%, so every later fight carries a fee that never comes back. The engine prices that crossing before the action, not after.
+```bash
+cp .env.example .env
+docker compose up --build
+# http://localhost:3000 · API docs http://localhost:8000/docs
+```
+
+Proof without leaving a server behind:
+
+```bash
+make demo     # seed, boot, run the 26 assertions, shut down
+make verify   # the full gate
+```
 
 ## The 60-second demo
 
@@ -56,14 +70,36 @@ Two panes: a buyer storefront on the left, the merchant command center on the ri
 
 The recommendation is not the best raw EV card. In an INQUIRY with complete telemetry the policy takes the zero-fee, evidence-backed message first, because it cannot attract the claim fee and can end the case before escalation. The CLI variant, `make demo`, files INR instead of SNAD and asserts p(win) 95.0% and EV fight -$35.70; both numbers are computed live. There is no hosted URL: the demo runs locally in simulator mode with zero keys, and the numbers above are asserted by [e2e_demo.py](backend/scripts/e2e_demo.py) and documented in [demo.md](docs/demo.md).
 
+## Why this exists
+
+PayPal's January 2026 seller-protection rules assume the seller ships a box. SaaS, digital goods and metered AI products ship bytes and API calls, so the standard evidence packet has nothing to attach to.
+
+| Gap | What the rule asks for | What it costs the merchant |
+|---|---|---|
+| **SNAD is outside seller protection** | A receipt proves payment, not consumption | No evidence route for a download or an API call |
+| **INR / UNAUTHORIZED need a system of record** | IP, device, delivery time and access proof | History gets rebuilt after the claim lands |
+| **Card-funded chargebacks follow Visa CE 3.0** | Two prior undisputed transactions sharing IP or device | Most subscriptions never keep that history |
+| **The $15 / $30 fee cliff** | The $30 fee is never refunded, even on a win | A cheap claim can cost more to defend than to refund |
+| **Subscription bleed** | An open chargeback on a live plan | A second chargeback 30 days later, access still on |
+
+Fight a $25 claim, win it, and the high-volume fee still lands: +$25 released, -$30 fee, net -$5. With 200 sales in the trailing 90 days, the third dispute moves the rolling ratio from 1.0% to 1.5%, exactly onto PayPal's high-volume threshold; the seeded queue then sits at 2.5–3.0%, so every later fight carries a fee that never comes back. The engine prices that crossing before the action, not after.
+
 ## How it works
 
-VerdictPay ingests signed lifecycle events from the merchant's product, links them into a per-payer hash chain, and treats that chain as the system of record PayPal asks for. When a case opens, through the webhook or the sandbox button, it persists the dispute, suspends the recurring subscription inside a bounded, failure-isolated timeout, locks an immutable fact pack, and prices fight, settle and offer with pure functions. The action it takes is filtered by PayPal's returned HATEOAS links, so an action the API would reject is never attempted. Deterministic code decides the money; an optional model writes the prose last.
+VerdictPay ingests signed lifecycle events from the merchant's product, links them into a
+per-payer hash chain, and treats that chain as the system of record PayPal asks for. When a case
+opens, it persists the dispute, suspends the recurring subscription inside a bounded,
+failure-isolated timeout, locks an immutable fact pack, and prices fight, settle and offer with
+pure functions.
+
+The action it takes is filtered by PayPal's returned HATEOAS links, so an action the API would
+reject is never attempted. Deterministic code decides the money; an optional model writes the
+prose last.
 
 FastAPI on Python 3.12+ with async SQLAlchemy (SQLite by default, Postgres through `DATABASE_URL`), a TypeScript SDK, and a Next.js 15 / React 19 / Tailwind 4 / AG Grid Community command center.
 
 ```mermaid
-flowchart LR
+flowchart TD
     A[Buyer checkout] --> B[SDK records 4 signed events]
     B --> C[SHA-256 chain per payer]
     C --> D[PayPal dispute webhook]
@@ -102,7 +138,29 @@ penalty = 3 * 30, only on the dispute that crosses the 1.5% ratio
 
 All amounts are `Decimal`, quantized to cents; every function is pure and unit-tested to the cent in [ev.py](backend/app/domain/disputes/ev.py) and [win_probability.py](backend/app/domain/disputes/win_probability.py).
 
-### AI air-gap
+## Dispute lifecycle
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant M as Merchant app
+    participant V as VerdictPay
+    participant P as PayPal
+    participant B as Buyer
+    B->>M: Open checkout
+    M->>V: Signed events
+    V->>V: Append to chain
+    B->>P: Open dispute
+    P->>V: Signed webhook
+    V->>P: Verify signature
+    V->>P: Suspend subscription
+    V->>V: Lock facts, price EV
+    V->>P: Cheapest legal action
+    P-->>V: Action accepted
+    V-->>M: Case, EV, dossier
+```
+
+## The AI air-gap
 
 A locked fact pack is built from the ledger and Reporting v1 transactions, serialized and frozen. Only then does the narrative provider run: one OpenAI-compatible `/chat/completions` call at temperature 0, against a hosted model or a local Ollama endpoint through `LLM_BASE_URL` and `LLM_MODEL`. The validator scans the output token by token and rejects any number or date absent from the facts, banned phrases and non-ASCII text; any failure, including no key at all, falls back to the deterministic template.
 
@@ -113,41 +171,6 @@ LLM_MODE=openai LLM_BASE_URL=http://localhost:11434/v1 LLM_MODEL=llama3.2 make s
 ```
 
 ReportLab renders a three-page, byte-reproducible PDF, which goes to PayPal as `multipart/related`. The dossier footer stamps `Narrative source: ai:<model>` or `Narrative source: template`. The model never touches EV, p(win), chain hashes or PDF layout, and a test asserts the API key never appears in the rendered document. The fence is [narrative.py](backend/app/domain/evidence/narrative.py); the renderer is [pdf.py](backend/app/domain/evidence/pdf.py).
-
-## What makes it different
-
-- **The price is decided before a word is written.** [ev.py](backend/app/domain/disputes/ev.py) runs first and the fact pack freezes; only then may a model draft. The validator rejects any figure that is not in that pack, so prose cannot move the money.
-- **Illegal actions are unrepresentable.** Triage intersects the case stage with PayPal's returned `links[]` before ranking EV ([state_machine.py](backend/app/domain/disputes/state_machine.py)), so the UI never offers, and the client never sends, an action PayPal would reject.
-- **Tamper detection names the row.** Chain verification recomputes each hash and returns the broken sequence number ([hashing.py](backend/app/domain/telemetry/hashing.py)); one mutated row is reported where it broke, not hidden behind a pass/fail badge.
-- **The fee cliff is priced, not mentioned.** `high_volume` requires 100+ trailing-90-day sales and a post-dispute ratio of at least 1.5%; the crossing dispute carries a $30 fee and $90 of three-dispute penalty exposure, and the EV card shows it.
-- **The demo path is the tested path.** [live.py](backend/app/integrations/paypal/live.py) implements OAuth2, Disputes v1, Orders v2, Subscriptions v1, Reporting v1 and webhook verification; the simulator satisfies the same `PayPalGateway` protocol ([protocol.py](backend/app/domain/protocols.py)), and the 26 end-to-end assertions drive the webhook, containment, EV and evidence upload through it.
-
-## Quickstart
-
-Requires Python 3.12+, Node 20+, `uv` and `pnpm`. SQLite, seed data and the PayPal simulator are local.
-
-```bash
-git clone https://github.com/Divyanshu-kumar14/Verdict-Pay
-cd Verdict-Pay
-make install
-make stack      # seeds the database, boots the API on :8000, asserts the flow, stays up
-make web        # second terminal -> http://localhost:3000
-```
-
-The API docs are at `http://localhost:8000/docs`. Docker is equivalent:
-
-```bash
-cp .env.example .env
-docker compose up --build
-# http://localhost:3000 · API docs http://localhost:8000/docs
-```
-
-Proof without leaving a server behind:
-
-```bash
-make demo     # seed, boot, run the 26 assertions, shut down
-make verify   # the full gate
-```
 
 ## API surface
 

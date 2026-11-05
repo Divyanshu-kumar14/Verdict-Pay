@@ -1,0 +1,13 @@
+<!--
+  VerdictPay - primary mark.
+  Geometric shield on a 24-unit grid: two 45-degree chevron flanks meet at the
+  point, and the verdict check is carved out of the plate as negative space.
+  One evenodd path, inherits currentColor, no fixed size, no background.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+  <path
+    fill="#E6EDF3"
+    fill-rule="evenodd"
+    d="M5.4 2.4H18.6L20.4 4.2V13.2L12 21.6L3.6 13.2V4.2Z M6.17 12.73L10.3 16.85L17.83 9.33L15.77 7.27L10.3 12.75L8.23 10.67Z"
+  />
+</svg>
