@@ -26,7 +26,7 @@ from app.logging_setup import get_logger, log_context
 
 logger = get_logger("verdictpay.llm.openai")
 
-_ENDPOINT: Final[str] = "https://api.openai.com/v1/chat/completions"
+_DEFAULT_BASE_URL: Final[str] = "https://api.openai.com/v1"
 _TIMEOUT_SECONDS: Final[float] = 20.0
 _MAX_ATTEMPTS: Final[int] = 2
 _RETRY_DELAY_SECONDS: Final[float] = 0.2
@@ -43,12 +43,16 @@ class OpenAINarrativeProvider:
 
     def __init__(self, settings: Settings) -> None:
         self._api_key = settings.openai_api_key
-        self._model = settings.openai_model
+        self._model = settings.llm_model or settings.openai_model
+        base_url = settings.llm_base_url or _DEFAULT_BASE_URL
+        self._endpoint = f"{base_url.rstrip('/')}/chat/completions"
+        self._local_endpoint = bool(settings.llm_base_url)
+        self.model_name = self._model
 
     async def compose(self, request: NarrativeRequest) -> str:
         """Write the rebuttal, falling back to the template on any failure."""
         fallback = await TemplateNarrativeProvider().compose(request)
-        if not self._api_key:
+        if not self._api_key and not self._local_endpoint:
             logger.info("openai_unconfigured", extra=log_context(fallback="template"))
             return fallback
 
@@ -73,14 +77,10 @@ class OpenAINarrativeProvider:
         async with httpx.AsyncClient(timeout=httpx.Timeout(_TIMEOUT_SECONDS)) as client:
             for attempt in range(1, _MAX_ATTEMPTS + 1):
                 try:
-                    response = await client.post(
-                        _ENDPOINT,
-                        headers={
-                            "Authorization": f"Bearer {self._api_key}",
-                            "Content-Type": "application/json",
-                        },
-                        json=body,
-                    )
+                    headers = {"Content-Type": "application/json"}
+                    if self._api_key:
+                        headers["Authorization"] = f"Bearer {self._api_key}"
+                    response = await client.post(self._endpoint, headers=headers, json=body)
                 except httpx.HTTPError as exc:
                     logger.warning(
                         "openai_transport_failed",

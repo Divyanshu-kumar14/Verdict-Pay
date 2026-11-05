@@ -370,7 +370,7 @@ Post-implementation review notes, kept because they change how the frozen spec s
 
 | Gate | Result |
 |---|---|
-| `uv run pytest -q` | 282+ passed, 0 failed |
+| `uv run pytest -q` | 291 passed, 0 failed |
 | `uv run ruff check app tests scripts` | clean |
 | `pnpm lint` / `tsc --noEmit` / `next build` | clean, six routes |
 | SDK `vitest` | 24 passed |

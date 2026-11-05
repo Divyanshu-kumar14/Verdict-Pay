@@ -198,13 +198,14 @@ class EvidenceService:
             gateway=self.gateway,
             case=case,
         )
-        narrative = await self._compose(case, facts)
+        narrative, narrative_source = await self._compose(case, facts)
         amount = quantize_money(as_decimal(case.amount_usd))
         pdf_bytes = render_dossier(
             DossierInput(
                 dispute_id=case.dispute_id,
                 facts=facts,
                 narrative=narrative,
+                narrative_source=narrative_source,
                 reason_code=case.reason_code,
                 stage=case.lifecycle_stage,
                 amount_usd=amount,
@@ -222,8 +223,8 @@ class EvidenceService:
         await self.session.commit()
         return pdf_bytes, facts, narrative
 
-    async def _compose(self, case: DisputeCase, facts: schemas.CaseFacts) -> str:
-        """Ask the provider for prose, falling back to the deterministic template."""
+    async def _compose(self, case: DisputeCase, facts: schemas.CaseFacts) -> tuple[str, str]:
+        """Return prose plus an honest source label ("template" or "ai:<model>")."""
         amount = quantize_money(as_decimal(case.amount_usd))
         request = NarrativeRequest(
             reason_code=case.reason_code,
@@ -234,6 +235,13 @@ class EvidenceService:
             facts=facts.model_dump(mode="json"),
             max_chars=NOTES_MAX_CHARS,
         )
+        template_text = build_template_narrative(
+            facts=facts,
+            reason_code=case.reason_code,
+            stage=case.lifecycle_stage,
+            amount_usd=amount,
+            merchant_name=self.settings.demo_merchant_name,
+        )
         text = await self.narrative.compose(request)
         ok, reason = validate_narrative(text, facts)
         if not ok:
@@ -241,14 +249,14 @@ class EvidenceService:
                 "narrative_rejected",
                 extra=log_context(dispute_id=case.dispute_id, reason=reason),
             )
-            text = build_template_narrative(
-                facts=facts,
-                reason_code=case.reason_code,
-                stage=case.lifecycle_stage,
-                amount_usd=amount,
-                merchant_name=self.settings.demo_merchant_name,
-            )
-        return text[:NOTES_MAX_CHARS]
+            text = template_text
+
+        source = "template"
+        provider_mode = getattr(self.narrative, "mode", "template")
+        if provider_mode != "template" and text.strip() != template_text.strip():
+            model = getattr(self.narrative, "model_name", "model")
+            source = f"ai:{model}"
+        return text[:NOTES_MAX_CHARS], source
 
     def _default_key(self, dispute_id: str, pdf_bytes: bytes) -> str:
         digest = hashlib.sha256(pdf_bytes).hexdigest()[:12]

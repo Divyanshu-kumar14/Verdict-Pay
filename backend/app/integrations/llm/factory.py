@@ -7,7 +7,9 @@ from app.domain.protocols import NarrativeProvider
 
 
 def build_narrative_provider(settings: Settings) -> NarrativeProvider:
-    if settings.llm_mode == "openai" and settings.openai_api_key:
+    # A hosted key or a local OpenAI-compatible endpoint both count as configured.
+    configured = bool(settings.openai_api_key or settings.llm_base_url)
+    if settings.llm_mode == "openai" and configured:
         from app.integrations.llm.openai_provider import OpenAINarrativeProvider
 
         return OpenAINarrativeProvider(settings)

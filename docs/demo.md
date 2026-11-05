@@ -23,6 +23,19 @@ make api                       # terminal 1  (API on :8000)
 make web                       # terminal 2  (UI on :3000)
 ```
 
+**Recording tip for the AI requirement:** start a free local model before recording so the
+dossier footer shows the AI path, not the template fallback:
+
+```bash
+ollama pull llama3.2
+LLM_MODE=openai LLM_BASE_URL=http://localhost:11434/v1 LLM_MODEL=llama3.2 make stack
+# dossier footer then reads: "Narrative source: ai:llama3.2. ... model prose is validated
+# against the fact pack ..."
+```
+
+Without a model the same pipeline runs and the footer honestly reads
+`Narrative source: template`. Both are correct; only one demonstrates the AI requirement on camera.
+
 Both paths start in **simulator gateway mode**. If the API is running but the merchant has no
 cases, the right panel shows "No dispute on file" until step 3 — that is expected.
 

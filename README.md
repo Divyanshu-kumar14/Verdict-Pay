@@ -1,6 +1,6 @@
 # 🛡️ VerdictPay
 
-**Pre-dispute telemetry + autonomous PayPal inquiry deflection and claim defense for SaaS, digital goods and metered AI apps.**
+**Pre-dispute telemetry + an AI rebuttal agent + deterministic PayPal dispute defense for SaaS, digital goods and metered AI apps.**
 
 VerdictPay turns a merchant's own product telemetry into a cryptographically chained **system of record**, prices every PayPal dispute with a **deterministic expected-value model**, and takes the **cheapest correct action** through PayPal's HATEOAS dispute state machine — before the $15/$30 dispute fee attaches.
 
@@ -117,6 +117,28 @@ model-generated.
 
 ---
 
+### Where the AI is (and where it deliberately is not)
+
+VerdictPay is an **AI agent with a deterministic core**:
+
+- **AI writes the filing.** The seller-protection rebuttal is composed by an LLM from a *locked*
+  fact pack — the model may rephrase facts, never invent them. A deterministic validator scans the
+  output; any number, date or banned claim (e.g. "100%", "guarantee") that is not present in the
+  facts rejects the draft and falls back to the template.
+- **AI runs locally for free if you want.** Any OpenAI-compatible endpoint works, including
+  [Ollama](https://ollama.com): `ollama pull llama3.2`, then
+  `LLM_MODE=openai LLM_BASE_URL=http://localhost:11434/v1 LLM_MODEL=llama3.2`. No paid key, no
+  data leaves the machine. No model configured? The deterministic template composes the same
+  structure, and the dossier footer says so.
+- **AI never touches money.** Win probability and EV are pure functions with frozen weights
+  (ADR-003). That is a deliberate product decision: a bank filing must be reproducible.
+- **Provenance is stamped in the dossier** footer: `Narrative source: ai:<model>` or
+  `Narrative source: template`, plus "facts locked before generation; model prose validated
+  against the fact pack".
+
+So the AI is not a chat gimmick bolted onto a dashboard — it is the component that drafts the legal
+rebuttal, which is the only part of a dispute a language model should be allowed to write.
+
 ## 🧱 Repository layout
 
 ```
@@ -200,6 +222,7 @@ make test        # backend unit + integration
 make lint        # ruff + eslint
 make typecheck   # tsc --noEmit (frontend + SDK)
 make e2e         # three-button flow against a running API
+make verify-live # real PayPal sandbox check (needs PAYPAL_MODE=live + credentials)
 ```
 
 ---
@@ -217,6 +240,25 @@ make e2e         # three-button flow against a running API
 | **Bryntum / AG Studio** | Not licensed for redistribution. The SLA board uses a **Bryntum-shaped events/resources model** (swap documented in `docs/sponsors.md`), and the analytics canvas is built on AG Grid Community. We say this instead of faking a license. |
 
 ---
+
+## 🏁 Hackathon compliance
+
+Built for the **PayPal AI Hackathon** (Oct 1 – Nov 12, 2026): "meaningfully use both PayPal and AI",
+working prototype, documented, public open-source repo with a visible license.
+
+| Requirement | Status | Evidence |
+|---|---|---|
+| PayPal integration central | ✅ | Disputes v1, Orders v2, Subscriptions v1, Reporting v1, webhook verification — `backend/app/integrations/paypal/` |
+| AI in the product | ✅ | Fact-locked narrative agent (hosted or local Ollama) — `backend/app/integrations/llm/` |
+| Working prototype | ✅ | `make demo` → 26/26 assertions; 291 backend tests |
+| Judges can run it | ✅ | `make stack` (no keys) or `docker compose up --build` |
+| Public open-source repo + license | ✅ | MIT, visible in the GitHub About panel |
+| Text description + Tools field | ✅ draft | [docs/submission.md](./docs/submission.md) |
+| Demo video < 3 min | ⚠️ **action required** | Script + shot list in [docs/demo.md](./docs/demo.md) |
+| Official Rules (eligibility, team, regions) | ⚠️ **verify in the form** | Rules page is Cloudflare-gated; see [docs/hackathon-compliance.md](./docs/hackathon-compliance.md) |
+
+Full audit, including the contradictions found and fixed, is in
+[docs/hackathon-compliance.md](./docs/hackathon-compliance.md).
 
 ## ⚠️ Known limitations
 

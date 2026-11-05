@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     llm_mode: LlmMode = "template"
     openai_api_key: str = ""
     openai_model: str = "gpt-4o-mini"
+    # Any OpenAI-compatible chat endpoint works, including a free local Ollama:
+    #   LLM_BASE_URL=http://localhost:11434/v1  LLM_MODEL=llama3.2
+    llm_base_url: str = ""
+    llm_model: str = ""
 
     # --- sponsor adapters (optional) --------------------------------------
     elastic_url: str = ""

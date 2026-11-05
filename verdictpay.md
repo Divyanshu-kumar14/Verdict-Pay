@@ -1,5 +1,12 @@
 # 🛡️ VerdictPay
 
+> **Status note (2026-11-06): this file is the original concept brief, not the shipping README.**
+> The project is implemented — see [README.md](./README.md) for what actually runs, and
+> [docs/submission.md](./docs/submission.md) for the hackathon submission pack. Claims below that
+> reference a hosted demo at `verdictpay.onrender.com` or proprietary Bryntum / AG Studio
+> runtimes are aspirational and are **not** part of the submitted build. The demo runs locally
+> with `make stack` and needs no PayPal credentials.
+
 **The Open-Source Pre-Dispute Telemetry SDK (`@verdictpay/sdk`) & Autonomous PayPal Inquiry Deflection + Claim Defense Engine for SaaS, Digital Goods, and Metered AI Apps.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](./LICENSE)
@@ -15,7 +22,7 @@
 
 We built VerdictPay so judges can test the entire real-time PayPal Sandbox lifecycle in under 60 seconds without creating an account or configuring API keys:
 
-1. **Open the Hosted Demo:** **[https://verdictpay.onrender.com](https://verdictpay.onrender.com)** *(drops directly into **Judge Sandbox Mode**)*
+1. **Run it locally (no hosted demo in the submitted build):** `make install && make stack && make web` — opens **http://localhost:3000** in **Judge Sandbox Mode***
 2. **Left Split-Screen (Mock AI SaaS Storefront):**
    - Click **`1. Checkout $99 Pro Plan (PayPal Sandbox)`** — executes a live PayPal Orders v2 / Subscriptions v1 sandbox checkout.
    - Click **`2. Simulate SaaS Usage & AI Token Drain`** — triggers `@verdictpay/sdk` to record SHA-256 hash-chained telemetry (IP address, device fingerprint, 15 dashboard logins, 42k LLM tokens consumed, and ZIP deliverable download receipt).

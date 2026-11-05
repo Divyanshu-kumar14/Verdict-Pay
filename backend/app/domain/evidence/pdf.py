@@ -33,9 +33,6 @@ from app.api import schemas
 _CENTS: Final[Decimal] = Decimal("0.01")
 _BODY_FONT: Final[str] = "Helvetica"
 _MONO_FONT: Final[str] = "Courier"
-_FOOTER_TEXT: Final[str] = (
-    "Generated deterministically by VerdictPay; no facts are model-generated."
-)
 _GRID_COLOR = colors.HexColor("#8a8a8a")
 _HEADER_FILL = colors.HexColor("#e8e8e8")
 
@@ -53,6 +50,7 @@ class DossierInput:
     currency: str
     merchant_name: str
     generated_at: datetime
+    narrative_source: str = "template"
 
 
 def _ascii(text: str) -> str:
@@ -142,14 +140,22 @@ def _styles() -> dict[str, ParagraphStyle]:
     }
 
 
-def _footer(canvas: Canvas, doc: Any) -> None:
-    """Draw the deterministic footer with a page number on every page."""
-    canvas.saveState()
-    canvas.setFont(_BODY_FONT, 7)
-    canvas.setFillColor(colors.HexColor("#444444"))
-    canvas.drawString(18 * mm, 10 * mm, _FOOTER_TEXT)
-    canvas.drawRightString(A4[0] - 18 * mm, 10 * mm, f"Page {doc.page}")
-    canvas.restoreState()
+def _make_footer(narrative_source: str) -> Any:
+    """Return a deterministic footer callback that names the narrative source."""
+    footer_text = (
+        f"Narrative source: {_ascii(narrative_source)}. Facts were locked before generation; "
+        "model prose is validated against the fact pack; no fact is model-generated."
+    )
+
+    def _footer(canvas: Canvas, doc: Any) -> None:
+        canvas.saveState()
+        canvas.setFont(_BODY_FONT, 7)
+        canvas.setFillColor(colors.HexColor("#444444"))
+        canvas.drawString(18 * mm, 10 * mm, footer_text)
+        canvas.drawRightString(A4[0] - 18 * mm, 10 * mm, f"Page {doc.page}")
+        canvas.restoreState()
+
+    return _footer
 
 
 def _heading(text: str, styles: dict[str, ParagraphStyle]) -> Paragraph:
@@ -418,5 +424,6 @@ def render_dossier(inputs: DossierInput) -> bytes:
     story.append(_heading("5. Seller Rebuttal", styles))
     story.extend(_rebuttal(inputs, styles))
 
-    document.build(story, onFirstPage=_footer, onLaterPages=_footer)
+    footer = _make_footer(inputs.narrative_source)
+    document.build(story, onFirstPage=footer, onLaterPages=footer)
     return buffer.getvalue()

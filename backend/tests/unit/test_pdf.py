@@ -100,7 +100,17 @@ def test_pdf_text_contains_locked_facts() -> None:
     assert "Evidence Timeline" in text
     assert "Chain of Custody" in text
     assert "Seller Rebuttal" in text
-    assert "no facts are model-generated" in text
+    assert "Narrative source: template" in text
+    assert "no fact is model-generated" in text
+
+
+def test_pdf_names_the_ai_narrative_source() -> None:
+    pdf = render_dossier(_dossier(narrative_source="ai:llama3.2"))
+    reader = PdfReader(BytesIO(pdf))
+    text = " ".join((page.extract_text() or "") for page in reader.pages)
+    normalised = " ".join(text.split())
+    assert "Narrative source: ai:llama3.2" in normalised
+    assert "validated against the fact pack" in normalised
 
 
 def test_pdf_is_byte_reproducible() -> None:
