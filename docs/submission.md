@@ -227,9 +227,9 @@ Latency and timestamps are the only moving values; EV and p(win) are determinist
    badge. Open the repo logged out and screenshot it for the submission.
 6. **Submission window — UNVERIFIED locally.** The stated period is October 1 to November 12, 2026.
    Confirm the deadline and timezone on the Devpost page, and submit with margin.
-7. **Repo sync — ACTION REQUIRED.** The public repo's last push is 2026-11-05T21:19Z, while this
-   working tree still has uncommitted changes and `docs/submission.md` is untracked. Commit and
-   push everything judges need (code, docs, LICENSE, this file), then re-read the GitHub page.
+7. **Repo sync — VERIFIED.** The public `main` branch contains every source file, `LICENSE` and
+   this pack; the tree is clean and local `HEAD` equals `origin/main`. Re-read the GitHub page
+   logged out once more immediately before submitting.
 
 ## 7. FAQ for judges
 
