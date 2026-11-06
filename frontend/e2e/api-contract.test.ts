@@ -80,6 +80,11 @@ describe("api-contract", () => {
     expect(Number(detail.breakdown.ev_fight_usd)).toBeLessThan(0);
   });
 
+  /* The decision is deterministic function of its inputs, but one input is live: the
+     trailing-90-day volume window that ratio_before divides by. Opening any dispute between
+     the two calls below changes that ratio and the two answers diverge for a reason that is
+     not nondeterminism. The e2e config therefore runs these files serially; keep it that way
+     before adding a second writer to this suite. */
   it("recomputes triage deterministically", async () => {
     const disputeId = await findInquiryDisputeId();
     const path = `/api/v1/disputes/${encodeURIComponent(disputeId)}/triage`;
