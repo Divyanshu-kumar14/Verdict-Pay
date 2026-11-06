@@ -11,6 +11,7 @@
 import { useCallback, useRef, useState } from "react";
 
 import { api, toApiError, type ApiError } from "../api";
+import { DEMO_BUYER_CLAIM } from "../constants";
 import { parseContainment } from "../containment";
 import { formatCompactInteger, formatLatency, formatPercent, formatUsd, shortHash } from "../format";
 import type { CheckoutResponse, DisputeSimulationResponse, UsageResponse } from "../types";
@@ -215,6 +216,7 @@ export function useSandboxFlow(): SandboxFlow {
           reason_code: "MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED",
           stage: "INQUIRY",
           channel: "INTERNAL",
+          claim_text: DEMO_BUYER_CLAIM,
         },
         signal,
       );

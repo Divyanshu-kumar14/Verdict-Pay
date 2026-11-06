@@ -227,6 +227,7 @@ export type DisputeSimulationRequestInput = {
   stage?: DisputeStage;
   channel?: DisputeChannel;
   amount_usd?: number;
+  claim_text?: string;
 };
 
 /* -------------------------------------------------------------- disputes */

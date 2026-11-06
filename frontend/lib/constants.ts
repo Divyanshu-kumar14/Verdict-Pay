@@ -4,6 +4,8 @@ export const APP_VERSION = "0.1.0";
 export const DEMO_MERCHANT_NAME = "Aurora Analytics";
 export const DEMO_BUYER_EMAIL = "demo.buyer@aurora.test";
 export const DEMO_BUYER_NAME = "Demo buyer";
+export const DEMO_BUYER_CLAIM =
+  "I paid for the $99 Pro plan but it does not do what was advertised. I want a full refund.";
 
 export const DEMO_PLAN = {
   product: "Aurora Analytics",
