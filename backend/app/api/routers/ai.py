@@ -99,7 +99,12 @@ async def _analyze(
     settings = service.settings
     merchant_name = settings.demo_merchant_name
     stage = detail.stage.value
-    explanation = explain.explain(detail.breakdown, detail.win_probability)
+    # Pass the comparison so the plain-English summary can distinguish the
+    # policy pick from the cheapest modelled loss instead of implying they are
+    # the same decision.
+    explanation = explain.explain(
+        detail.breakdown, detail.win_probability, detail.decision_comparison
+    )
 
     def _finish(
         classification: ClaimClassification,

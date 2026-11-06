@@ -87,14 +87,16 @@ every subsequent fight carries the never-refunded fee. VerdictPay prices that cr
 the action that avoids it — usually a zero-fee evidence-backed inquiry deflection that ends the case
 before a claim fee can attach.
 
-**The demo is 60 seconds and it is not a video.** Two panes: a buyer storefront on the left, the
-merchant command center on the right. Button 1 checks out a $99 Pro plan. Button 2 burns 42,000
-tokens, 15 logins and one signed ZIP. Button 3 files a SNAD claim through the real webhook path and
-the case room prices it live: p(win) 90.0%, EV fight -$41.40, EV settle -$99.00, EV offer -$29.70
-with the best-EV badge, recommendation DEFLECT_INQUIRY at a $0.00 fee. The CLI variant files INR
-instead and asserts p(win) 0.95, EV fight -$35.70. Behind those screens: 296 backend tests, 188 frontend
-unit and component tests, 12 frontend API tests that drive the real server over HTTP, 24 SDK tests, and
-26 end-to-end assertions against the running simulator, all reproducible with `make verify`.
+**The demo is seven steps and it is not a video.** Two panes: a buyer storefront on the left, the
+merchant command center on the right. The steps run checkout, telemetry, chain verification, dispute
+creation, deterministic triage, Gemini analysis and dossier verification, each showing its real
+identifiers and response data. The seeded SNAD claim prices live: p(win) 90.0%, EV fight -$41.40, EV
+settle -$99.00, EV offer -$29.70, policy recommendation DEFLECT_INQUIRY at a $0.00 fee, and a
+decision-comparison panel that names the cheapest modelled loss separately from the policy choice. The
+CLI variant files INR instead and asserts p(win) 0.95, EV fight -$35.70. Behind those screens: the
+backend pytest suite, the frontend unit and component suites, the HTTP contract tests that drive a real
+server, the SDK tests and the end-to-end assertions against the running simulator, all reproducible
+with `make test` and `make demo`.
 
 ## 3. Tools
 
@@ -190,8 +192,8 @@ make web                     # second terminal -> http://localhost:3000
 **Proof without leaving a server behind:**
 
 ```bash
-make demo                    # seed + boot + 26 assertions + shutdown
-make verify                  # ruff + pytest + eslint + tsc + next build + vitest + e2e
+make demo                    # seed + boot + assert the full flow + shutdown
+make verify                  # ruff + pytest + eslint + tsc + next build + vitest + demo
 curl -s localhost:8000/api/v1/health
 ```
 
@@ -217,18 +219,18 @@ Latency and timestamps are the only moving values; EV and p(win) are determinist
 
 | Devpost requirement | Where it is satisfied |
 |---|---|
-| Project meaningfully uses PayPal (developer platform, sandbox) | [live.py](../backend/app/integrations/paypal/live.py) — OAuth2, Disputes v1, Subscriptions v1, Reporting v1, Orders v2, webhook verification. [simulator.py](../backend/app/integrations/paypal/simulator.py) — same protocol, deterministic. [protocol.py](../backend/app/domain/protocols.py) — one boundary, two implementations. |
+| Project meaningfully uses PayPal (developer platform, sandbox) | [live.py](../backend/app/integrations/paypal/live.py) — OAuth2, Disputes v1, Subscriptions v1, Reporting v1, Orders v2, webhook verification. [simulator.py](../backend/app/integrations/paypal/simulator.py) — same protocol, deterministic. [protocols.py](../backend/app/domain/protocols.py) — one boundary, three gateway modes. |
 | Project meaningfully uses AI | [openai_provider.py](../backend/app/integrations/llm/openai_provider.py) + [narrative.py](../backend/app/domain/evidence/narrative.py) validator; template fallback in [template_provider.py](../backend/app/integrations/llm/template_provider.py) |
 | Project + text description | §1 and §2 of this file |
-| Functional demo (run instructions or hosted URL) | Hosted at https://verdictpay-web.onrender.com, or run locally per §5; [README.md](../README.md) quickstart; [demo.md](demo.md) three-button script. |
+| Functional demo (run instructions or hosted URL) | Hosted at https://verdictpay-web.onrender.com, or run locally per §5; [README.md](../README.md) quickstart; [demo.md](demo.md) seven-step script. |
 | "Tools" field | §3 |
 | Public open-source repo, license visible in About | [LICENSE](../LICENSE) (MIT) at repo root; repo URL in §1 |
 | Demo video under 3 minutes on YouTube, showing it working | §4 script; video itself is `[ADD YOUTUBE LINK]` |
-| Judging: Technological Implementation | 520 tests (296 backend, 188 frontend, 12 API end-to-end, 24 SDK) plus 26 E2E assertions, adversarial QA with regressions |
+| Judging: Technological Implementation | Backend pytest suite, frontend vitest suite, SDK vitest suite, the HTTP contract suite and the `make demo` end-to-end assertions, plus adversarial QA with regressions. Run `make test` and `make demo` for current counts. |
 | Judging: Design | [frontend/app/page.tsx](../frontend/app/page.tsx), [SandboxWorkspace.tsx](../frontend/components/sandbox/SandboxWorkspace.tsx), AG Grid queue, EV cards, case room |
 | Judging: Potential Impact | EV model + fee-cliff penalty in [ev.py](../backend/app/domain/disputes/ev.py); $15/$30 fees, 1.5% threshold |
 | Judging: Innovation / Idea | Pre-dispute chain as system of record, action priced before the fee, air-gapped narrative |
-| Judging: Presentation | [demo.md](demo.md) 60-second script; §4 video script |
+| Judging: Presentation | [demo.md](demo.md) seven-step script; §4 video script |
 
 ### UNVERIFIED / ACTION REQUIRED
 
@@ -258,19 +260,23 @@ Latency and timestamps are the only moving values; EV and p(win) are determinist
 
 **Is the PayPal integration real?**
 
-The client is real code against the real REST contracts: OAuth2 credentials, Disputes v1, Subscriptions v1, Reporting v1, Orders v2 and webhook signature verification, with idempotency keys and bounded retries. It is covered by recorded HTTP fixtures ([test_paypal_live.py](../backend/tests/unit/test_paypal_live.py)), not by a live sandbox account: this environment had no credentials and no live transaction was run. What we did run is the simulator behind the same protocol.
+Yes. `backend/scripts/verify_paypal_sandbox.py` runs against `https://api-m.sandbox.paypal.com` with real sandbox credentials and proves three things live: an OAuth2 client-credentials token from `POST /v1/oauth2/token`, a real order from `POST /v2/checkout/orders` (`intent=CAPTURE`, USD 99.00), and an authoritative `GET /v2/checkout/orders/{id}` re-read. Evidence is committed-adjacent at `artifacts/paypal-sandbox-proof.json` and `artifacts/paypal-sandbox-proof.log` — order `0BN11980TR384063M`, status `CREATED`, a real `sandbox.paypal.com/checkoutnow` approval URL, and the PayPal `debug_id` for each call.
+
+What is **not** claimed: the capture. Buyer approval in the sandbox requires a human to open the approval URL and log in as the sandbox buyer, so the script reports `"result": "pass_order_creation_capture_blocked"` and exits 0 with an explicit `blocker` field instead of fabricating a `capture_id`. Run it yourself with `--wait-for-approval 120` to complete the lifecycle by hand.
+
+The client is real code against the real REST contracts: OAuth2, Disputes v1, Subscriptions v1, Reporting v1, Orders v2 and webhook signature verification, with idempotency keys and bounded retries. The offline suite replays those calls with recorded HTTP fixtures ([test_paypal_live.py](../backend/tests/unit/test_paypal_live.py)).
 
 **Why a simulator by default?**
 
-Because the demo must run on a judge's laptop with no account, and the demo path should be the tested path. `PAYPAL_MODE=simulator` is the default in [config.py](../backend/app/config.py); both implementations satisfy one `PayPalGateway` protocol and the domain never imports `httpx`. Set `PAYPAL_MODE=live` plus credentials and the same calls go to `api-m.sandbox.paypal.com`.
+Because the demo must run on a judge's laptop with no account, and the demo path should be the tested path. `PAYPAL_MODE=LOCAL_SIMULATOR` is the default in [config.py](../backend/app/config.py); all three modes satisfy one `PayPalGateway` protocol and the domain never imports `httpx`. Set `PAYPAL_MODE=PAYPAL_SANDBOX` plus credentials and the same calls go to `api-m.sandbox.paypal.com`. A network mode with missing credentials yields an `UnconfiguredGateway`: the app boots and `/health` names the blockers, but every payment call fails loudly rather than silently degrading, so a simulated call can never be mistaken for a real one.
 
 **Where is the AI?**
 
-In the narrative layer only: a chat-completions call writes the seller-protection rebuttal from a locked fact pack, after the deterministic engine has already priced the dispute. It is disabled by default (`LLM_MODE=template`), so the demo never depends on a key. Every EV number, win probability, chain hash and PDF layout is pure code.
+Gemini, `gemini-2.5-flash` by default, does two things: classify the buyer's claim into one of five categories, and draft the seller-protection narrative from a locked fact pack. A deterministic validator then rejects any draft containing a number or date that is not in the facts. It never sets the win probability, the EV figures, the recommended action or PayPal eligibility — those are computed before the model is reached. With no `GEMINI_API_KEY` the same endpoint returns a correct result from a keyword classifier and a template narrative, marked `degraded=true` with a reason. Full disclosure: [ai-disclosure.md](ai-disclosure.md).
 
 **Does it need keys?**
 
-No. The default stack needs no PayPal key, no OpenAI key, no Elastic cluster, no Supabase project. Optional keys only switch adapters: `OPENAI_API_KEY` or `LLM_BASE_URL` for the narrative, `ELASTIC_URL` for the optional search adapter, `PAYPAL_CLIENT_ID`/`SECRET` for live mode.
+No. The default stack needs no PayPal key, no Gemini key, no OpenAI key, no Elastic cluster, no Supabase project. Optional keys only switch adapters: `GEMINI_API_KEY` for the dispute AI layer, `OPENAI_API_KEY` or `LLM_BASE_URL` for the dossier narrative provider, `ELASTIC_URL` for the optional search adapter, `PAYPAL_CLIENT_ID`/`SECRET` for `PAYPAL_SANDBOX`.
 
 **Is the data real?**
 

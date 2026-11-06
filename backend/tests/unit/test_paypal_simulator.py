@@ -106,7 +106,7 @@ def _signed_headers(secret: str, raw_body: bytes, *, timestamp: str) -> dict[str
 
 async def test_protocol_conformance(gateway: SimulatorGateway) -> None:
     assert isinstance(gateway, PayPalGateway)
-    assert gateway.mode == "simulator"
+    assert gateway.mode == "LOCAL_SIMULATOR"
 
 
 async def test_create_order_ids_are_deterministic(settings: Settings) -> None:
@@ -124,7 +124,9 @@ async def test_create_order_ids_are_deterministic(settings: Settings) -> None:
     subscription_suffix = hashlib.sha256(f"sub:{PAYER}:1".encode()).hexdigest().upper()[:10]
     assert first.order_id == second.order_id == f"5O1{order_suffix}"
     assert first.subscription_id == second.subscription_id == f"I-BW{subscription_suffix}"
-    assert first.status == "COMPLETED"
+    # An order is not a payment: it must start CREATED, not COMPLETED.
+    assert first.status == "CREATED"
+    assert first.lifecycle_stage == "CREATED"
     assert first.approval_url == (
         f"https://sandbox.paypal.com/checkoutnow?token={first.order_id}"
     )
@@ -623,3 +625,32 @@ async def test_hydrate_restores_persisted_cases(
 
     suspended = await target.suspend_subscription(order.subscription_id, "restored case")
     assert suspended.body["status"] == "SUSPENDED"
+
+async def test_order_lifecycle_requires_approval_before_capture(settings: Settings) -> None:
+    """The simulator must model PayPal: an unapproved order cannot be captured."""
+    gateway = SimulatorGateway(settings)
+    order = await gateway.create_order(payer_id=PAYER, amount=Decimal("99.00"))
+    assert order.lifecycle_stage == "CREATED"
+
+    with pytest.raises(UpstreamError, match="order_not_approved"):
+        await gateway.capture_order(order.order_id)
+
+    approved = await gateway.approve_order(order.order_id)
+    assert approved.status == "APPROVED"
+    assert approved.lifecycle_stage == "APPROVED"
+
+    capture = await gateway.capture_order(order.order_id)
+    assert capture.capture_status == "COMPLETED"
+    assert capture.completed is True
+    assert capture.capture_id and capture.capture_id.startswith("CAP")
+    assert capture.amount == Decimal("99.00")
+
+    final = await gateway.get_order(order.order_id)
+    assert final.status == "COMPLETED"
+    assert final.lifecycle_stage == "CAPTURED"
+
+
+async def test_get_order_rejects_unknown_id(settings: Settings) -> None:
+    gateway = SimulatorGateway(settings)
+    with pytest.raises(UpstreamError, match="order_not_found"):
+        await gateway.get_order("5O1DOESNOTEXIST")

@@ -8,11 +8,16 @@ import {
   evPathValue,
   feeComponents,
   fightEvNote,
+  highVolumeRuleNote,
   offerEvNote,
+  ratioExplain,
+  ratioRelationNote,
+  ratioVerdict,
   settleEvNote,
+  thresholdLabel,
   type EvPath,
 } from "@/lib/ev";
-import { formatPercent, formatUsd } from "@/lib/format";
+import { formatInteger, formatPercent, formatUsd } from "@/lib/format";
 import type { DisputeAction, DisputeDetail, EvBreakdown } from "@/lib/types";
 import { TONE_BAR, type Tone } from "@/lib/vocab";
 
@@ -57,7 +62,7 @@ function waterflowSteps(breakdown: EvBreakdown): FlowStep[] {
       label: "Penalty cliff",
       value: breakdown.penalty_ratio_usd,
       tone: "negative",
-      note: breakdown.crosses_cliff ? "ratio crosses 1.5%" : "ratio below threshold",
+      note: ratioRelationNote(breakdown),
     },
   ];
 }
@@ -250,23 +255,16 @@ export function EvWaterfall({ detail }: { detail: DisputeDetail }) {
           </div>
         </div>
 
-        <p className="row-rule mt-2 pt-3 text-sm leading-relaxed text-ink">
-          {breakdown.crosses_cliff ? (
-            <>
-              The dispute ratio moves from{" "}
-              <span className="num">{formatPercent(breakdown.ratio_before, 2)}</span> to{" "}
-              <span className="num">{formatPercent(breakdown.ratio_after, 2)}</span>, crossing the
-              1.5% line. A penalty of{" "}
-              <span className="num">{formatUsd(breakdown.penalty_ratio_usd)}</span> lands on the
-              fight path.
-            </>
-          ) : (
-            <>
-              The dispute ratio sits at{" "}
-              <span className="num">{formatPercent(breakdown.ratio_after, 2)}</span>, below the 1.5%
-              line. No cliff penalty lands on the fight path.
-            </>
-          )}
+        {/* The sentence is generated from the payload's own threshold and its
+            authoritative relation, so it can never print a ratio beside a
+            threshold it does not actually sit behind. */}
+        <p className="row-rule mt-2 pt-3 text-sm leading-relaxed text-ink">{ratioExplain(breakdown)}</p>
+        {/* How the line itself is computed — the threshold and the sales gate both
+            come from the payload, so the explanation cannot drift from scoring. */}
+        <p className="mt-1.5 text-xs text-muted">
+          The line is {highVolumeRuleNote(breakdown)}:{" "}
+          <span className="num">{formatInteger(breakdown.disputes_3mo)}</span> disputes on{" "}
+          <span className="num">{formatInteger(breakdown.sales_3mo)}</span> sales.
         </p>
 
         <div className="mt-4 grid gap-x-8 gap-y-3 sm:grid-cols-2" aria-label="Fee components">
@@ -285,11 +283,9 @@ export function EvWaterfall({ detail }: { detail: DisputeDetail }) {
       <PanelFooter className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <span className="num text-sm text-muted">
           Dispute ratio {formatPercent(breakdown.ratio_before, 2)} to{" "}
-          {formatPercent(breakdown.ratio_after, 2)}, cliff at 1.5%
+          {formatPercent(breakdown.ratio_after, 2)}, cliff at {thresholdLabel(breakdown)}
         </span>
-        <span className="text-sm text-muted">
-          {breakdown.crosses_cliff ? "Crosses the cliff" : "Below the cliff"}
-        </span>
+        <span className="text-sm text-muted">{ratioVerdict(breakdown)}</span>
       </PanelFooter>
 
       {breakdown.formula_notes.length > 0 ? (

@@ -68,6 +68,26 @@ class UpstreamError(VerdictPayError):
     status_code = 502
     default_message = "Upstream PayPal call failed."
 
+    def __init__(
+        self,
+        message: str | None = None,
+        *,
+        details: list[dict[str, Any]] | None = None,
+        code: str | None = None,
+        status_code: int | None = None,
+        issues: list[str] | None = None,
+        upstream_status: int | None = None,
+    ) -> None:
+        super().__init__(message, details=details, code=code, status_code=status_code)
+        # Machine-readable PayPal ``details[].issue`` tokens, so callers can
+        # branch on ORDER_NOT_APPROVED rather than parsing the message text.
+        self.issues = issues or []
+        self.upstream_status = upstream_status
+
+    def has_issue(self, issue: str) -> bool:
+        """True when PayPal reported this exact issue token."""
+        return issue in self.issues
+
 
 class IllegalDisputeActionError(VerdictPayError):
     code = "illegal_dispute_action"

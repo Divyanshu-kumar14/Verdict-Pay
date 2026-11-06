@@ -63,8 +63,21 @@ services:
         value: "true"
       - key: DATABASE_URL
         value: sqlite+aiosqlite:////app/data/verdictpay.db
+      # PAYPAL_MODE must be PAYPAL_SANDBOX for a judge to see real PayPal
+      # activity. It previously said "simulator", which is why the public
+      # deployment reported "Gateway: simulator" while the credentials below
+      # were already configured. Set to LOCAL_SIMULATOR to run keyless.
       - key: PAYPAL_MODE
-        value: simulator
+        value: PAYPAL_SANDBOX
+      # Real money never moves: PAYPAL_LIVE additionally requires this flag.
+      - key: ALLOW_PAYPAL_LIVE
+        value: "false"
+      # Where PayPal returns the buyer after approving. Leave empty to fall back
+      # to the gateway's default deep link.
+      - key: PAYPAL_RETURN_URL
+        sync: false
+      - key: PAYPAL_CANCEL_URL
+        sync: false
       - key: LLM_MODE
         value: gemini
       - key: GEMINI_MODEL

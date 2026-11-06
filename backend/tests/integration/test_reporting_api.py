@@ -90,7 +90,7 @@ async def test_transactions_are_cached_newest_first(client) -> None:
     assert {row["currency"] for row in rows} == {"USD"}
     assert {row["client_ip"] for row in rows} == {"203.0.113.42"}
     assert {row["device_fingerprint"] for row in rows} == {"fp_89a7c6d5e4f3"}
-    assert {row["source"] for row in rows} == {"simulator"}
+    assert {row["source"] for row in rows} == {"local_simulator"}
     assert all(row["order_id"] is None for row in rows)
     assert len({row["transaction_id"] for row in rows}) == 3
     assert all(row["created_at"].endswith(("Z", "+00:00")) for row in rows)

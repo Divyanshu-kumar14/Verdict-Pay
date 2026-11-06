@@ -31,7 +31,8 @@ from app.db.models import (
     TelemetryLedger,
     WebhookEventRecord,
 )
-from app.domain.disputes.ev import EvInputs, compute_ev, to_breakdown
+from app.domain.disputes.decision import compare, policy_reason_from
+from app.domain.disputes.ev import EvInputs, compute_ev, ratio_relation, to_breakdown
 from app.domain.disputes.state_machine import ensure_allowed, to_allowed_actions
 from app.domain.disputes.triage import TriageDecision, TriageInput, decide
 from app.domain.disputes.win_probability import SignalSet, completeness, score_win_probability
@@ -135,6 +136,7 @@ def to_dispute_summary(case: DisputeCase) -> schemas.DisputeSummary:
     """Project a case row onto the frozen list/detail summary contract."""
     return schemas.DisputeSummary(
         dispute_id=case.dispute_id,
+        run_id=getattr(case, "run_id", None),
         payer_id=case.paypal_payer_id,
         order_id=case.paypal_order_id,
         subscription_id=case.paypal_subscription_id,
@@ -382,7 +384,9 @@ async def assemble_case_facts(
     await cache_transactions(
         session,
         merchant_id=merchant_id,
-        paypal_mode=settings.paypal_mode,
+        # ``provenance`` is the stable machine label ("local_simulator",
+        # "paypal_sandbox", "paypal_live"), not the mutable config spelling.
+        paypal_mode=settings.provenance,
         records=transactions,
     )
     verification = await TelemetryService(session, merchant_id=merchant_id).verify(
@@ -617,16 +621,26 @@ class DisputeService:
                 .order_by(DisputeActionRecord.created_at.desc(), DisputeActionRecord.id)
             )
         ).all()
+        allowed_actions = to_allowed_actions(stage=stage, channel=channel, links=links)
         return schemas.DisputeDetail(
             **to_dispute_summary(case).model_dump(),
             breakdown=breakdown,
             win_probability=win_probability,
-            allowed_actions=to_allowed_actions(stage=stage, channel=channel, links=links),
+            allowed_actions=allowed_actions,
             rationale=[
                 schemas.RationaleItem.model_validate(item) for item in (case.action_rationale or [])
             ],
             facts=facts,
             actions=[to_action_record(row) for row in action_rows],
+            # Policy recommendation and cheapest modelled loss are two different
+            # questions. Answering both here — from the same persisted breakdown —
+            # is what stops a reader from believing "recommended" means "cheapest".
+            decision_comparison=compare(
+                breakdown=breakdown,
+                policy_action=RecommendedAction(case.recommended_action),
+                allowed_actions=allowed_actions,
+                policy_reason=policy_reason_from(case.action_rationale or []),
+            ),
         )
 
     # ------------------------------------------------------------------ actions
@@ -753,9 +767,11 @@ class DisputeService:
         ]
         sales_3mo, disputes_3mo = await self._volume_counts()
         ratio = disputes_3mo / max(sales_3mo, 1)
+        # Same helper the case detail uses, so the dashboard and the case room can
+        # never disagree about which side of the 1.5% line a merchant is on.
         high_volume = (
             sales_3mo >= self.settings.high_volume_min_sales
-            and ratio >= float(self.settings.ratio_threshold)
+            and ratio_relation(ratio, self.settings.ratio_threshold) == "at_or_above"
         )
         payers = sorted({case.paypal_payer_id for case in cases})
         chain_verified = 0
@@ -918,7 +934,7 @@ class DisputeService:
         ratio_after = (disputes_3mo + 1) / max(sales_3mo, 1)
         high_volume = (
             sales_3mo >= self.settings.high_volume_min_sales
-            and ratio_after >= float(self.settings.ratio_threshold)
+            and ratio_relation(ratio_after, self.settings.ratio_threshold) == "at_or_above"
         )
         stage = DisputeStage(case.lifecycle_stage)
         channel = DisputeChannel(case.dispute_channel)

@@ -20,9 +20,11 @@ while this was written (277 → 306 → 174), so line numbers are indicative; se
 | 6 | Inconsistent voice | "click in order" (L29) next to "Requires Python 3.12+" (L90); noun-phrase headings next to a claim heading; sentences run 8 to 90 words | Third person to describe, imperative to instruct, <= 35 words per sentence |
 
 Two blockers outside the six: `<!-- BADGES -->` (L9) and `<!-- DIAGRAM: PIPELINE -->` (L45) ship as invisible
-gaps on the page — fill or delete them before merge. The test count is asserted in three places; it is
-now the measured 520 (296 pytest + 188 frontend unit + 12 frontend API + 24 SDK), re-confirmed by
-collecting rather than by counting `def test_` functions, which undercounts parametrisation.
+gaps on the page — fill or delete them before merge. The test count was previously asserted in three
+places; it is no longer quoted anywhere, because a fixed total goes stale the moment a test is added.
+The `tests` badge now names the runners (`pytest + vitest`) and the reader is pointed at `make test`.
+Counts, when quoted at all, must come from collecting rather than from counting `def test_` functions,
+which undercounts parametrisation.
 
 ## 2. Hero spec
 
@@ -50,19 +52,19 @@ collecting rather than by counting `def test_` functions, which undercounts para
 
   <h1>VerdictPay</h1>
 
-  <p><strong>Hash-chained proof, deterministic pricing, and an AI that cannot invent a number.</strong></p>
+  <p><strong>Deterministic dispute economics, Gemini-drafted evidence, and a dossier a judge can verify.</strong></p>
 
-  <p>Pre-dispute telemetry for PayPal digital-goods disputes.<br/>
-  Runs locally: no PayPal account, no model key, no cloud.</p>
+  <p>Pre-dispute telemetry and fee-cliff aware triage for PayPal digital-goods disputes.<br/>
+  Runs locally with no PayPal account and no model key.</p>
 
-  <p><sub>520 tests &nbsp;·&nbsp; 26 end-to-end assertions &nbsp;·&nbsp; MIT</sub></p>
+  <p><sub>Real PayPal Sandbox OAuth2 + orders &nbsp;·&nbsp; SHA-256 chained custody &nbsp;·&nbsp; MIT licensed</sub></p>
 
   <p>
     <img src="https://img.shields.io/badge/PayPal-Disputes%20v1%20%C2%B7%20Orders%20v2%20%C2%B7%20Subscriptions%20v1-222224?style=flat-square&labelColor=131217" alt="PayPal APIs: Disputes v1, Orders v2, Subscriptions v1" />
-    <img src="https://img.shields.io/badge/AI-OpenAI--compatible%20%2B%20local%20Ollama-222224?style=flat-square&labelColor=131217" alt="AI: OpenAI-compatible or local Ollama" />
+    <img src="https://img.shields.io/badge/AI-Gemini%20classify%20%2B%20draft%20%C2%B7%20deterministic%20EV-222224?style=flat-square&labelColor=131217" alt="AI: Gemini classifies and drafts; the deterministic engine decides EV" />
     <img src="https://img.shields.io/badge/Python-3.12%2B-222224?style=flat-square&labelColor=131217" alt="Python 3.12 or newer" />
     <img src="https://img.shields.io/badge/Next.js-15-222224?style=flat-square&labelColor=131217" alt="Next.js 15" />
-    <img src="https://img.shields.io/badge/tests-520%20passing-44A282?style=flat-square&labelColor=131217" alt="520 tests passing" />
+    <img src="https://img.shields.io/badge/tests-pytest%20%2B%20vitest-44A282?style=flat-square&labelColor=131217" alt="Test suites run with pytest and vitest" />
     <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-44A282?style=flat-square&labelColor=131217" alt="License: MIT" /></a>
   </p>
 
@@ -227,7 +229,7 @@ The OG card is dark by brand; cap it at 760 so it reads as a card rather than a 
 
 - Alt text: the banner states the claim and the chip text; the mark is `alt=""` (decorative, the H1 names the
   product). Never "image of" and never the filename.
-- Link text: badge alt is the meaning ("License: MIT", "520 tests passing"), not "badge" or "here"; file links
+- Link text: badge alt is the meaning ("License: MIT", "Test suites run with pytest and vitest"), not "badge" or "here"; file links
   name the file (`hashing.py`, not "this file").
 - Heading order: one H1, twelve H2, at most two H3, no H4. `<summary>` is a disclosure label, not a heading.
 - Tables: a header row always, no empty header cell, sentence-case heads, three columns maximum.

@@ -169,6 +169,9 @@ export type StorefrontProps = {
   onCheckout: () => Promise<void>;
   onUsage: () => Promise<void>;
   onDispute: () => Promise<void>;
+  onEvidence: () => Promise<void>;
+  onAI: () => Promise<void>;
+  onDossier: () => Promise<void>;
   onReset: () => void;
 };
 
@@ -189,20 +192,26 @@ function buildSteps(
   onCheckout: () => Promise<void>,
   onUsage: () => Promise<void>,
   onDispute: () => Promise<void>,
+  onEvidence: () => Promise<void>,
+  onAI: () => Promise<void>,
+  onDossier: () => Promise<void>,
   busy: boolean,
 ): DemoStep[] {
   const canCheckout = !busy && state.checkoutStatus !== "success";
   const canUsage = !busy && state.checkoutStatus === "success" && state.usageStatus !== "success";
   const canDispute = !busy && state.usageStatus === "success" && state.disputeStatus !== "success";
+  const canEvidence = !busy && state.disputeStatus === "success" && state.evidenceStatus !== "success";
+  const canAI = !busy && state.disputeStatus === "success" && state.aiStatus !== "success";
+  const canDossier = !busy && state.disputeStatus === "success" && state.dossierStatus !== "success";
   const reasonShort = REASON_META.MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED.short;
   return [
     {
       key: "checkout",
       index: 1,
-      title: "Checkout",
-      subtitle: "PayPal Orders v2 · ToS captured",
+      title: "PayPal Checkout",
+      subtitle: "Orders v2 · ToS captured · lifecycle_stage=CREATED",
       successDetail: state.checkout
-        ? "order " + shortHash(state.checkout.order_id, 10, 4) + " · payer " + shortHash(state.checkout.payer_id, 8, 4) + " · " + formatUsd(state.checkout.amount_usd)
+        ? "order " + shortHash(state.checkout.order_id, 10, 4) + " · payer " + shortHash(state.checkout.payer_id, 8, 4) + " · " + formatUsd(state.checkout.amount_usd) + " · " + (state.checkout.gateway_mode ?? "simulator")
         : null,
       action: "Run checkout",
       status: state.checkoutStatus,
@@ -235,25 +244,64 @@ function buildSteps(
       canRun: canDispute || state.disputeStatus === "error",
       run: onDispute,
     },
+    {
+      key: "evidence",
+      index: 4,
+      title: "Verify evidence",
+      subtitle: "SHA-256 chain head + append-only validation",
+      successDetail: state.evidenceStatus === "success"
+        ? "Chain verified"
+        : null,
+      action: "Verify evidence",
+      status: state.evidenceStatus,
+      canRun: canEvidence || state.evidenceStatus === "error",
+      run: onEvidence,
+    },
+    {
+      key: "ai",
+      index: 5,
+      title: "Run AI analysis",
+      subtitle: "Gemini claim classification + evidence drafting",
+      successDetail: state.aiStatus === "success"
+        ? "AI analysis complete"
+        : null,
+      action: "Run AI analysis",
+      status: state.aiStatus,
+      canRun: canAI || state.aiStatus === "error",
+      run: onAI,
+    },
+    {
+      key: "dossier",
+      index: 6,
+      title: "Generate dossier",
+      subtitle: "PDF + SHA-256 manifest + tamper verification",
+      successDetail: state.dossierStatus === "success"
+        ? "Dossier verified"
+        : null,
+      action: "Generate dossier",
+      status: state.dossierStatus,
+      canRun: canDossier || state.dossierStatus === "error",
+      run: onDossier,
+    },
   ];
 }
 
 /**
- * The three demo steps as a horizontal progress rail: completed / active /
+ * The seven demo steps as a horizontal progress rail: completed / active /
  * locked / failed states with animated connectors. Locked steps stay visible
  * with a tooltip explaining the dependency; failed steps retry inline.
  */
-export function DemoStepper({ state, onCheckout, onUsage, onDispute, onReset }: StorefrontProps) {
+export function DemoStepper({ state, onCheckout, onUsage, onDispute, onEvidence, onAI, onDossier, onReset }: StorefrontProps) {
   const reduced = useReducedMotion() ?? false;
-  const busy = state.checkoutStatus === "running" || state.usageStatus === "running" || state.disputeStatus === "running";
-  const steps = buildSteps(state, onCheckout, onUsage, onDispute, busy);
+  const busy = state.checkoutStatus === "running" || state.usageStatus === "running" || state.disputeStatus === "running" || state.evidenceStatus === "running" || state.aiStatus === "running" || state.dossierStatus === "running";
+  const steps = buildSteps(state, onCheckout, onUsage, onDispute, onEvidence, onAI, onDossier, busy);
   const nextKey = steps.find((step) => step.status !== "success" && step.canRun)?.key ?? null;
   const doneCount = steps.filter((step) => step.status === "success").length;
   return (
     <section aria-label="Demo steps" className="panel overflow-hidden">
       <div className="flex items-center justify-between gap-3 border-b border-rule px-4 py-2.5 sm:px-5">
         <h2 className="title-card">Steps</h2>
-        <span className="num text-xs text-muted">{doneCount} of 3 done</span>
+        <span className="num text-xs text-muted">{doneCount} of 6 done</span>
       </div>
       <ol className="flex min-w-0 flex-col px-4 py-4 sm:px-5">
         {steps.map((step, i) => {
@@ -264,7 +312,7 @@ export function DemoStepper({ state, onCheckout, onUsage, onDispute, onReset }: 
           const isFailed = step.status === "error";
           const isLocked = rail === "locked";
           const detail = rail === "completed" && step.successDetail ? step.successDetail : step.subtitle;
-          const label = step.action + " (step " + step.index + " of 3: " + step.title + ", " + (isLocked ? "locked" : badge.label) + ")";
+          const label = step.action + " (step " + step.index + " of 6: " + step.title + ", " + (isLocked ? "locked" : badge.label) + ")";
           const isLast = i === steps.length - 1;
           const button = (
             <Button size="sm" variant={isNext && !isFailed ? "primary" : "secondary"} loading={isRunning} disabled={!step.canRun} icon={isFailed ? <RefreshCw size={12} aria-hidden /> : undefined} aria-label={label} onClick={() => { void step.run(); }}>
@@ -332,14 +380,14 @@ export function RealVsSim() {
   );
 }
 
-export function Storefront({ state, onCheckout, onUsage, onDispute, onReset }: StorefrontProps) {
-  const retry = state.disputeStatus === "error" ? onDispute : state.usageStatus === "error" ? onUsage : state.checkoutStatus === "error" ? onCheckout : null;
+export function Storefront({ state, onCheckout, onUsage, onDispute, onEvidence, onAI, onDossier, onReset }: StorefrontProps) {
+  const retry = state.dossierStatus === "error" ? onDossier : state.aiStatus === "error" ? onAI : state.evidenceStatus === "error" ? onEvidence : state.disputeStatus === "error" ? onDispute : state.usageStatus === "error" ? onUsage : state.checkoutStatus === "error" ? onCheckout : null;
   return (
     <Panel>
       <PanelBody className="grid gap-5 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
         <MerchantCheckout state={state} />
         <section aria-label="Demo flow" className="min-w-0">
-          <DemoStepper state={state} onCheckout={onCheckout} onUsage={onUsage} onDispute={onDispute} onReset={onReset} />
+          <DemoStepper state={state} onCheckout={onCheckout} onUsage={onUsage} onDispute={onDispute} onEvidence={onEvidence} onAI={onAI} onDossier={onDossier} onReset={onReset} />
           {state.error ? (
             <ErrorBanner className="mt-3" error={state.error} context="The step stopped before it changed server state. Fix the connection and retry." onRetry={retry ? () => { void retry(); } : undefined} />
           ) : null}

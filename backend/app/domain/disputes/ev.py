@@ -13,12 +13,15 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
+from typing import Literal
 
 from app.api import schemas
 from app.domain.enums import RecommendedAction
 
 _CENTS = Decimal("0.01")
 _ZERO = Decimal("0.00")
+# Ratios are compared at six decimal places so 0.015 == 1.5% exactly.
+_RATIO_PRECISION = Decimal("0.000001")
 _ACCEPT_CLAIM_FEE = Decimal("15.00")
 
 # Frozen tie-break order (section 5): cheaper fee first, then this rank.
@@ -56,6 +59,7 @@ class EvInputs:
     high_volume_fee_usd: Decimal = Decimal("30.00")
     ratio_threshold: Decimal = Decimal("0.015")
     penalty_multiplier: Decimal = Decimal("3")
+    high_volume_min_sales: int = 100
 
 
 @dataclass(frozen=True, slots=True)
@@ -252,8 +256,25 @@ def _formula_notes(
     return tuple(notes)
 
 
+def ratio_relation(ratio: float | Decimal, threshold: float | Decimal) -> Literal["below", "at_or_above"]:
+    """Which side of the high-volume line a dispute ratio sits on.
+
+    One implementation for the dashboard, the case room, the dossier and the AI
+    context. Comparing at micro-ratio precision keeps the 1.50% boundary exact:
+    ``150/5000`` must read ``at_or_above``, never ``below``.
+    """
+    observed = Decimal(str(ratio)).quantize(_RATIO_PRECISION)
+    limit = Decimal(str(threshold)).quantize(_RATIO_PRECISION)
+    return "at_or_above" if observed >= limit else "below"
+
+
 def to_breakdown(inputs: EvInputs, outcome: EvOutcome) -> schemas.EvBreakdown:
     """Project the frozen inputs/outcome pair onto the API response contract."""
+    # The threshold relationship is derived here, once, from the same numbers
+    # that drive the arithmetic. Renderers read ``ratio_relation`` instead of
+    # inferring it from ``crosses_cliff`` (which is false both below the line
+    # and already above it — the source of the "3.00% is below 1.5%" defect).
+    relation = ratio_relation(outcome.ratio_after, inputs.ratio_threshold)
     return schemas.EvBreakdown(
         amount_usd=inputs.amount_usd,
         high_volume=inputs.high_volume,
@@ -262,6 +283,12 @@ def to_breakdown(inputs: EvInputs, outcome: EvOutcome) -> schemas.EvBreakdown:
         penalty_ratio_usd=outcome.penalty_ratio,
         ratio_before=outcome.ratio_before,
         ratio_after=outcome.ratio_after,
+        ratio_threshold=float(inputs.ratio_threshold),
+        ratio_relation=relation,
+        threshold_crossed_now=outcome.crosses_cliff,
+        high_volume_min_sales=inputs.high_volume_min_sales,
+        sales_3mo=inputs.sales_3mo,
+        disputes_3mo=inputs.disputes_3mo,
         crosses_cliff=outcome.crosses_cliff,
         p_win=inputs.p_win,
         offer_ratio=float(inputs.offer_ratio),

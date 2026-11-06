@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -49,6 +49,29 @@ class ErrorResponse(ApiModel):
 
 
 # --------------------------------------------------------------------------- health
+class GatewayStatus(ApiModel):
+    """Judge-facing gateway configuration completeness — never any secret."""
+
+    mode: str
+    readiness: Literal["ready", "degraded", "unconfigured"]
+    sandbox: bool
+    live: bool
+    simulation: bool
+    api_base: str
+    credentials_configured: bool
+    webhook_configured: bool
+    blockers: list[str] = Field(default_factory=list)
+
+
+class AiStatus(ApiModel):
+    provider: str
+    model: str
+    enabled: bool
+    configured: bool
+    timeout_ms: int
+    prompt_version: str
+
+
 class HealthResponse(ApiModel):
     status: str
     mode: str
@@ -59,6 +82,8 @@ class HealthResponse(ApiModel):
     demo_mode: bool
     uptime_seconds: float
     timestamp: datetime
+    gateway_status: GatewayStatus | None = None
+    ai_status: AiStatus | None = None
 
 
 # --------------------------------------------------------------------------- telemetry
@@ -145,6 +170,13 @@ class CustomerTimeline(ApiModel):
 
 # --------------------------------------------------------------------------- disputes
 class EvBreakdown(ApiModel):
+    """Every number the UI needs to explain the fight/settle/offer decision.
+
+    ``ratio_relation`` is the authoritative word ("below" / "at_or_above") — a
+    renderer must never infer it from ``crosses_cliff``, because "no cliff" also
+    describes a merchant who is *already above* the threshold.
+    """
+
     amount_usd: Decimal
     high_volume: bool
     high_volume_fee_usd: Decimal
@@ -152,6 +184,13 @@ class EvBreakdown(ApiModel):
     penalty_ratio_usd: Decimal
     ratio_before: float
     ratio_after: float
+    # Threshold metadata: the policy line, plus a machine-checkable verdict.
+    ratio_threshold: float
+    ratio_relation: Literal["below", "at_or_above"]
+    threshold_crossed_now: bool
+    high_volume_min_sales: int
+    sales_3mo: int
+    disputes_3mo: int
     crosses_cliff: bool
     p_win: float
     offer_ratio: float
@@ -226,6 +265,7 @@ class ActionRecord(ApiModel):
 
 class DisputeSummary(ApiModel):
     dispute_id: str
+    run_id: str | None = None
     payer_id: str
     order_id: str
     subscription_id: str | None
@@ -248,6 +288,37 @@ class DisputeSummary(ApiModel):
     updated_at: datetime
 
 
+class DecisionOption(ApiModel):
+    """One row of the Fight / Settle / Make-offer comparison."""
+
+    action: RecommendedAction
+    label: str
+    value_usd: Decimal
+    detail: str
+    is_policy_choice: bool
+    is_best_financial: bool
+    paypal_action_available: bool
+    paypal_action_reason: str | None = None
+
+
+class DecisionComparison(ApiModel):
+    """Policy recommendation vs lowest modelled loss — two distinct concepts.
+
+    ``agree`` is false when the policy the rules select is not the cheapest
+    modelled outcome; the UI must then explain both rather than implying that
+    the recommended action is the financially optimal one.
+    """
+
+    policy_action: RecommendedAction
+    policy_label: str
+    policy_reason: str
+    best_financial_action: RecommendedAction
+    best_financial_label: str
+    agree: bool
+    divergence_explanation: str | None = None
+    options: list[DecisionOption] = Field(default_factory=list)
+
+
 class DisputeDetail(DisputeSummary):
     breakdown: EvBreakdown
     win_probability: WinProbability
@@ -255,6 +326,7 @@ class DisputeDetail(DisputeSummary):
     rationale: list[RationaleItem]
     facts: CaseFacts
     actions: list[ActionRecord]
+    decision_comparison: DecisionComparison | None = None
 
 
 class ActionRequest(ApiModel):
@@ -288,10 +360,15 @@ class CheckoutRequest(ApiModel):
     payer_id: str | None = None
     email: str | None = None
     tos_version: str = "v2.4-2026-01"
+    # A judge run gets its own run_id so old cases never bleed into a new demo.
+    run_id: str | None = Field(default=None, max_length=64)
 
 
 class CheckoutResponse(ApiModel):
+    """A created order. NOT a payment — status must be read literally."""
+
     order_id: str
+    run_id: str | None = None
     subscription_id: str | None
     payer_id: str
     status: str
@@ -299,12 +376,63 @@ class CheckoutResponse(ApiModel):
     currency: str
     approval_url: str
     created_at: datetime
+    gateway_mode: str
+    sandbox: bool
+    lifecycle_stage: Literal["CREATED", "APPROVED", "CAPTURED", "FAILED"] = "CREATED"
+    # Honest provenance: "paypal_sandbox" means a real PayPal order exists.
+    provenance: Literal["paypal_sandbox", "paypal_live", "local_simulator"] = "local_simulator"
+    paypal_debug_id: str | None = None
+
+
+class OrderStatusResponse(ApiModel):
+    """Live order state straight from PayPal (or the simulator)."""
+
+    order_id: str
+    run_id: str | None = None
+    status: str
+    lifecycle_stage: Literal["CREATED", "APPROVED", "CAPTURED", "FAILED"]
+    amount_usd: Decimal
+    currency: str
+    payer_id: str | None = None
+    approval_url: str | None = None
+    capture_id: str | None = None
+    capture_status: str | None = None
+    captured_at: datetime | None = None
+    gateway_mode: str
+    provenance: Literal["paypal_sandbox", "paypal_live", "local_simulator"]
+    paypal_debug_id: str | None = None
+    payer_action_required: bool = False
+    detail: str | None = None
+
+
+class CaptureRequest(ApiModel):
+    run_id: str | None = Field(default=None, max_length=64)
+
+
+class CaptureResponse(ApiModel):
+    """Result of POST /orders/{id}/capture — the only path that yields money."""
+
+    order_id: str
+    run_id: str | None = None
+    capture_id: str | None
+    capture_status: str
+    lifecycle_stage: Literal["CAPTURED", "FAILED"]
+    amount_usd: Decimal
+    currency: str
+    payer_id: str | None = None
+    captured_at: datetime | None = None
+    transaction: TransactionOut | None = None
+    gateway_mode: str
+    provenance: Literal["paypal_sandbox", "paypal_live", "local_simulator"]
+    paypal_debug_id: str | None = None
+    detail: str | None = None
 
 
 class UsageRequest(ApiModel):
     payer_id: str
     order_id: str
     subscription_id: str | None = None
+    run_id: str | None = Field(default=None, max_length=64)
     logins: int = Field(default=15, ge=0, le=1000)
     tokens: int = Field(default=42000, ge=0, le=10_000_000)
     export_name: str = "q3_financial_model.xlsx"
@@ -316,11 +444,13 @@ class UsageResponse(ApiModel):
     chain: ChainVerification
     events: list[TelemetryEventOut]
     totals: dict[str, int]
+    run_id: str | None = None
 
 
 class DisputeSimulationRequest(ApiModel):
     payer_id: str | None = None
     order_id: str | None = None
+    run_id: str | None = Field(default=None, max_length=64)
     reason_code: DisputeReason = DisputeReason.MERCHANDISE_OR_SERVICE_NOT_RECEIVED
     stage: DisputeStage = DisputeStage.INQUIRY
     channel: DisputeChannel = DisputeChannel.INTERNAL
@@ -333,6 +463,47 @@ class DisputeSimulationResponse(ApiModel):
     webhook_event_id: str
     triage_triggered: bool
     containment: dict[str, Any] = Field(default_factory=dict)
+    # "internal_test_event" is a locally generated event that travelled through
+    # the real verification pipeline; it is NOT a PayPal-originated dispute.
+    origin: Literal["internal_test_event", "paypal_sandbox"] = "internal_test_event"
+
+
+# --------------------------------------------------------------------------- demo runs
+class DemoRun(ApiModel):
+    """One isolated judge run: its own order, telemetry, dispute and analysis."""
+
+    run_id: str
+    created_at: datetime
+    updated_at: datetime
+    status: Literal["OPEN", "COMPLETED", "ABANDONED"]
+    gateway_mode: str
+    provenance: Literal["paypal_sandbox", "paypal_live", "local_simulator"]
+    payer_id: str | None = None
+    order_id: str | None = None
+    capture_id: str | None = None
+    order_stage: Literal["CREATED", "APPROVED", "CAPTURED", "FAILED"] | None = None
+    amount_usd: Decimal | None = None
+    currency: str | None = None
+    chain_head: str | None = None
+    chain_valid: bool | None = None
+    event_count: int = 0
+    dispute_id: str | None = None
+    ai_analyzed: bool = False
+    dossier_available: bool = False
+    steps: dict[str, str] = Field(default_factory=dict)
+
+
+class DemoRunList(ApiModel):
+    runs: list[DemoRun] = Field(default_factory=list)
+    total: int
+
+
+class DemoResetResponse(ApiModel):
+    run_id: str
+    cleared_runs: int
+    cleared_cases: int
+    merchant_records_preserved: int
+    detail: str
 
 
 # --------------------------------------------------------------------------- reporting
@@ -388,3 +559,33 @@ class Page[T](ApiModel):
 
 class DisputePage(Page[DisputeSummary]):
     pass
+
+
+# --------------------------------------------------------------------------- dossier integrity
+class DossierManifest(ApiModel):
+    """Everything a judge needs to verify a downloaded dossier independently."""
+
+    dispute_id: str
+    run_id: str | None = None
+    filename: str
+    sha256: str
+    size_bytes: int
+    generated_at: datetime
+    chain_head: str | None = None
+    chain_valid: bool | None = None
+    event_count: int = 0
+    narrative_source: str = "template"
+    snapshot_hash: str | None = None
+    download_url: str
+
+
+class DossierVerification(ApiModel):
+    """Result of re-rendering the dossier from its frozen snapshot and diffing."""
+
+    dispute_id: str
+    verified: bool
+    expected_sha256: str | None = None
+    actual_sha256: str | None = None
+    verified_at: datetime
+    detail: str
+    checks: dict[str, bool] = Field(default_factory=dict)

@@ -246,3 +246,65 @@ def test_invalid_probability_rejected() -> None:
 def test_float_money_rejected() -> None:
     with pytest.raises(TypeError, match="amount_usd"):
         compute_ev(EvInputs(amount_usd=25.0, p_win=0.7, sales_3mo=200, disputes_3mo=1))  # type: ignore[arg-type]
+
+
+# --------------------------------------------------------------- threshold relation
+def test_ratio_relation_reports_already_above_threshold_not_below() -> None:
+    """Regression for the live defect: 3.00% was described as below 1.50%.
+
+    150 disputes over 5,000 sales is 3.00%, twice the 1.5% line. ``crosses_cliff``
+    is false — not because the merchant is under the line, but because they were
+    already over it — so the breakdown must state the relation explicitly.
+    """
+    inputs = EvInputs(
+        amount_usd=Decimal("99.00"),
+        p_win=0.42,
+        sales_3mo=5000,
+        disputes_3mo=149,
+    )
+
+    breakdown = to_breakdown(inputs, compute_ev(inputs))
+
+    assert breakdown.ratio_after == pytest.approx(0.03)
+    assert breakdown.ratio_threshold == pytest.approx(0.015)
+    assert breakdown.ratio_relation == "at_or_above"
+    assert breakdown.threshold_crossed_now is False
+    assert breakdown.crosses_cliff is False
+    # No new cliff penalty, yet the high-volume regime is already in force.
+    assert breakdown.penalty_ratio_usd == Decimal("0.00")
+    assert breakdown.high_volume_fee_usd == Decimal("30.00")
+
+
+def test_ratio_relation_reports_below_when_under_the_line() -> None:
+    inputs = EvInputs(amount_usd=Decimal("99.00"), p_win=0.5, sales_3mo=5000, disputes_3mo=10)
+
+    breakdown = to_breakdown(inputs, compute_ev(inputs))
+
+    assert breakdown.ratio_relation == "below"
+    assert breakdown.threshold_crossed_now is False
+    assert breakdown.disputes_3mo == 10
+
+
+def test_threshold_crossed_now_is_flagged_and_penalised() -> None:
+    """One more dispute tips a below-line merchant over: that is the cliff."""
+    inputs = EvInputs(amount_usd=Decimal("99.00"), p_win=0.5, sales_3mo=5000, disputes_3mo=74)
+
+    outcome = compute_ev(inputs)
+    breakdown = to_breakdown(inputs, outcome)
+
+    # 74/5000 = 1.48% -> 75/5000 = 1.50%, exactly the boundary.
+    assert breakdown.ratio_relation == "at_or_above"
+    assert breakdown.threshold_crossed_now is True
+    assert breakdown.crosses_cliff is True
+    assert breakdown.penalty_ratio_usd == Decimal("90.00")
+
+
+def test_breakdown_carries_the_engine_inputs_used() -> None:
+    inputs = EvInputs(amount_usd=Decimal("99.00"), p_win=0.42, sales_3mo=5000, disputes_3mo=149)
+
+    breakdown = to_breakdown(inputs, compute_ev(inputs))
+
+    assert breakdown.sales_3mo == 5000
+    assert breakdown.disputes_3mo == 149
+    assert breakdown.high_volume_min_sales == inputs.high_volume_min_sales
+    assert breakdown.ratio_relation in {"below", "at_or_above"}

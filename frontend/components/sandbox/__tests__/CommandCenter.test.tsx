@@ -21,6 +21,14 @@ function makeBreakdown(overrides: Partial<EvBreakdown> = {}): EvBreakdown {
     penalty_ratio_usd: 0,
     ratio_before: 0.01,
     ratio_after: 0.012,
+    // The threshold is data now, and this word is the backend's authoritative
+    // verdict on which side of it the ratio sits.
+    ratio_threshold: 0.015,
+    ratio_relation: "below",
+    threshold_crossed_now: false,
+    high_volume_min_sales: 100,
+    sales_3mo: 1000,
+    disputes_3mo: 12,
     crosses_cliff: false,
     p_win: 0.68,
     offer_ratio: 0.5,

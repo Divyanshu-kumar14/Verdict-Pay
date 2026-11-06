@@ -23,14 +23,24 @@ the default database, and the narrative layer has a template implementation.
 | TypeScript SDK | [packages/verdictpay-sdk](../packages/verdictpay-sdk) | Batched, HMAC-signed pre-dispute telemetry keyed to PayPal `payer_id` / `order_id`. |
 
 The PayPal boundary is the only place that talks to PayPal. It is a protocol
-([backend/app/domain/protocols.py](../backend/app/domain/protocols.py)) with two real
-implementations, chosen by `PAYPAL_MODE` in
-[backend/app/integrations/paypal/factory.py](../backend/app/integrations/paypal/factory.py):
+([backend/app/domain/protocols.py](../backend/app/domain/protocols.py)) chosen by `PAYPAL_MODE` in
+[backend/app/integrations/paypal/factory.py](../backend/app/integrations/paypal/factory.py), with
+three modes over two implementations:
 
-* `SimulatorGateway` — deterministic, keyless, records every call. This is the demo and
-  E2E path, not a mock.
-* `LiveGateway` — OAuth token cache, idempotent retries, real PayPal Disputes / Orders /
-  Subscriptions / Reporting endpoints, webhook signature verification.
+* `LOCAL_SIMULATOR` → `SimulatorGateway` — deterministic, keyless, records every call, derives
+  order/subscription/capture ids from SHA-256 of the input. This is the demo and E2E path, not a
+  mock. It exposes `approve_order()` as a test affordance for the CREATED → APPROVED → CAPTURED
+  lifecycle.
+* `PAYPAL_SANDBOX` → `LivePayPalGateway` against `https://api-m.sandbox.paypal.com` — OAuth token
+  cache, idempotent retries, real PayPal Disputes / Orders / Subscriptions / Reporting endpoints,
+  webhook signature verification.
+* `PAYPAL_LIVE` → the same `LivePayPalGateway` against `https://api-m.paypal.com`. It moves real
+  money and refuses to start unless `ALLOW_PAYPAL_LIVE=true`.
+
+A network mode with missing credentials builds an `UnconfiguredGateway` instead of the live client.
+The app stays bootable so `/health` can name the blockers, but every payment call fails loudly and it
+never falls back to the simulator. `POST /sandbox/orders/{id}/approve` returns `409
+approve_not_supported` outside the simulator: buyer approval in the sandbox is a human action.
 
 ---
 
@@ -320,8 +330,14 @@ flowchart LR
 
 ## 8. Known limits (stated, not hidden)
 
-* The simulator is the default and the tested path; `LiveGateway` is covered by recorded
-  fixtures, not by a live PayPal sandbox run in this environment.
+* The simulator is the default and the tested path. The network gateway is covered by recorded
+  fixtures, and the real sandbox has been exercised for OAuth2 and order creation
+  (`artifacts/paypal-sandbox-proof.json`). Capture against the real network is not proven in this
+  checkout because it needs a human to approve the order as the sandbox buyer; the verification
+  script reports that as `pass_order_creation_capture_blocked` rather than claiming a capture.
+* The internal test-dispute event (`POST /sandbox/dispute`, `origin: "internal_test_event"`) is not a
+  PayPal-originated dispute. It travels the real ingest, triage and dossier pipeline, but PayPal did
+  not create it. Only webhook- or API-originated disputes are labelled `paypal_sandbox`.
 * Telemetry ingest requires an HMAC signature by default
   (`REQUIRE_SIGNED_TELEMETRY=true`); disabling it is a deliberate, local-only escape hatch.
 * The Elastic adapter implements the `SearchIndex` port and is selected by configuration;

@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import logging
 
+from pydantic import ValidationError
+
+from app.api import schemas
 from app.config import Settings
 from app.domain.evidence.narrative import (
     build_template_narrative,
@@ -18,7 +21,7 @@ from app.domain.evidence.narrative import (
 from app.domain.protocols import NarrativeRequest
 from app.integrations.ai.client import GeminiClient
 from app.integrations.ai.prompts.v1 import DRAFT_SYSTEM, DRAFT_USER_TEMPLATE
-from app.integrations.llm.template_provider import truncate_narrative
+from app.integrations.llm.template_provider import _ascii, truncate_narrative
 
 logger = logging.getLogger(__name__)
 
@@ -71,10 +74,41 @@ class GeminiNarrativeProvider:
             return truncate_narrative(narrative, request.max_chars)
         except Exception as exc:
             logger.warning("gemini compose falling back to template: %s", exc)
-            return build_template_narrative(
-                facts=request.facts,
-                reason_code=request.reason_code,
-                stage=request.stage,
-                amount_usd=request.amount_usd,
-                merchant_name=request.merchant_name,
+            return self._template(request)
+
+    @staticmethod
+    def _hydrate_facts(request: NarrativeRequest) -> schemas.CaseFacts | None:
+        """Rebuild the locked fact view from the serialized mapping.
+
+        ``NarrativeRequest.facts`` is a plain Mapping on purpose — the provider
+        contract is JSON-shaped. ``build_template_narrative`` needs the typed
+        model, so hydrate here; returning None means the degraded path must not
+        assert any evidentiary figure.
+        """
+        if isinstance(request.facts, schemas.CaseFacts):
+            return request.facts
+        try:
+            return schemas.CaseFacts.model_validate(dict(request.facts))
+        except (ValidationError, TypeError, ValueError):
+            return None
+
+    def _template(self, request: NarrativeRequest) -> str:
+        """Deterministic fallback: the same prose path the offline mode uses."""
+        facts = self._hydrate_facts(request)
+        if facts is None:
+            return truncate_narrative(
+                _ascii(
+                    f"{request.merchant_name} responds to the PayPal dispute for payer "
+                    f"{request.payer_id} under reason code {request.reason_code} at stage "
+                    f"{request.stage}. The locked fact pack could not be rehydrated, so no "
+                    "evidentiary figures are asserted in this response."
+                ),
+                request.max_chars,
             )
+        return build_template_narrative(
+            facts=facts,
+            reason_code=request.reason_code,
+            stage=request.stage,
+            amount_usd=request.amount_usd,
+            merchant_name=request.merchant_name,
+        )

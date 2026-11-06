@@ -145,5 +145,6 @@ closes one of the two remaining hackathon items; the demo video is the other.
 
 - **The demo video** (< 3 min, required by the hackathon) does not exist yet.
 - **Elastic, Supabase** — optional adapters, not wired into the demo path.
-- **PayPal live mode** — the deploy defaults to `PAYPAL_MODE=simulator`. To use the
-  sandbox, set the three `PAYPAL_*` values and change `PAYPAL_MODE` to `live`.
+- **PayPal network mode** — the deploy defaults to `PAYPAL_MODE=LOCAL_SIMULATOR`. To use the
+  sandbox, set `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` and change `PAYPAL_MODE` to
+  `PAYPAL_SANDBOX`. `PAYPAL_LIVE` additionally requires `ALLOW_PAYPAL_LIVE=true`.

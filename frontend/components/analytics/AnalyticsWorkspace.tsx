@@ -33,7 +33,7 @@ import {
 import { EvidenceSignal, type SignalStep } from "@/components/evidence/EvidenceSignal";
 import { SealMark } from "@/components/evidence/SealMark";
 import { Magnetic } from "@/components/motion/Magnetic";
-import { PageHeader, PageMeta } from "@/components/PageHeader";
+import { PageHeader } from "@/components/PageHeader";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -245,6 +245,38 @@ function Kpi({
   );
 }
 
+/**
+ * One cell of the KPI rail. `min-w-0` is load-bearing: without it a long figure
+ * refuses to shrink inside the grid track and pushes the document wider than the
+ * viewport, which is exactly the defect this rail replaced.
+ */
+function MetricCell({
+  label,
+  value,
+  tone = "neutral",
+  className,
+}: {
+  label: string;
+  value: ReactNode;
+  tone?: "positive" | "warning" | "negative" | "accent" | "neutral";
+  className?: string;
+}): React.JSX.Element {
+  const INK = {
+    positive: "text-positive",
+    warning: "text-warning",
+    negative: "text-negative",
+    accent: "text-accent",
+    neutral: "text-ink",
+  } as const;
+
+  return (
+    <div className={cn("min-w-0 px-4 py-3.5", className)}>
+      <p className="label">{label}</p>
+      <div className={cn("value mt-1.5 text-lg", INK[tone])}>{value}</div>
+    </div>
+  );
+}
+
 /** /analytics - the exposure ledger: counted KPIs, ranked breakdown, intake, fee cliff, queue. */
 export function AnalyticsWorkspace(): React.JSX.Element {
   const now = useNow(30000);
@@ -373,8 +405,11 @@ export function AnalyticsWorkspace(): React.JSX.Element {
           state: "verified",
         },
         {
+          /* The label has to follow the flag, not assume it: showing "within the
+             limit" beside a red "Above threshold" badge is the same class of
+             self-contradiction as the 3.00%-below-1.50% EV copy. */
           id: "limit",
-          label: "Within high-volume limit",
+          label: highVolume.flag ? "Above high-volume limit" : "Within high-volume limit",
           meta: formatPercent(highVolume.threshold, 2) + " threshold",
           state: highVolume.flag ? "failed" : "verified",
         },
@@ -414,91 +449,107 @@ export function AnalyticsWorkspace(): React.JSX.Element {
   return (
     <div className="min-w-0 space-y-6">
       <PageHeader
-        className="lg:flex-wrap lg:gap-y-5"
         title="Analytics"
         description={
           <span className="title-section">
             Last {range} days to {formatDayLabel(nowMs)}
           </span>
         }
-        meta={
-          <>
-            <PageMeta
-              label="Open exposure"
-              value={
-                <Kpi
-                  ready={ready}
-                  value={report?.total_exposure_usd ?? 0}
-                  format={formatUsd}
-                  prefix="-"
-                  sub="At risk across open cases"
-                />
-              }
-            />
-            <PageMeta
-              label="Open cases"
-              value={
-                <Kpi
-                  ready={ready}
-                  value={report?.open_cases ?? 0}
-                  format={formatInteger}
-                  sub={
-                    report
-                      ? formatInteger(report.in_inquiry) + " inquiry · " + formatInteger(report.in_claim) + " claim"
-                      : ""
-                  }
-                />
-              }
-            />
-            <PageMeta
-              label="Protected"
-              value={
-                <Kpi
-                  ready={ready}
-                  value={report?.protected_usd ?? 0}
-                  format={formatUsd}
-                  prefix="+"
-                  sub="Recovered via protection"
-                />
-              }
-            />
-            <PageMeta
-              label="Fees avoided"
-              value={
-                <Kpi
-                  ready={ready}
-                  value={report?.fees_avoided_usd ?? 0}
-                  format={formatUsd}
-                  prefix="+"
-                  sub="Waived on won claims"
-                />
-              }
-            />
-            <PageMeta
-              label="Avg p(win)"
-              value={
-                <Kpi
-                  ready={ready}
-                  value={report?.avg_p_win ?? 0}
-                  format={(n) => formatPercent(n, 1)}
-                  sub="Across open cases"
-                />
-              }
-            />
-            <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                loading={summary.refreshing}
-                icon={<RefreshCw size={12} aria-hidden />}
-                onClick={summary.refresh}
-              >
-                Refresh
-              </Button>
-            </div>
-          </>
+        actions={
+          <Button
+            variant="ghost"
+            size="sm"
+            loading={summary.refreshing}
+            icon={<RefreshCw size={12} aria-hidden />}
+            onClick={summary.refresh}
+          >
+            Refresh
+          </Button>
         }
       />
+
+      {/* The five portfolio KPIs used to ride in PageHeader's `meta` slot, which is
+          `shrink-0`: at the 1024px lg breakpoint that row could not shrink, so it
+          pushed the document to 1112px wide. As their own grid they wrap and
+          shrink with the parent, and every figure stays visible. */}
+      <Panel className="overflow-hidden">
+        <div className="grid gap-px bg-rule sm:grid-cols-2 xl:grid-cols-5">
+          <MetricCell
+            className="bg-surface"
+            label="Open exposure"
+            tone="negative"
+            value={
+              <Kpi
+                ready={ready}
+                value={report?.total_exposure_usd ?? 0}
+                format={formatUsd}
+                prefix="-"
+                sub="At risk across open cases"
+              />
+            }
+          />
+          <MetricCell
+            className="bg-surface"
+            label="Open cases"
+            value={
+              <Kpi
+                ready={ready}
+                value={report?.open_cases ?? 0}
+                format={formatInteger}
+                sub={
+                  report
+                    ? formatInteger(report.in_inquiry) +
+                      " inquiry · " +
+                      formatInteger(report.in_claim) +
+                      " claim"
+                    : ""
+                }
+              />
+            }
+          />
+          <MetricCell
+            className="bg-surface"
+            label="Protected"
+            tone="positive"
+            value={
+              <Kpi
+                ready={ready}
+                value={report?.protected_usd ?? 0}
+                format={formatUsd}
+                prefix="+"
+                sub="Recovered via protection"
+              />
+            }
+          />
+          <MetricCell
+            className="bg-surface"
+            label="Fees avoided"
+            tone="positive"
+            value={
+              <Kpi
+                ready={ready}
+                value={report?.fees_avoided_usd ?? 0}
+                format={formatUsd}
+                prefix="+"
+                sub="Waived on won claims"
+              />
+            }
+          />
+          <MetricCell
+            className="bg-surface sm:col-span-2 xl:col-span-1"
+            label="Avg p(win)"
+            tone="accent"
+            value={
+              <Kpi
+                ready={ready}
+                value={report?.avg_p_win ?? 0}
+                format={(n) => formatPercent(n, 1)}
+                sub="Across open cases"
+              />
+            }
+          />
+        </div>
+      </Panel>
 
       {summary.error ? (
         <ErrorBanner

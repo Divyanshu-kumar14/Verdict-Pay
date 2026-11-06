@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 from decimal import Decimal
+from enum import StrEnum
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -16,8 +17,41 @@ from pydantic import field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 AppEnv = Literal["local", "test", "production"]
-PayPalMode = Literal["simulator", "live"]
 LlmMode = Literal["template", "openai", "gemini"]
+
+PAYPAL_SANDBOX_BASE = "https://api-m.sandbox.paypal.com"
+PAYPAL_LIVE_BASE = "https://api-m.paypal.com"
+
+
+class GatewayMode(StrEnum):
+    """The three gateway modes the product exposes, in escalating trust order.
+
+    ``LOCAL_SIMULATOR`` never touches the network. ``PAYPAL_SANDBOX`` calls the
+    real PayPal API against the free sandbox. ``PAYPAL_LIVE`` moves real money
+    and therefore demands an explicit opt-in.
+    """
+
+    LOCAL_SIMULATOR = "LOCAL_SIMULATOR"
+    PAYPAL_SANDBOX = "PAYPAL_SANDBOX"
+    PAYPAL_LIVE = "PAYPAL_LIVE"
+
+
+_LocalAliases = frozenset({"local_simulator", "simulator", "local", "mock", "test"})
+_SandboxAliases = frozenset({"paypal_sandbox", "sandbox"})
+_LiveAliases = frozenset({"paypal_live", "production"})
+# Internal marker: the legacy "live" token, resolved against the API base.
+_LEGACY_LIVE_MARKER = "__legacy_live__"
+
+
+def _legacy_mode_for(base: str) -> GatewayMode:
+    """Old-style ``live`` means production only if the base really is production.
+
+    With no explicit base there is nothing saying "production", and the
+    historical default was the sandbox, so an unset base stays on the sandbox.
+    """
+    if not base:
+        return GatewayMode.PAYPAL_SANDBOX
+    return GatewayMode.PAYPAL_SANDBOX if "sandbox" in base.lower() else GatewayMode.PAYPAL_LIVE
 
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
 _REPO_DIR = _BACKEND_DIR.parent
@@ -44,12 +78,20 @@ class Settings(BaseSettings):
     allowed_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     # --- PayPal -----------------------------------------------------------
-    paypal_mode: PayPalMode = "simulator"
-    paypal_api_base: str = "https://api-m.sandbox.paypal.com"
+    # Accepted values (case-insensitive): LOCAL_SIMULATOR | PAYPAL_SANDBOX |
+    # PAYPAL_LIVE plus the legacy aliases "simulator" and "live".
+    paypal_mode: str = "LOCAL_SIMULATOR"
+    paypal_api_base: str = ""
     paypal_client_id: str = ""
     paypal_client_secret: str = ""
     paypal_webhook_id: str = ""
     paypal_timeout_seconds: float = 15.0
+    # PAYPAL_LIVE moves real money; this second switch stops a typo in
+    # PAYPAL_MODE alone from turning the demo into a payment processor.
+    allow_paypal_live: bool = False
+    # Where PayPal sends the buyer after approval / cancellation.
+    paypal_return_url: str = ""
+    paypal_cancel_url: str = ""
 
     # --- secrets / auth ---------------------------------------------------
     verdictpay_api_key: str = "vp_demo_sk_local"
@@ -114,8 +156,60 @@ class Settings(BaseSettings):
             return ",".join(str(item) for item in value)
         return value
 
+    @field_validator("paypal_mode", mode="before")
+    @classmethod
+    def _normalise_paypal_mode(cls, value: object) -> object:
+        """Accept the canonical three modes plus the legacy aliases.
+
+        The legacy ``live`` token is kept as a marker here and resolved in the
+        model validator below, where the configured API base is already known.
+        """
+        if value is None:
+            return GatewayMode.LOCAL_SIMULATOR.value
+        token = str(value).strip().lower().replace("-", "_").replace(" ", "_")
+        if token == "live":
+            return _LEGACY_LIVE_MARKER
+        if token in _LiveAliases:
+            return GatewayMode.PAYPAL_LIVE.value
+        if token in _SandboxAliases:
+            return GatewayMode.PAYPAL_SANDBOX.value
+        if token in _LocalAliases:
+            return GatewayMode.LOCAL_SIMULATOR.value
+        raise ValueError(
+            "paypal_mode must be one of LOCAL_SIMULATOR, PAYPAL_SANDBOX, PAYPAL_LIVE "
+            f"(or legacy simulator/live); got {value!r}"
+        )
+
+    @model_validator(mode="after")
+    def _resolve_gateway_mode(self) -> Settings:
+        """Resolve the legacy marker against the API base, then pin the base.
+
+        ``PAYPAL_MODE=live`` historically meant "call the real PayPal API", and
+        the historical default base was the sandbox. Resolving the alias from the
+        endpoint keeps old configs pointing at the sandbox while an explicitly
+        production base still lands on PAYPAL_LIVE (and its double opt-in).
+        """
+        base = (self.paypal_api_base or "").strip().rstrip("/")
+        mode = self.paypal_mode
+        if mode == _LEGACY_LIVE_MARKER:
+            object.__setattr__(self, "paypal_mode", _legacy_mode_for(base).value)
+        if not base:
+            resolved = self.gateway_mode
+            base = (
+                PAYPAL_LIVE_BASE
+                if resolved is GatewayMode.PAYPAL_LIVE
+                else PAYPAL_SANDBOX_BASE
+            )
+        object.__setattr__(self, "paypal_api_base", base)
+        return self
+
     @model_validator(mode="after")
     def _reject_dev_secrets_in_production(self) -> Settings:
+        if self.gateway_mode is GatewayMode.PAYPAL_LIVE and not self.allow_paypal_live:
+            raise ValueError(
+                "PAYPAL_MODE=PAYPAL_LIVE moves real money: set ALLOW_PAYPAL_LIVE=true to "
+                "confirm you intend to process production payments."
+            )
         if self.app_env != "production":
             return self
         insecure = [
@@ -134,6 +228,53 @@ class Settings(BaseSettings):
         if not self.require_signed_telemetry:
             raise ValueError("require_signed_telemetry must be true in production")
         return self
+
+    # --- gateway helpers ---------------------------------------------------
+    @property
+    def gateway_mode(self) -> GatewayMode:
+        """Canonical gateway mode (always one of the three enum members)."""
+        return GatewayMode(self.paypal_mode)
+
+    @property
+    def provenance(self) -> str:
+        """Provenance label stamped on every order and transaction row."""
+        return {
+            GatewayMode.LOCAL_SIMULATOR: "local_simulator",
+            GatewayMode.PAYPAL_SANDBOX: "paypal_sandbox",
+            GatewayMode.PAYPAL_LIVE: "paypal_live",
+        }[self.gateway_mode]
+
+    @property
+    def is_simulator(self) -> bool:
+        return self.gateway_mode is GatewayMode.LOCAL_SIMULATOR
+
+    @property
+    def uses_paypal_network(self) -> bool:
+        return not self.is_simulator
+
+    @property
+    def paypal_credentials_configured(self) -> bool:
+        """True when both halves of an OAuth2 client-credentials pair exist."""
+        return bool(self.paypal_client_id.strip() and self.paypal_client_secret.strip())
+
+    @property
+    def gateway_blockers(self) -> list[str]:
+        """Human-readable reasons the selected gateway mode cannot run yet."""
+        blockers: list[str] = []
+        mode = self.gateway_mode
+        if mode is GatewayMode.LOCAL_SIMULATOR:
+            return blockers
+        if not self.paypal_client_id.strip():
+            blockers.append("PAYPAL_CLIENT_ID is not set")
+        if not self.paypal_client_secret.strip():
+            blockers.append("PAYPAL_CLIENT_SECRET is not set")
+        if mode is GatewayMode.PAYPAL_LIVE and not self.allow_paypal_live:
+            blockers.append("ALLOW_PAYPAL_LIVE is not true")
+        return blockers
+
+    @property
+    def gateway_ready(self) -> bool:
+        return not self.gateway_blockers
 
     @property
     def cors_origins(self) -> list[str]:
@@ -158,6 +299,9 @@ class Settings(BaseSettings):
         return {
             "app_env": self.app_env,
             "paypal_mode": self.paypal_mode,
+            "gateway_ready": self.gateway_ready,
+            "gateway_blockers": self.gateway_blockers,
+            "paypal_api_base": self.paypal_api_base,
             "database": self.database_url.split("://", 1)[0],
             "llm_mode": self.llm_mode,
             "ai_enabled": self.ai_enabled,

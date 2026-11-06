@@ -25,6 +25,7 @@ from app.domain.enums import DisputeChannel, DisputeStage, DisputeStatus
 from app.domain.protocols import (
     EvidenceSubmission,
     GatewayResponse,
+    OrderCapture,
     PayPalDisputeRecord,
     PayPalTransactionRecord,
     SandboxOrder,
@@ -62,6 +63,10 @@ def _order_id(payer_id: str, sequence: int) -> str:
 
 def _subscription_id(payer_id: str, sequence: int) -> str:
     return f"I-BW{_digest(f'sub:{payer_id}:{sequence}')[:10]}"
+
+
+def _capture_id(order_id: str) -> str:
+    return f"CAP{_digest(f'cap:{order_id}')[:14].upper()}"
 
 
 def _require_currency(raw: Any) -> str:
@@ -157,7 +162,7 @@ class _StoredDispute:
 class SimulatorGateway:
     """Keyless PayPal stand-in: deterministic ids, real state transitions."""
 
-    mode = "simulator"
+    mode = "LOCAL_SIMULATOR"
 
     def __init__(
         self, settings: Settings, *, clock: Callable[[], datetime] | None = None
@@ -173,6 +178,10 @@ class SimulatorGateway:
         self._evidence_replays: dict[str, GatewayResponse] = {}
         self._subscriptions: dict[str, str] = {}
         self._order_subscriptions: dict[str, str] = {}
+        # Full order lifecycle: CREATED -> APPROVED -> CAPTURED. An order exists
+        # here as CREATED and is never implicitly paid.
+        self._orders: dict[str, SandboxOrder] = {}
+        self._captures: dict[str, OrderCapture] = {}
         self._suspended: dict[str, str] = {}
         self.calls: list[tuple[str, dict[str, Any]]] = []
         if settings.demo_subscription_id:
@@ -218,8 +227,14 @@ class SimulatorGateway:
         amount: Decimal,
         currency: str = "USD",
         description: str = "VerdictPay demo plan",
+        return_url: str | None = None,
+        cancel_url: str | None = None,
     ) -> SandboxOrder:
-        """Create a deterministic Orders v2 order plus its subscription id."""
+        """Create a deterministic Orders v2 order plus its subscription id.
+
+        The order starts in CREATED. Money only moves through capture_order(),
+        mirroring PayPal's real intent=CAPTURE lifecycle.
+        """
         if not isinstance(payer_id, str) or not payer_id.strip():
             raise UpstreamError("payer_id_required")
         order_amount = wire.parse_decimal(amount)
@@ -247,16 +262,81 @@ class SimulatorGateway:
                     "currency": code,
                 },
             )
-            return SandboxOrder(
+            order = SandboxOrder(
                 order_id=order_id,
                 subscription_id=subscription_id,
                 payer_id=payer_id.strip(),
                 amount=order_amount,
                 currency=code,
-                status="COMPLETED",
+                status="CREATED",
                 approval_url=f"{SANDBOX_CHECKOUT_BASE}{order_id}",
                 created_at=created_at,
+                lifecycle_stage="CREATED",
             )
+            self._orders[order_id] = order
+            return order
+
+    async def get_order(self, order_id: str) -> SandboxOrder:
+        """Return the stored order, reflecting approver/capture progress."""
+        if not isinstance(order_id, str) or not order_id.strip():
+            raise UpstreamError("order_id_required")
+        async with self._lock:
+            order = self._orders.get(order_id.strip())
+            if order is None:
+                raise UpstreamError("order_not_found")
+            return order
+
+    async def approve_order(self, order_id: str) -> SandboxOrder:
+        """Simulate the buyer approving in the PayPal UI (test affordance only)."""
+        if not isinstance(order_id, str) or not order_id.strip():
+            raise UpstreamError("order_id_required")
+        async with self._lock:
+            order = self._orders.get(order_id.strip())
+            if order is None:
+                raise UpstreamError("order_not_found")
+            if order.lifecycle_stage == "CAPTURED":
+                return order
+            approved = replace(order, status="APPROVED", lifecycle_stage="APPROVED")
+            self._orders[approved.order_id] = approved
+            self._record_call("approve_order", {"order_id": approved.order_id})
+            return approved
+
+    async def capture_order(self, order_id: str) -> OrderCapture:
+        """Capture an approved order; refuse an unapproved one, like PayPal does."""
+        if not isinstance(order_id, str) or not order_id.strip():
+            raise UpstreamError("order_id_required")
+        async with self._lock:
+            order = self._orders.get(order_id.strip())
+            if order is None:
+                raise UpstreamError("order_not_found")
+            if order.lifecycle_stage != "APPROVED":
+                # Mirrors PayPal's 422 ORDER_NOT_APPROVED for an unapproved order.
+                raise UpstreamError("order_not_approved")
+            captured_at = self._now()
+            capture_id = _capture_id(order.order_id)
+            capture = OrderCapture(
+                order_id=order.order_id,
+                capture_id=capture_id,
+                capture_status="COMPLETED",
+                amount=order.amount,
+                currency=order.currency,
+                payer_id=order.payer_id,
+                captured_at=captured_at,
+            )
+            self._captures[order.order_id] = capture
+            self._orders[order.order_id] = replace(
+                order, status="COMPLETED", lifecycle_stage="CAPTURED"
+            )
+            self._record_call(
+                "capture_order",
+                {
+                    "order_id": order.order_id,
+                    "capture_id": capture_id,
+                    "capture_status": "COMPLETED",
+                    "amount": f"{order.amount:.2f}",
+                },
+            )
+            return capture
 
     # ----------------------------------------------------------------- disputes
     async def create_sandbox_dispute(

@@ -88,6 +88,8 @@ class WebhookVerification:
 
 @dataclass(frozen=True, slots=True)
 class SandboxOrder:
+    """A created PayPal order — explicitly NOT a captured payment."""
+
     order_id: str
     subscription_id: str | None
     payer_id: str
@@ -96,6 +98,33 @@ class SandboxOrder:
     status: str
     approval_url: str
     created_at: datetime
+    # "CREATED" until PayPal reports the buyer approved, then "APPROVED".
+    lifecycle_stage: str = "CREATED"
+    paypal_debug_id: str | None = None
+    raw: Mapping[str, Any] = field(default_factory=dict, repr=False)
+
+
+@dataclass(frozen=True, slots=True)
+class OrderCapture:
+    """The outcome of capturing an approved order.
+
+    ``capture_id`` and ``capture_status`` come from PayPal's capture resource;
+    only ``status == "COMPLETED"`` means the money actually moved.
+    """
+
+    order_id: str
+    capture_id: str | None
+    capture_status: str
+    amount: Decimal
+    currency: str
+    payer_id: str | None
+    captured_at: datetime | None
+    raw: Mapping[str, Any] = field(default_factory=dict, repr=False)
+    paypal_debug_id: str | None = None
+
+    @property
+    def completed(self) -> bool:
+        return (self.capture_status or "").upper() in {"COMPLETED", "CAPTURED"}
 
 
 @runtime_checkable
@@ -139,7 +168,13 @@ class PayPalGateway(Protocol):
         amount: Decimal,
         currency: str = "USD",
         description: str = "VerdictPay demo plan",
+        return_url: str | None = None,
+        cancel_url: str | None = None,
     ) -> SandboxOrder: ...
+
+    async def get_order(self, order_id: str) -> SandboxOrder: ...
+
+    async def capture_order(self, order_id: str) -> OrderCapture: ...
 
     async def create_sandbox_dispute(
         self,

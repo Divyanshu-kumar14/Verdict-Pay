@@ -7,19 +7,19 @@
 
 <h1>VerdictPay</h1>
 
-<p><strong>Hash-chained proof, deterministic pricing, and an AI that cannot invent a number.</strong></p>
+<p><strong>Deterministic dispute economics, Gemini-drafted evidence, and a dossier a judge can verify.</strong></p>
 
-<p>Pre-dispute telemetry for PayPal digital-goods disputes.<br/>
-Runs locally: no PayPal account, no model key, no cloud.</p>
+<p>Pre-dispute telemetry and fee-cliff aware triage for PayPal digital-goods disputes.<br/>
+Runs locally with no PayPal account and no model key.</p>
 
-<p><sub>520 tests &nbsp;·&nbsp; 26 end-to-end assertions &nbsp;·&nbsp; MIT licensed</sub></p>
+<p><sub>Real PayPal Sandbox OAuth2 + orders &nbsp;·&nbsp; SHA-256 chained custody &nbsp;·&nbsp; MIT licensed</sub></p>
 
 <p>
   <img src="https://img.shields.io/badge/PayPal-Disputes%20v1%20%C2%B7%20Orders%20v2%20%C2%B7%20Subscriptions%20v1-222224?style=flat-square&labelColor=131217" alt="PayPal APIs: Disputes v1, Orders v2, Subscriptions v1" />
-  <img src="https://img.shields.io/badge/AI-Gemini%20classify%20%2B%20draft%20%C2%B7%20deterministic%20EV-222224?style=flat-square&labelColor=131217" alt="AI: Gemini classifies and drafts; deterministic engine decides EV" />
+  <img src="https://img.shields.io/badge/AI-Gemini%20classify%20%2B%20draft%20%C2%B7%20deterministic%20EV-222224?style=flat-square&labelColor=131217" alt="AI: Gemini classifies and drafts; the deterministic engine decides EV" />
   <img src="https://img.shields.io/badge/Python-3.12%2B-222224?style=flat-square&labelColor=131217" alt="Python 3.12 or newer" />
   <img src="https://img.shields.io/badge/Next.js-15-222224?style=flat-square&labelColor=131217" alt="Next.js 15" />
-  <img src="https://img.shields.io/badge/tests-520%20passing-44A282?style=flat-square&labelColor=131217" alt="520 tests passing" />
+  <img src="https://img.shields.io/badge/tests-pytest%20%2B%20vitest-44A282?style=flat-square&labelColor=131217" alt="Test suites run with pytest and vitest" />
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-44A282?style=flat-square&labelColor=131217" alt="License: MIT" /></a>
 </p>
 
@@ -27,260 +27,555 @@ Runs locally: no PayPal account, no model key, no cloud.</p>
 
 </div>
 
-**Jump to:** [quickstart](#quickstart) · [the demo](#the-60-second-demo) ·
-[why this exists](#why-this-exists) · [how it works](#how-it-works) ·
-[the AI air-gap](#the-ai-air-gap) · [API](#api-surface) · [limitations](#honest-limitations)
+**Jump to:** [overview](#1-product-overview) · [architecture](#2-architecture) ·
+[setup](#3-setup) · [sandbox testing](#4-sandbox-testing) · [AI disclosure](#5-ai-disclosure) ·
+[limitations](#6-limitations) · [verification](#7-verification)
 
-## Quickstart
+---
 
-**No install:** the judge demo is live at <https://verdictpay-web.onrender.com> (API:
-<https://verdictpay-api.onrender.com>). The free tier sleeps after ~15 minutes idle — open the
-API's [`/api/v1/health`](https://verdictpay-api.onrender.com/api/v1/health) first to wake it,
-then the web app.
+## 1. Product overview
 
-To run it locally, you need Python 3.12+, Node 20+, `uv` and `pnpm`. SQLite, seed data and the
-PayPal simulator are local.
+A merchant selling digital goods loses a PayPal dispute twice: they refund the sale, and they pay a
+dispute fee whether or not they win. The fee is not a flat cost. PayPal charges **$15.00** per
+chargeback normally, and **$30.00** once the merchant is classified high-volume. The $30.00 fee is
+never refunded on a win, so winning a $25.00 claim nets **−$5.00** after the released funds.
+
+Two thresholds make the timing matter more than the amount:
+
+- **The 1.5% ratio cliff.** PayPal's high-volume classification keys off the dispute-to-sales ratio
+  over a rolling 90 days. With 200 sales, the third dispute moves the ratio from 1.0% to 1.5% — onto
+  the line — and the fee doubles from that dispute forward. A 3× penalty multiplier applies to the
+  single dispute that crosses.
+- **The 10-day response deadline.** Evidence must be assembled and filed before it, and the merchant
+  is usually reconstructing account history from memory at that point.
+
+Most disputes are winnable when the merchant can show the buyer accepted the terms, received the
+goods, and used them. That evidence exists in application logs, but nothing links it to the buyer at
+dispute time. The gap is not analytical, it is custodial.
+
+VerdictPay closes it with three cooperating parts:
+
+| Part | What it does | Why it can be trusted |
+|---|---|---|
+| **Deterministic EV triage** | Prices all four responses in dollars, including the fee cliff and the 3× penalty | Pure function of stored inputs; no model in the path |
+| **Gemini-grounded evidence** | Classifies the buyer's claim and drafts a narrative from recorded facts | Every number in the draft is checked against the fact set; the model cannot set a figure |
+| **Verifiable dossier** | Renders the case to PDF with a SHA-256 manifest over the bytes and the chain | Deterministic render; a judge can re-hash the file and compare |
+
+The win probability is also deterministic: six weighted signals (ToS hash acceptance 0.15, IP match
+0.12, delivery receipt 0.18, metered usage 0.15, verified chain 0.10, prior Visa CE 3.0 history in
+the 120–365 day window 0.20) over a 0.10 base, scaled by a reason multiplier (not-received 1.00,
+not-as-described 0.90, unauthorized 0.75, other 0.95) and clamped to 0.02–0.95.
+
+## 2. Architecture
+
+Three processes, no broker, no cloud dependency on the demo path.
+
+- **Frontend** — Next.js 15 App Router, React 19, TypeScript, Tailwind 4. Pages: landing, the
+  seven-step `/demo` workflow, disputes list and detail, customer timeline, analytics, settings.
+  One route handler (`/api/sdk/usage`) runs the SDK server-side so the HMAC signing secret never
+  reaches the browser.
+- **Backend** — FastAPI on Python 3.12, SQLAlchemy 2 async, SQLite by default (Postgres optional via
+  `DATABASE_URL`). Pydantic v2 schemas, a single error envelope `{"error": {code, message, details,
+  request_id}}`, request-id middleware, a body-size cap and an in-process rate limiter.
+- **SDK** — `@verdictpay/sdk`, a typed client that canonicalises payloads, signs them, and submits
+  telemetry batches.
+
+### Gateway modes
+
+One adapter boundary, three modes, chosen by `PAYPAL_MODE` and resolved in `backend/app/config.py`.
+`LOCAL_SIMULATOR` and the two network modes implement the same protocol, so the API surface is
+identical and only the wire behaviour differs.
+
+| `PAYPAL_MODE` | Talks to | Credentials | Order ids |
+|---|---|---|---|
+| `LOCAL_SIMULATOR` (default) | nothing — in-process | none | `5O1…` derived from SHA-256 of payer + sequence |
+| `PAYPAL_SANDBOX` | `https://api-m.sandbox.paypal.com` | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | PayPal-assigned |
+| `PAYPAL_LIVE` | `https://api-m.paypal.com` | same, **plus** `ALLOW_PAYPAL_LIVE=true` | PayPal-assigned |
+
+A network mode with missing credentials builds an `UnconfiguredGateway` rather than a live client.
+The app still boots so `GET /health` can name what is missing in `gateway_status.blockers`, but every
+payment call fails loudly. It never degrades to the simulator: a judge must never believe they are
+watching a real PayPal call when they are not. `PAYPAL_LIVE` additionally fails validation unless
+`ALLOW_PAYPAL_LIVE` is literally `true`.
+
+### Order lifecycle
+
+Every checkout traverses the same three stages, in both the simulator and the live network path.
+
+```
+POST /api/v1/sandbox/checkout            -> CREATED    order exists, approval_url returned
+        buyer approves in the PayPal UI   -> APPROVED   (or POST /sandbox/orders/{id}/approve locally)
+POST /api/v1/sandbox/orders/{id}/capture -> CAPTURED   capture_id, transaction recorded
+```
+
+Capture is the only path that yields money. Calling capture before approval returns `409
+order_not_approved`, mirroring PayPal's own 422 `ORDER_NOT_APPROVED`. In `PAYPAL_SANDBOX` the
+`approval_url` is a real `https://www.sandbox.paypal.com/checkoutnow?token=…` URL — a human has to
+open it and log in as the sandbox buyer. `POST /sandbox/orders/{id}/approve` exists only in the
+simulator and returns `409 approve_not_supported` in a network mode.
+
+### Deterministic EV engine
+
+`backend/app/domain/disputes/ev.py` is a pure function. Given a claim amount, a win probability and
+the merchant's 90-day ratio, it prices four actions and picks one by lowest modelled loss with a
+deterministic tie-break.
+
+```python
+ratio_before   = disputes_3mo / max(sales_3mo, 1)
+ratio_after    = (disputes_3mo + 1) / max(sales_3mo, 1)
+crosses_cliff  = high_volume and ratio_before < 0.015 and ratio_after >= 0.015
+penalty        = 30.00 * 3 if crosses_cliff else 0.00        # 90.00 on the crossing dispute
+
+ev_fight       = p * (-30.00) + (1-p) * (-amount - 15.00 - 30.00 - penalty)
+ev_settle      = -(amount + 15.00) if claim_fee_attached else -amount
+ev_offer       = -(0.30 * amount)                            # offer_ratio default 0.30
+```
+
+Every value is quantised with `ROUND_HALF_UP` to cents and negative zero is normalised away. The
+breakdown also returns `ratio_relation` (`below` / `at_or_above`) as the authoritative word on where
+the merchant sits against 1.5%. Renderers must read `ratio_relation` and never infer position from
+`crosses_cliff` — that field is `false` both below the line and already above it, which is exactly
+how a UI ends up printing "3.00% below 1.50%".
+
+Tie-break order, when two actions price equally: `PROVIDE_EVIDENCE` → `DEFLECT_INQUIRY` →
+`MAKE_OFFER` → `ACCEPT_CLAIM`, then lower fee.
+
+### Policy versus cheapest
+
+The engine's cheapest action and the triage policy's recommendation are reported separately, because
+they legitimately differ. `decision.py` returns a three-row comparison — fight, settle, make offer —
+each with its real modelled value, which row the policy chose, which row is cheapest, and whether
+PayPal would currently accept that action. When the two disagree, `divergence_explanation` names both
+and quantifies the gap in dollars.
+
+Deflecting an inquiry is the documented example: it carries no fee, preserves the relationship and
+avoids a chargeback, so policy may prefer it even when `MAKE_OFFER` prices lower. The API never claims
+the recommendation *is* the cheapest outcome — it states which is which.
+
+### Gemini layer
+
+`GEMINI_MODEL` defaults to `gemini-2.5-flash`, called through the `google-genai` SDK at API version
+`v1beta` (JSON mode is unavailable on `v1`). The model has exactly two jobs — classify the buyer's
+claim into one of five categories, and draft the rebuttal narrative from the stored fact set. Both
+outputs are schema-validated; the narrative is additionally checked for numeric containment, banned
+phrasing and ASCII-only output before it is accepted. A rejected or failed draft falls back to the
+deterministic template and the response says so. Section 5 is the full disclosure.
+
+### Telemetry chain
+
+Five event types — `TOS_ACCEPTED`, `SESSION_AUTH`, `ASSET_DELIVERED`, `USAGE_METERED`,
+`AI_GENERATION` — are appended per payer in one ledger with no update or delete path.
+
+```
+payload_hash = sha256(canonical_json(payload))            # sorted keys, no whitespace, UTF-8
+chain_hash   = sha256(f"{prev_hash}:{event_type}:{payer_id}:{created_at}:{payload_hash}")
+```
+
+`prev_hash` starts at `"0" * 64`. Verification recomputes every link and reports each break with its
+sequence number, so tampering is localisable rather than merely detectable. Canonicalisation and the
+chain formula live in `backend/app/domain/telemetry/hashing.py`.
+
+### Dossier
+
+`GET /api/v1/disputes/{id}/dossier.pdf` renders an A4 PDF with ReportLab in invariant mode, so the
+same inputs produce byte-identical output. No fact is generated at render time — the renderer reads a
+locked snapshot, which is what makes the hash meaningful. `GET …/dossier/manifest` returns the
+SHA-256 over those bytes plus chain head and event count, and `GET …/dossier/verify` re-renders from
+the same frozen snapshot and compares hashes, reporting `chain_valid`, `snapshot_present`,
+`hash_matches` and `size_matches` individually. The `.pdf` response also carries `X-Dossier-SHA256`,
+so a judge can compare a download against the manifest without trusting either.
+
+### Request path
+
+```mermaid
+flowchart LR
+  SDK["@verdictpay/sdk<br/>signs batch"] --> API["FastAPI<br/>verify HMAC"]
+  API --> LEDGER[("SQLite<br/>append-only ledger")]
+  LEDGER --> FACTS["Deterministic<br/>fact extraction"]
+  FACTS --> EV["EV engine<br/>pure function"]
+  FACTS --> GEM["Gemini<br/>classify + draft"]
+  GEM --> VAL{"Validator<br/>numbers, dates, ASCII"}
+  VAL -->|reject| TPL["Template fallback<br/>degraded=true"]
+  VAL -->|accept| DOSSIER
+  EV --> DOSSIER["PDF dossier<br/>SHA-256 manifest"]
+  TPL --> DOSSIER
+```
+
+## 3. Setup
+
+Requires Python 3.12+, Node 20+, [`uv`](https://docs.astral.sh/uv/) and `pnpm`. SQLite, seed data
+and the simulator are all local — no account of any kind is needed for the default path.
 
 ```bash
 git clone https://github.com/Divyanshu-kumar14/Verdict-Pay
 cd Verdict-Pay
-make install
-make stack      # seeds the database, boots the API on :8000, asserts the flow, stays up
-make web        # second terminal -> http://localhost:3000
+make install          # uv sync + pnpm install (frontend and SDK)
+cp .env.example .env  # optional: the defaults already run offline
 ```
 
-The API docs are at `http://localhost:8000/docs`. Docker is equivalent:
+Backend, in one terminal:
+
+```bash
+make api              # uvicorn app.main:app on :8000, reload on
+# or: uv run --directory backend uvicorn app.main:app --port 8000 --reload
+```
+
+Frontend, in a second terminal:
+
+```bash
+make web              # pnpm -C frontend dev → http://localhost:3000
+```
+
+`make stack` does both — it seeds the database, boots the API on `:8000`, runs the scripted demo as a
+self-check, and stays up. `make demo` runs the demo and exits. API docs are at
+`http://localhost:8000/docs`, health at `http://localhost:8000/api/v1/health`.
+
+Docker is equivalent:
 
 ```bash
 cp .env.example .env
-docker compose up --build
-# http://localhost:3000 · API docs http://localhost:8000/docs
+docker compose up --build     # web on :3000, API on :8000
 ```
 
-Proof without leaving a server behind:
+### Environment variables
 
-```bash
-make demo     # seed, boot, run the 26 assertions, shut down
-make verify   # the full gate
-```
+Every variable below is documented in [.env.example](.env.example). Values shown are placeholders.
 
-### Live PayPal sandbox (optional)
+**Core**
 
-The demo never needs credentials. To exercise the same gateway against a real PayPal sandbox
-account, put them in a gitignored `.env` and run the live check — it forces `PAYPAL_MODE=live`
-for that command only, so `make stack` stays deterministic:
-
-```bash
-make env                      # copy the template, then fill in the two values
-# PAYPAL_CLIENT_ID=...  PAYPAL_CLIENT_SECRET=...
-make verify-live              # OAuth, dispute read, Reporting v1 lookback
-```
-
-Never commit `.env`; it is ignored by git and by the Docker build context. Reporting v1 caps a
-query at 31 days and rejects `payer_id` as a filter, so the live client chunks the CE 3.0
-lookback and filters locally — see [docs/live-mode.md](docs/live-mode.md).
-
-## The 60-second demo
-
-Two panes: a buyer storefront on the left, the merchant command center on the right. Seed, boot, open `http://localhost:3000` and click in order. Every value on the right is served by the API; none of it is a static panel.
-
-| Button | What appears on the right |
-|---|---|
-| **1 · Checkout $99 Pro plan** | Orders v2 creates order `5O14B26DBBB1A5529` and subscription `I-BW2BDCA160D9` for payer `YRZ829104KLA`; the SDK binds that payer to the SHA-256 of the Terms of Service the buyer accepted |
-| **2 · Simulate usage** | Four signed events append to the ledger: 8 rows, `logins=15`, `tokens=42,000`, `assets=1`, chain verified |
-| **3 · File friendly-fraud dispute** | Case `PP-D-40006` on the SNAD · INQUIRY path; subscription suspended in 0–1 ms; p(win) 90.0%, EV fight -$41.40, settle -$99.00, offer -$29.70, recommendation `DEFLECT_INQUIRY` at a $0.00 fee |
-
-The recommendation is not the best raw EV card. In an INQUIRY with complete telemetry the policy takes the zero-fee, evidence-backed message first, because it cannot attract the claim fee and can end the case before escalation. The CLI variant, `make demo`, files INR instead of SNAD and asserts p(win) 95.0% and EV fight -$35.70; both numbers are computed live. There is no hosted URL: the demo runs locally in simulator mode with zero keys, and the numbers above are asserted by [e2e_demo.py](backend/scripts/e2e_demo.py) and documented in [demo.md](docs/demo.md).
-
-## Why this exists
-
-PayPal's January 2026 seller-protection rules assume the seller ships a box. SaaS, digital goods and metered AI products ship bytes and API calls, so the standard evidence packet has nothing to attach to.
-
-| Gap | What the rule asks for | What it costs the merchant |
+| Name | Purpose | Example placeholder |
 |---|---|---|
-| **SNAD is outside seller protection** | A receipt proves payment, not consumption | No evidence route for a download or an API call |
-| **INR / UNAUTHORIZED need a system of record** | IP, device, delivery time and access proof | History gets rebuilt after the claim lands |
-| **Card-funded chargebacks follow Visa CE 3.0** | Two prior undisputed transactions sharing IP or device | Most subscriptions never keep that history |
-| **The $15 / $30 fee cliff** | The $30 fee is never refunded, even on a win | A cheap claim can cost more to defend than to refund |
-| **Subscription bleed** | An open chargeback on a live plan | A second chargeback 30 days later, access still on |
+| `APP_ENV` | `local`, `test` or `production`; `production` rejects dev-default secrets | `local` |
+| `DEMO_MODE` | Exposes the `/sandbox/*` helpers and the seeded demo merchant | `true` |
+| `DATABASE_URL` | Async SQLAlchemy URL | `sqlite+aiosqlite:///./verdictpay.db` |
+| `ALLOWED_ORIGINS` | Comma-separated CORS allow-list | `http://localhost:3000,http://127.0.0.1:3000` |
+| `APP_NAME` | Service name in logs and OpenAPI | `VerdictPay API` |
+| `API_V1_PREFIX` | Mount point for all routes | `/api/v1` |
+| `REQUEST_ID_HEADER` | Correlation header read or assigned per request | `X-Request-Id` |
+| `LOG_LEVEL` | Root log level | `INFO` |
 
-Fight a $25 claim, win it, and the high-volume fee still lands: +$25 released, -$30 fee, net -$5. With 200 sales in the trailing 90 days, the third dispute moves the rolling ratio from 1.0% to 1.5%, exactly onto PayPal's high-volume threshold; the seeded queue then sits at 2.5–3.0%, so every later fight carries a fee that never comes back. The engine prices that crossing before the action, not after.
+**PayPal gateway**
 
-## How it works
-
-VerdictPay ingests signed lifecycle events from the merchant's product, links them into a
-per-payer hash chain, and treats that chain as the system of record PayPal asks for. When a case
-opens, it persists the dispute, suspends the recurring subscription inside a bounded,
-failure-isolated timeout, locks an immutable fact pack, and prices fight, settle and offer with
-pure functions.
-
-The action it takes is filtered by PayPal's returned HATEOAS links, so an action the API would
-reject is never attempted. Deterministic code decides the money; an optional model writes the
-prose last.
-
-FastAPI on Python 3.12+ with async SQLAlchemy (SQLite by default, Postgres through `DATABASE_URL`), a TypeScript SDK, and a Next.js 15 / React 19 / Tailwind 4 / AG Grid Community command center.
-
-```mermaid
-flowchart TD
-    A[Buyer checkout] --> B[SDK records 4 signed events]
-    B --> C[SHA-256 chain per payer]
-    C --> D[PayPal dispute webhook]
-    D --> E[Subscription suspended]
-    D --> F[Immutable fact pack]
-    F --> G[Deterministic EV triage]
-    G -->|INQUIRY| H[Zero-fee deflection]
-    G -->|CLAIM| I[PDF dossier + evidence upload]
-    G -->|EV negative| J[Offer or accept claim]
-```
-
-### Telemetry ledger
-
-The SDK records four event types keyed to the PayPal payer id: `TOS_ACCEPTED` with the SHA-256 of the exact text shown, `SESSION_AUTH` with IP and device, `ASSET_DELIVERED` with the resource and its SHA-256, and `USAGE_METERED`. Rows are deduplicated by `event_id` and appended to a per-payer chain:
-
-```text
-payload_hash = sha256(canonical_json(payload))
-chain_hash   = sha256(prev_hash : event_type : payer_id : created_at : payload_hash)
-```
-
-Verification recomputes every row and reports the exact sequence number that breaks, not a boolean. The ledger is append-only; the frozen contract lives in [hashing.py](backend/app/domain/telemetry/hashing.py) and the append path in [service.py](backend/app/domain/telemetry/service.py).
-
-### Deterministic EV
-
-Win probability is a deterministic score over six telemetry signals: ToS hash +0.15, IP match +0.12, delivery receipt +0.18, metered usage +0.15, verified chain +0.10 and Visa CE 3.0 history +0.20, on a 0.10 base, multiplied by reason (INR 1.00, SNAD 0.90, UNAUTHORIZED 0.75) and clamped to 0.02–0.95.
-
-```text
-ev_fight  = p * (-Fh) + (1 - p) * (-A - Fs - Fh - penalty)
-ev_settle = -(A + 15) once a claim fee attaches, else -A
-ev_offer  = -0.30 * A
-
-Fs      = 15    standard fee, refundable on a win only if it attached
-Fh      = 30    high-volume fee, never refunded
-penalty = 3 * 30, only on the dispute that crosses the 1.5% ratio
-```
-
-All amounts are `Decimal`, quantized to cents; every function is pure and unit-tested to the cent in [ev.py](backend/app/domain/disputes/ev.py) and [win_probability.py](backend/app/domain/disputes/win_probability.py).
-
-## Dispute lifecycle
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant M as Merchant app
-    participant V as VerdictPay
-    participant P as PayPal
-    participant B as Buyer
-    B->>M: Open checkout
-    M->>V: Signed events
-    V->>V: Append to chain
-    B->>P: Open dispute
-    P->>V: Signed webhook
-    V->>P: Verify signature
-    V->>P: Suspend subscription
-    V->>V: Lock facts, price EV
-    V->>P: Cheapest legal action
-    P-->>V: Action accepted
-    V-->>M: Case, EV, dossier
-```
-
-## The AI air-gap
-
-A locked fact pack is built from the ledger and Reporting v1 transactions, serialized and frozen. Only then does a model run — and the model only classifies the buyer's claim and drafts the evidence narrative. Win probability, expected value, the recommendation and the verdict stay in pure deterministic functions; no model output can change an amount, a probability, a hash, a date or a name.
-
-Two model paths sit behind that fence. The dossier narrative provider is one OpenAI-compatible `/chat/completions` call at temperature 0, against a hosted model or a local Ollama endpoint through `LLM_BASE_URL` and `LLM_MODEL`. The dispute AI layer calls Gemini (`GEMINI_MODEL`, default `gemini-2.5-flash`) to classify the claim into one of five categories and draft a grounded evidence narrative from the locked fact pack. Both outputs are re-validated token by token: any number, name or date absent from the facts fails (including an empty draft), banned phrases and non-ASCII text fail, and a low-confidence classification is demoted to the conservative `other` bucket by a frozen category-to-reason-code map the model cannot override.
-
-Any failure — no `GEMINI_API_KEY`, `AI_ENABLED=false`, a timeout (`AI_TIMEOUT_MS`, default 12000 ms, `AI_MAX_RETRIES`, default 1 retry), or a failed validation — degrades deterministically: the endpoint still returns a correct analysis built from the keyword classifier and the template narrative, marked `degraded=true`. Every generation, degraded or not, is recorded as an append-only `AI_GENERATION` telemetry event in the SHA-256 chain as provenance.
-
-```bash
-# free, offline AI - no paid key
-ollama pull llama3.2
-LLM_MODE=openai LLM_BASE_URL=http://localhost:11434/v1 LLM_MODEL=llama3.2 make stack
-# Gemini AI layer (claim classification + grounded drafting on /ai)
-GEMINI_API_KEY=... make stack
-```
-
-ReportLab renders a three-page, byte-reproducible PDF, which goes to PayPal as `multipart/related`. The dossier footer stamps `Narrative source: ai:<model>` or `Narrative source: template`. The model never touches EV, p(win), chain hashes or PDF layout, and a test asserts the API key never appears in the rendered document. The fence is [narrative.py](backend/app/domain/evidence/narrative.py) plus the AI-layer grounding validator; the renderer is [pdf.py](backend/app/domain/evidence/pdf.py).
-
-## API surface
-
-<details>
-<summary>17 endpoints and one error envelope</summary>
-
-| Method | Path | Purpose |
+| Name | Purpose | Example placeholder |
 |---|---|---|
-| GET | `/api/v1/health` | Version and active gateway mode |
-| POST | `/api/v1/telemetry/events` | HMAC-signed batch ingest |
-| GET | `/api/v1/telemetry/chain/{payer_id}/verify` | Recompute the chain and report any break |
-| GET | `/api/v1/customers/{payer_id}/timeline` | Ordered events, aggregates and chain proof |
-| POST | `/api/v1/sandbox/checkout` | Orders v2 checkout plus subscription |
-| POST | `/api/v1/sandbox/usage` | Four chained telemetry events |
-| POST | `/api/v1/sandbox/dispute` | Open a case through the real webhook path |
-| POST | `/api/v1/webhooks/paypal` | Signature-verified, replay-safe ingest |
-| GET | `/api/v1/disputes` | Paginated triage queue |
-| GET | `/api/v1/disputes/{id}` | Case room: EV, signals, facts and allowed actions |
-| POST | `/api/v1/disputes/{id}/triage` | Recompute the decision |
-| POST | `/api/v1/disputes/{id}/actions/{action}` | `SEND_MESSAGE`, `MAKE_OFFER`, `ACCEPT_CLAIM`, `PROVIDE_EVIDENCE` |
-| GET | `/api/v1/disputes/{id}/dossier.pdf` | Byte-reproducible evidence dossier |
-| GET | `/api/v1/reporting/summary` | Exposure, fees avoided and the rolling dispute ratio |
-| GET | `/api/v1/reporting/transactions` | Cached transaction history (CE 3.0 lookback) |
-| POST | `/api/v1/disputes/{id}/ai/analyze` | Gemini claim classification + grounded draft + explanation (degrades to deterministic fallback with `degraded=true`) |
-| GET | `/api/v1/disputes/{id}/ai` | Idempotent re-read of the last AI analysis for a case |
+| `PAYPAL_MODE` | `LOCAL_SIMULATOR`, `PAYPAL_SANDBOX` or `PAYPAL_LIVE` | `PAYPAL_SANDBOX` |
+| `PAYPAL_CLIENT_ID` | Sandbox/live app client id | `<your-paypal-sandbox-client-id>` |
+| `PAYPAL_CLIENT_SECRET` | Sandbox/live app secret | `<your-paypal-sandbox-client-secret>` |
+| `PAYPAL_WEBHOOK_ID` | Webhook id for signature verification | `<your-webhook-id>` |
+| `PAYPAL_API_BASE` | Host override; empty resolves from the mode | `https://api-m.sandbox.paypal.com` |
+| `ALLOW_PAYPAL_LIVE` | Second latch; must be `true` for `PAYPAL_LIVE` | `false` |
+| `PAYPAL_RETURN_URL` | Where PayPal sends the buyer after approving | `http://localhost:3000/demo` |
+| `PAYPAL_CANCEL_URL` | Where PayPal sends the buyer after cancelling | `http://localhost:3000/demo` |
+| `PAYPAL_TIMEOUT_SECONDS` | Per-request HTTP timeout | `15` |
+| `ALLOW_UNSIGNED_WEBHOOKS` | Accept unsigned webhooks (local testing only) | `false` |
 
-Errors use one envelope:
+**AI**
 
-```json
-{"error": {"code": "illegal_dispute_action", "message": "...", "details": [], "request_id": "..."}}
+| Name | Purpose | Example placeholder |
+|---|---|---|
+| `GEMINI_API_KEY` | Enables the Gemini classify + draft path | `<your-google-ai-studio-key>` |
+| `GEMINI_MODEL` | Gemini model id | `gemini-2.5-flash` |
+| `AI_ENABLED` | Master switch; `false` forces deterministic mode | `true` |
+| `AI_TIMEOUT_MS` | Per-call timeout | `12000` |
+| `AI_MAX_RETRIES` | Retries before degrading | `1` |
+| `LLM_MODE` | Dossier narrative provider: `template`, `openai`, `gemini` | `template` |
+| `LLM_BASE_URL` | OpenAI-compatible base; point at Ollama for a local model | `http://localhost:11434/v1` |
+| `LLM_MODEL` | Model id for that provider | `llama3.2` |
+| `OPENAI_API_KEY` / `OPENAI_MODEL` | Used only when `LLM_MODE=openai` | `<key>` / `gpt-4o-mini` |
+
+**Secrets and limits**
+
+| Name | Purpose | Example placeholder |
+|---|---|---|
+| `VERDICTPAY_API_KEY` | Demo tenant key (public in the browser bundle by design) | `vp_demo_sk_local` |
+| `VERDICTPAY_SIGNING_SECRET` | HMAC key for telemetry signatures | `openssl rand -hex 32` |
+| `VERDICTPAY_WEBHOOK_SECRET` | HMAC key for the internal webhook | `openssl rand -hex 32` |
+| `REQUIRE_SIGNED_TELEMETRY` | Reject unsigned batches; keep `true` | `true` |
+| `WEBHOOK_TOLERANCE_SECONDS` | Replay window for signed timestamps | `300` |
+| `RATE_LIMIT_PER_MINUTE` | In-process limiter, per key | `600` |
+| `MAX_BODY_BYTES` | Request body cap | `262144` |
+| `MAX_BATCH_EVENTS` | Events accepted in one telemetry batch | `500` |
+| `ACTION_LATENCY_BUDGET_MS` | Budget the API reports against per action | `500` |
+| `ARTIFACTS_DIR` | Where dossier PDFs are cached | `./artifacts` |
+| `ELASTIC_URL` | Optional Elasticsearch mirror; empty disables it | `http://localhost:9200` |
+| `ELASTIC_API_KEY` | Credential for that cluster | `<your-elastic-api-key>` |
+| `ELASTIC_INDEX_PREFIX` | Index namespace | `verdictpay` |
+
+**Demo identity** — fixed so the seeded run is reproducible. Changing any of these changes the
+deterministic order, subscription and capture ids derived from them.
+
+| Name | Purpose | Default |
+|---|---|---|
+| `DEMO_MERCHANT_NAME` | Seeded merchant; its id is `mch_` + SHA-256 prefix | `Aurora Analytics` |
+| `DEMO_PAYER_ID` | Seeded payer whose ledger the demo extends | `YRZ829104KLA` |
+| `DEMO_ORDER_ID` | Historical order cited in seeded data | `5O190127TN364715T` |
+| `DEMO_SUBSCRIPTION_ID` | Historical subscription cited in seeded data | `I-BW452GLLEP1G` |
+
+**Frontend**
+
+| Name | Purpose | Example placeholder |
+|---|---|---|
+| `NEXT_PUBLIC_API_BASE_URL` | Frontend → API base | `http://localhost:8000` |
+| `NEXT_PUBLIC_VERDICTPAY_API_KEY` | Key bundled into the browser | `vp_demo_sk_local` |
+
+The fee model itself is configurable but frozen in the demo: `STANDARD_FEE_USD=15.00`,
+`HIGH_VOLUME_FEE_USD=30.00`, `RATIO_THRESHOLD=0.015`, `OFFER_RATIO=0.30`,
+`HIGH_VOLUME_MIN_SALES=100`. Change any of them and every EV changes with it.
+
+## 4. Sandbox testing
+
+This is the judge path for real PayPal. It needs a free PayPal developer account and about five
+minutes.
+
+### 4.1 Get sandbox credentials
+
+1. Sign in at <https://developer.paypal.com/dashboard/applications/sandbox>.
+2. Create (or open) a **Sandbox** app and copy the **Client ID** and **Secret**.
+3. Copy the **Sandbox** buyer account email and password from *Accounts* — you will need them to
+   approve the order, and they are not the same as your real PayPal login.
+
+Set them in `.env`:
+
+```dotenv
+PAYPAL_MODE=PAYPAL_SANDBOX
+PAYPAL_CLIENT_ID=<your-paypal-sandbox-client-id>
+PAYPAL_CLIENT_SECRET=<your-paypal-sandbox-client-secret>
+PAYPAL_RETURN_URL=http://localhost:3000/demo
+PAYPAL_CANCEL_URL=http://localhost:3000/demo
 ```
 
-</details>
-
-## Security model
-
-- **SDK to API:** HMAC-SHA256 over `<timestamp>.<raw body>` in `X-VerdictPay-Timestamp` and `X-VerdictPay-Signature`, a ±300 s window, `event_id` dedupe, and signing required by default ([security.py](backend/app/security.py)).
-- **PayPal to API:** `verify-webhook-signature` in live mode; unsigned traffic is rejected unless explicitly enabled in a local profile.
-- **Secrets:** environment only, redacted from logs, and the app refuses to boot in production with the documented development defaults ([config.py](backend/app/config.py)).
-- **Ingest and output:** 256 KB bodies, 500 events per batch, per-merchant rate limits, and a test that asserts the API key never appears in the rendered dossier.
-
-## Verification
+Restart the API and confirm the gateway is live before clicking anything:
 
 ```bash
-make verify        # ruff, 296 pytest, eslint, tsc, next build, 224 vitest, 26 E2E assertions
-make demo          # the judge flow alone, exits
-make verify-live   # live PayPal sandbox check, needs PAYPAL_MODE=live and credentials
+curl -s http://localhost:8000/api/v1/health | python -m json.tool
+# gateway_status.readiness == "ready", mode == "PAYPAL_SANDBOX", credentials_configured == true
 ```
 
-520 tests pass in total: **296** pytest on the backend, **188** frontend unit and component tests (vitest + Testing Library), **12** frontend API tests that run the real server over HTTP, and **24** SDK tests. The judge flow adds 26 assertions against the running simulator. `ruff`, `eslint`, `tsc --noEmit` and `next build` are green across six routes (/, /disputes, /disputes/[id], /timeline, /analytics, /settings).
+If readiness is `unconfigured`, the `blockers` array names the exact missing variables. The API still
+boots so `/health` can tell you what is wrong, but every payment call fails with a `502` that repeats
+the blocker. It never falls back to the simulator behind a `PAYPAL_SANDBOX` label.
 
-## Sponsor tooling, honestly
+### 4.2 Prove the lifecycle from the command line
 
-| Tool | What this repository actually does |
+This script is the fastest way to see a real order on PayPal's side, independent of the UI:
+
+```bash
+./backend/.venv/bin/python backend/scripts/verify_paypal_sandbox.py --wait-for-approval 120
+```
+
+It performs four steps and prints each one: an OAuth2 client-credentials token against
+`/v1/oauth2/token`, `POST /v2/checkout/orders` for USD 99.00 with `intent=CAPTURE`, an authoritative
+`GET /v2/checkout/orders/{id}` re-read, and then the approval window. It polls every 5 seconds and
+auto-captures as soon as the order leaves `CREATED`.
+
+It refuses to run against a non-sandbox base (exit 2), never prints a token or secret, and never
+fabricates a capture. If nobody approves within the window it exits **0** with an explicit `BLOCKER`
+line and `"result": "pass_order_creation_capture_blocked"` — the order creation is genuinely proven
+and the capture is honestly reported as not exercised. Evidence lands in
+`artifacts/paypal-sandbox-proof.json` (newest run at the top level, up to ten earlier runs under
+`runs`) and `artifacts/paypal-sandbox-proof.log`.
+
+Exit codes: `0` verified (capture may be blocked), `1` network or upstream failure, `2` configuration
+failure.
+
+### 4.3 Walk the checkout in the browser
+
+1. Open <http://localhost:3000/demo> and start a run. The demo issues `POST /sandbox/checkout` and
+   shows the returned `approval_url`.
+2. Open that URL — it is a real `sandbox.paypal.com` checkout page. Log in with the **sandbox buyer**
+   credentials and approve.
+3. Back in the app, capture. `POST /sandbox/orders/{id}/capture` now returns `CAPTURED` with a `capture_id`,
+   and the order detail shows `lifecycle_stage: CAPTURED`.
+4. If you capture before approving, the API returns `409 order_not_approved`. That is the lifecycle
+   working, not a bug.
+
+In `LOCAL_SIMULATOR` the same steps run keyless, using `POST /sandbox/orders/{id}/approve` instead of the
+PayPal UI.
+
+### 4.4 Trigger events and inspect the result
+
+```bash
+# create an order first; the response carries order_id
+curl -s -X POST localhost:8000/api/v1/sandbox/checkout \
+  -H 'content-type: application/json' \
+  -H 'X-API-Key: vp_demo_sk_local' \
+  -d '{"plan":"pro","payer_id":"YRZ829104KLA"}' | python -m json.tool
+
+# usage telemetry: four chained events for the payer (order_id is required)
+curl -s -X POST localhost:8000/api/v1/sandbox/usage \
+  -H 'content-type: application/json' \
+  -H 'X-API-Key: vp_demo_sk_local' \
+  -d '{"payer_id":"YRZ829104KLA","order_id":"<order_id from checkout>"}' | python -m json.tool
+
+# open a dispute through the real webhook ingest path
+curl -s -X POST localhost:8000/api/v1/sandbox/dispute \
+  -H 'content-type: application/json' \
+  -H 'X-API-Key: vp_demo_sk_local' \
+  -d '{"payer_id":"YRZ829104KLA","reason_code":"MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED"}' \
+  | python -m json.tool
+```
+
+The dispute response carries `origin: "internal_test_event"` by default. That label is deliberate;
+see [Limitations](#6-limitations).
+
+To feed a real PayPal webhook instead, subscribe your sandbox app to the customer-dispute events,
+set `PAYPAL_WEBHOOK_ID`, and post to `/api/v1/webhooks/paypal`. The handler verifies the signature
+with the configured id and rejects anything outside the replay window or unsigned when
+`ALLOW_UNSIGNED_WEBHOOKS=false`.
+
+### 4.5 Run the AI analysis and the integrity checks
+
+```bash
+# Gemini classifies the claim and drafts the rebuttal; EV stays deterministic
+curl -s -X POST localhost:8000/api/v1/disputes/PP-D-40006/ai/analyze \
+  -H 'content-type: application/json' \
+  -H 'X-API-Key: vp_demo_sk_local' \
+  -d '{"claim_text":"I never received the export I paid for."}' | python -m json.tool
+
+# verify the ledger for a payer
+curl -s localhost:8000/api/v1/telemetry/chain/YRZ829104KLA/verify | python -m json.tool
+
+# manifest, download, verify
+curl -s localhost:8000/api/v1/disputes/PP-D-40006/dossier/manifest | python -m json.tool
+curl -s -o /tmp/dossier.pdf -D - localhost:8000/api/v1/disputes/PP-D-40006/dossier.pdf
+shasum -a 256 /tmp/dossier.pdf     # compare with manifest.sha256 and X-Dossier-SHA256
+curl -s localhost:8000/api/v1/disputes/PP-D-40006/dossier/verify | python -m json.tool
+```
+
+### 4.6 Run the test suites
+
+```bash
+make test                 # backend (pytest) + frontend (vitest) + SDK
+make test-backend         # uv run --directory backend pytest -q
+make test-frontend        # pnpm -C frontend test --run
+make test-sdk             # pnpm -C packages/verdictpay-sdk test
+make test-e2e             # frontend HTTP contract + judge-flow suite, needs a running API
+make verify               # full gate: ruff, pytest, eslint, tsc, vitest, next build, SDK, demo
+```
+
+`pytest` must run from `backend/` — `make test-backend` handles that. Run from the repository root it
+fails collection with `ModuleNotFoundError: No module named 'app'`.
+
+## 5. AI disclosure
+
+VerdictPay uses **Google Gemini**, `gemini-2.5-flash` by default, configured by `GEMINI_MODEL`. The
+governing rule is in the module docstring: *AI explains and drafts; rules decide.*
+
+**What Gemini does**
+
+- **Claim classification.** Reads the buyer's free-text claim and returns one of five categories
+  (`not_as_described`, `unauthorized`, `not_received`, `duplicate`, `other`) with a confidence and a
+  one-line rationale. The claim text is passed as untrusted input; the prompt instructs the model to
+  ignore instructions inside it.
+- **Narrative drafting.** Writes the seller's rebuttal prose from the stored fact set — dates,
+  delivery records, usage counts, the accepted ToS hash. Output is capped at 1,800 characters and
+  must satisfy the validator: every number and date must appear in the fact set, banned phrasing is
+  rejected, non-ASCII is rejected.
+- **Plain explanation.** The "why this recommendation" paragraph is *not* model-written. It is
+  rendered by a deterministic formatter over the EV breakdown, because a formula explanation cannot
+  hallucinate a coefficient.
+
+**What Gemini never controls**
+
+- Win probability — the weighted deterministic function in `win_probability.py`.
+- Any EV figure, fee, penalty, offer amount or the recommended action — `ev.py`, a pure function.
+- PayPal eligibility, protection outcomes or whether a dispute is winnable in reality.
+- Whether the case exists, its stage, its deadline, or any stored fact.
+
+The model's output is bounded input to a template, not a decision. Concretely, `POST
+/disputes/{id}/ai/analyze` computes `build_detail()` first and the model is only reached afterwards;
+a 404 or a deterministic failure never invokes it at all.
+
+**Degraded mode is always labelled.** Every AI response carries `degraded` and `degraded_reason`,
+and the UI shows a badge when either is set:
+
+| `degraded_reason` | Meaning |
 |---|---|
-| **PayPal** | Live clients for Disputes v1, Orders v2, Subscriptions v1, Reporting v1 and webhook verification, plus a protocol-identical simulator for the keyless demo. |
-| **AG Grid** | Community grid powers the triage queue and the analytics table. |
-| **APIMatic** | The PayPal client follows the official OpenAPI shapes; every request and response is Pydantic-validated. |
-| **Postman** | [postman/](postman) collection and environment covering telemetry, webhook, dispute and evidence calls. |
-| **Render** | Deployed: [verdictpay-web.onrender.com](https://verdictpay-web.onrender.com) + [verdictpay-api.onrender.com](https://verdictpay-api.onrender.com). Two free-plan Docker services that auto-deploy from `main`; [render.yaml](render.yaml) is the blueprint, [deploy-render.md](docs/deploy-render.md) the runbook. Free tier sleeps after ~15 min idle, so warm the API health URL first. |
-| **Elastic** | Optional search adapter behind an interface; not on the demo path, SQL stays authoritative. |
-| **Bryntum / AG Studio** | Not licensed, not bundled and not emulated. The SLA board is a Bryntum-shaped React/CSS timeline; analytics uses AG Grid Community. We say so instead of faking a license. |
+| `ai_disabled` | No `GEMINI_API_KEY`, or `AI_ENABLED=false`. Deterministic classifier and template narrative. |
+| `model_error` | The call failed or timed out. The exception type is included. |
+| `model draft fell back to template` | Gemini answered but the draft failed validation. |
 
-## Honest limitations
+In all three cases the analysis is still correct — classification falls back to a keyword table and
+the narrative to a deterministic template — and the response says which path ran. The dossier footer
+stamps provenance as `Narrative source: ai:<model>` or `Narrative source: template`, so a printed
+dossier cannot overstate what produced it. Each successful generation also appends an `AI_GENERATION`
+event to the telemetry chain, which is why AI use is auditable rather than inferred.
 
-- **The simulator is the default.** `PAYPAL_MODE=simulator` needs no PayPal account, credentials or network. It proves the pipeline, not PayPal's production behaviour.
-- **Live mode is fixture-tested only.** The client is real code against the published REST contracts, but no live sandbox transaction was run from this checkout; the tests replay recorded HTTP fixtures. `make verify-live` runs the check when credentials exist.
-- **Bryntum and AG Studio are not used.** Neither runtime is licensed or bundled. The timeline renders a Bryntum-shaped data model with React and CSS, and analytics uses AG Grid Community; the repository says this instead of faking a license.
-- **The Elastic adapter is optional and off the demo path.** It is selected only when `ELASTIC_URL` is set; SQL stays authoritative and the demo never needs a cluster.
-- **The demo is single-merchant.** One seeded merchant and one API key; `merchant_id` is carried through the schema, but multi-tenant key derivation is not wired.
+Full detail, including the exact prompt contract and validation rules, is in
+[docs/ai-disclosure.md](docs/ai-disclosure.md).
 
-Claim-by-claim detail, including what is deliberately *not* claimed, is in
-[sponsors.md](docs/sponsors.md).
+## 6. Limitations
 
-## Hackathon
+Stated plainly, because a judge should not have to discover these.
 
-Built for the PayPal AI Hackathon, October 1 to November 12, 2026. The submission text, tools list, video script and judge run instructions are in [submission.md](docs/submission.md); the requirement-by-requirement audit, including the items still open, is in [hackathon-compliance.md](docs/hackathon-compliance.md).
+- **Sandbox capture needs a human.** Buyer approval in `PAYPAL_SANDBOX` requires a person to open the
+  `approval_url` and log in as the sandbox buyer. No amount of scripting removes that step, and the
+  verification script reports `capture BLOCKED` when it does not happen rather than inventing one.
+- **The internal test dispute is not a PayPal dispute.** `POST /sandbox/dispute` produces an event
+  labelled `origin: "internal_test_event"`. It travels the real verification, triage and dossier
+  pipeline, but PayPal did not originate it. Only a webhook delivered by PayPal or a dispute created
+  through the Disputes API is a genuine PayPal dispute, and those are labelled `paypal_sandbox`.
+- **Impact metrics are estimates.** `fees_avoided_usd`, `protected_usd` and `win_rate_estimate` in
+  `/reporting/summary` extrapolate the modelled EV over the seeded case set. They are not observed
+  PayPal outcomes.
+- **The win probability is a prior, not a prediction.** The weights are a hand-set, documented model.
+  They are not fitted to real dispute outcomes, and they should not be read as a calibrated forecast.
+- **`LOCAL_SIMULATOR` is the default.** Order ids, subscription ids, captures and disputes are
+  SHA-256 derivations. They are stable and realistic in shape, and nothing hits the network.
+- **Single merchant, single tenant.** One demo merchant, one API key. There is no multi-tenant
+  isolation, no user accounts, and no per-customer authorisation.
+- **SQLite is the demo store.** Concurrent write behaviour is SQLite's; Postgres is supported by
+  `DATABASE_URL` but the demo does not exercise it.
+- **The rate limiter is per process.** A multi-replica deployment would need a shared limiter.
+- **Elasticsearch is optional and off the demo path.** If `ELASTIC_URL` is unset the search adapter is
+  a null implementation and SQL remains the only source of truth.
+- **Bryntum and AG Studio are not used.** AG Grid is used for the disputes table; the Bryntum
+  scheduler and AG Studio tooling are not part of this build. See
+  [docs/sponsors.md](docs/sponsors.md) for the per-tool accounting.
+
+## 7. Verification
+
+Every claim above is reproducible with these commands. Artifacts are written to `artifacts/`, which
+is gitignored, so a fresh clone regenerates rather than inherits them.
+
+| What to check | Command |
+|---|---|
+| Backend tests | `make test-backend` |
+| Frontend tests | `make test-frontend` |
+| SDK tests | `make test-sdk` |
+| End-to-end browser tests | `make test-e2e` |
+| Lint and types | `make lint` and `make typecheck` |
+| Full gate incl. scripted demo | `make verify` |
+| Real PayPal Sandbox lifecycle | `./backend/.venv/bin/python backend/scripts/verify_paypal_sandbox.py --wait-for-approval 120` |
+| Ledger integrity | `curl -s localhost:8000/api/v1/telemetry/chain/YRZ829104KLA/verify` |
+| Dossier integrity | `curl -s localhost:8000/api/v1/disputes/PP-D-40006/dossier/verify` |
+
+Evidence artifacts:
+
+| Path | Contents |
+|---|---|
+| `artifacts/paypal-sandbox-proof.json` | Machine-readable PayPal proof: API base, mode, order id, status, approval URL, `debug_id`, and an explicit `blocker` field when capture was not exercised |
+| `artifacts/paypal-sandbox-proof.log` | Human-readable run with each of the four steps and the polling window |
+| `artifacts/PP-D-*.pdf` | Rendered dossiers, byte-identical for identical inputs |
+| `backend/.pytest_cache/`, `frontend/.qa/` | Test run metadata and recorded QA output |
+
+A dossier can be verified without trusting the server: download the PDF, take its SHA-256, and
+compare it against `manifest.sha256` and the `/dossier/verify` result. All three must agree.
+`curl` can also read the `X-Dossier-SHA256` response header, which carries the same digest as the
+manifest; a browser cannot, because the API exposes only `X-Request-Id` through CORS. The manifest
+also carries `chain_head` and `event_count`, so the same file ties back to the ledger.
+
+```bash
+curl -sD - -o /tmp/d.pdf localhost:8000/api/v1/disputes/PP-D-40006/dossier.pdf \
+  -H 'X-API-Key: vp_demo_sk_local' | grep -i x-dossier-sha256
+shasum -a 256 /tmp/d.pdf
+```
+
+Related documentation: [architecture](docs/architecture.md) · [architecture decisions](docs/adr/) ·
+[demo script](docs/demo.md) · [AI disclosure](docs/ai-disclosure.md) ·
+[sandbox mode](docs/live-mode.md) · [deployment](docs/deploy-render.md) ·
+[sponsor accounting](docs/sponsors.md).
 
 ## License
 
 MIT. See [LICENSE](LICENSE).
-
-<div align="center">
-  <sub>Built with FastAPI, Next.js and a healthy distrust of anything a language model says about money.</sub>
-</div>

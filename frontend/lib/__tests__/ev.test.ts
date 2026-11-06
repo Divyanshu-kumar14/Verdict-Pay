@@ -3,10 +3,16 @@ import { describe, expect, it } from "vitest";
 import {
   bestEvPath,
   evPathValue,
+  evRatioState,
   feeComponents,
   fightEvNote,
+  highVolumeRuleNote,
   offerEvNote,
+  ratioExplain,
+  ratioRelationNote,
+  ratioVerdict,
   settleEvNote,
+  thresholdLabel,
 } from "../ev";
 import type { EvBreakdown } from "../types";
 
@@ -19,6 +25,12 @@ function makeBreakdown(overrides: Partial<EvBreakdown> = {}): EvBreakdown {
     penalty_ratio_usd: 5,
     ratio_before: 0.01,
     ratio_after: 0.02,
+    ratio_threshold: 0.015,
+    ratio_relation: "below",
+    threshold_crossed_now: false,
+    high_volume_min_sales: 100,
+    sales_3mo: 400,
+    disputes_3mo: 8,
     crosses_cliff: false,
     p_win: 0.6,
     offer_ratio: 0.5,
@@ -235,14 +247,36 @@ describe("feeComponents", () => {
     expect(compsFalse[1]?.note).toBe("not applied");
   });
 
-  it("crosses_cliff affects cliff note", () => {
-    const bdCross = makeBreakdown({ crosses_cliff: true, penalty_ratio_usd: 5 });
+  it("names the crossing state from the payload's own threshold", () => {
+    const bdCross = makeBreakdown({
+      crosses_cliff: true,
+      threshold_crossed_now: true,
+      ratio_relation: "at_or_above",
+      penalty_ratio_usd: 5,
+      ratio_threshold: 0.015,
+    });
     const comps = feeComponents(bdCross, "INQUIRY");
-    expect(comps[2]?.note).toBe("ratio crosses 1.5%");
+    expect(comps[2]?.note).toBe("this dispute crosses 1.50%");
+  });
 
-    const bdNo = makeBreakdown({ crosses_cliff: false });
+  it("names the below state without claiming a crossing", () => {
+    const bdNo = makeBreakdown({ crosses_cliff: false, ratio_relation: "below" });
     const comps2 = feeComponents(bdNo, "INQUIRY");
-    expect(comps2[2]?.note).toBe("ratio below threshold");
+    expect(comps2[2]?.note).toBe("below 1.50%");
+  });
+
+  it("never says 'below' for a merchant already at or above the line", () => {
+    const bd = makeBreakdown({
+      crosses_cliff: false,
+      threshold_crossed_now: false,
+      ratio_relation: "at_or_above",
+      ratio_before: 0.03,
+      ratio_after: 0.031,
+      ratio_threshold: 0.015,
+    });
+    const note = feeComponents(bd, "CHARGEBACK")[2]?.note ?? "";
+    expect(note).toBe("already above 1.50%");
+    expect(note).not.toContain("below");
   });
 
   it("stage INQUIRY affects offer ratio note", () => {
@@ -273,5 +307,167 @@ describe("feeComponents", () => {
     const bd = makeBreakdown();
     expect(feeComponents(bd, "INQUIRY")[0]?.note).toBe("refunded on a win");
     expect(feeComponents(bd, "CHARGEBACK")[0]?.note).toBe("refunded on a win");
+  });
+});
+
+// ------------------------------------------------ threshold truthfulness (Job A)
+/**
+ * The live defect: a merchant at 3.00% was described as "below the 1.50% line".
+ * `ratio_relation` is the backend's authoritative word, so every string below is
+ * derived from it. These cases pin all three states and the exact regression.
+ */
+describe("evRatioState", () => {
+  it("returns below when the relation is below and nothing crossed", () => {
+    const bd = makeBreakdown({ ratio_relation: "below", threshold_crossed_now: false });
+    expect(evRatioState(bd)).toBe("below");
+  });
+
+  it("returns crossing when this dispute pushes the ratio over the line", () => {
+    const bd = makeBreakdown({
+      ratio_relation: "at_or_above",
+      threshold_crossed_now: true,
+      crosses_cliff: true,
+    });
+    expect(evRatioState(bd)).toBe("crossing");
+  });
+
+  it("returns above when the merchant was already over the line", () => {
+    const bd = makeBreakdown({
+      ratio_relation: "at_or_above",
+      threshold_crossed_now: false,
+      crosses_cliff: false,
+    });
+    expect(evRatioState(bd)).toBe("above");
+  });
+
+  it("trusts threshold_crossed_now over crosses_cliff when only one is set", () => {
+    const crossed = makeBreakdown({ threshold_crossed_now: true, crosses_cliff: false });
+    expect(evRatioState(crossed)).toBe("crossing");
+    const notCrossed = makeBreakdown({
+      threshold_crossed_now: false,
+      crosses_cliff: false,
+      ratio_relation: "at_or_above",
+    });
+    expect(evRatioState(notCrossed)).toBe("above");
+  });
+});
+
+describe("thresholdLabel", () => {
+  it("renders the payload threshold, not a literal", () => {
+    expect(thresholdLabel(makeBreakdown({ ratio_threshold: 0.015 }))).toBe("1.50%");
+    expect(thresholdLabel(makeBreakdown({ ratio_threshold: 0.01 }))).toBe("1.00%");
+    expect(thresholdLabel(makeBreakdown({ ratio_threshold: 0.025 }))).toBe("2.50%");
+  });
+});
+
+describe("ratioExplain", () => {
+  it("describes the crossing state with the real threshold and the penalty", () => {
+    const bd = makeBreakdown({
+      ratio_before: 0.0145,
+      ratio_after: 0.0155,
+      ratio_threshold: 0.015,
+      ratio_relation: "at_or_above",
+      threshold_crossed_now: true,
+      crosses_cliff: true,
+      penalty_ratio_usd: 25,
+    });
+    const text = ratioExplain(bd);
+    expect(text).toContain("crossing");
+    expect(text).toContain("1.50%");
+    expect(text).toContain("$25.00");
+    expect(text).toContain("lands on the fight path");
+  });
+
+  it("describes the below state and denies any penalty", () => {
+    const bd = makeBreakdown({
+      ratio_before: 0.005,
+      ratio_after: 0.006,
+      ratio_threshold: 0.015,
+      ratio_relation: "below",
+      threshold_crossed_now: false,
+      crosses_cliff: false,
+      penalty_ratio_usd: 0,
+    });
+    const text = ratioExplain(bd);
+    expect(text).toContain("staying below");
+    expect(text).toContain("1.50%");
+    expect(text).toContain("No cliff penalty");
+  });
+
+  it("REGRESSION: 3.00% vs 1.50% never says 'below' when the merchant is above", () => {
+    const bd = makeBreakdown({
+      ratio_before: 0.03,
+      ratio_after: 0.0302,
+      ratio_threshold: 0.015,
+      ratio_relation: "at_or_above",
+      threshold_crossed_now: false,
+      crosses_cliff: false,
+      penalty_ratio_usd: 0,
+    });
+    const text = ratioExplain(bd);
+    // The defect sentence was "3.00% ... below the 1.5% line".
+    expect(text).not.toMatch(/below/i);
+    expect(text).toContain("already at or above");
+    expect(text).toContain("3.00%");
+    expect(text).toContain("1.50%");
+    expect(text).toContain("no new cliff penalty");
+  });
+
+  it("renders a non-default threshold from the payload", () => {
+    const bd = makeBreakdown({
+      ratio_threshold: 0.02,
+      ratio_relation: "below",
+      threshold_crossed_now: false,
+      crosses_cliff: false,
+    });
+    expect(ratioExplain(bd)).toContain("2.00%");
+  });
+});
+
+describe("ratioRelationNote and ratioVerdict", () => {
+  it("keeps relation wording truthful in all three states", () => {
+    const below = makeBreakdown({ ratio_relation: "below", threshold_crossed_now: false });
+    const crossing = makeBreakdown({
+      ratio_relation: "at_or_above",
+      threshold_crossed_now: true,
+      crosses_cliff: true,
+    });
+    const above = makeBreakdown({ ratio_relation: "at_or_above", threshold_crossed_now: false });
+
+    expect(ratioRelationNote(below)).toBe("below 1.50%");
+    expect(ratioRelationNote(crossing)).toBe("this dispute crosses 1.50%");
+    expect(ratioRelationNote(above)).toBe("already above 1.50%");
+
+    expect(ratioVerdict(below)).toBe("Below 1.50%");
+    expect(ratioVerdict(crossing)).toBe("Crosses 1.50% now");
+    expect(ratioVerdict(above)).toBe("Already above 1.50%");
+  });
+
+  it("REGRESSION: an at_or_above verdict never contains 'below' in any helper", () => {
+    const above = makeBreakdown({
+      ratio_relation: "at_or_above",
+      threshold_crossed_now: false,
+      crosses_cliff: false,
+      ratio_before: 0.03,
+      ratio_after: 0.03,
+    });
+    for (const text of [
+      ratioExplain(above),
+      ratioRelationNote(above),
+      ratioVerdict(above),
+      ...feeComponents(above, "CHARGEBACK").map((c) => c.note),
+    ]) {
+      expect(text.toLowerCase()).not.toContain("below");
+    }
+  });
+});
+
+describe("highVolumeRuleNote", () => {
+  it("states the ratio and the sales gate from the payload", () => {
+    const bd = makeBreakdown({ ratio_threshold: 0.015, high_volume_min_sales: 100 });
+    const text = highVolumeRuleNote(bd);
+    expect(text).toContain("1.50%");
+    expect(text).toContain("100+");
+    expect(text).not.toContain("NaN");
   });
 });

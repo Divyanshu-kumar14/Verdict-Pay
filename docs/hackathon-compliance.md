@@ -42,15 +42,15 @@ Judging: Technological Implementation · Design · Potential Impact · Innovatio
 
 | # | Requirement | Status | Evidence | Action |
 |---|---|---|---|---|
-| 1 | PayPal integration is central | **PASS** | Real clients for Disputes v1 (get/list/send-message/make-offer/accept-claim/provide-evidence/require-evidence), Orders v2, Subscriptions v1 suspend, Reporting v1 transaction search, webhook signature verification — `backend/app/integrations/paypal/live.py`. Simulator satisfies the same `PayPalGateway` protocol. | Run `make verify-live` with sandbox credentials before recording. |
-| 2 | AI is meaningful | **PASS, with a visibility caveat** | AI composes the seller-protection rebuttal from a locked fact pack; deterministic validation rejects invented numbers; any OpenAI-compatible endpoint incl. free local Ollama — `backend/app/integrations/llm/`. Dossier footer stamps `Narrative source: ai:<model>`. | The default `LLM_MODE=template` means a keyless judge sees no AI. **Record the video with a model enabled** (local Ollama is free) and say so in the Tools field. |
-| 3 | Working prototype | **PASS** | `make demo` → 26/26 assertions; 520 tests (296 backend, 188 frontend unit, 12 API end-to-end, 24 SDK); all six UI routes render real data. | — |
+| 1 | PayPal integration is central | **PASS** | Real clients for Disputes v1 (get/list/send-message/make-offer/accept-claim/provide-evidence/require-evidence), Orders v2 create/get/capture, Subscriptions v1 suspend, Reporting v1 transaction search, webhook signature verification — `backend/app/integrations/paypal/live.py`. `LOCAL_SIMULATOR` satisfies the same `PayPalGateway` protocol. A live sandbox OAuth2 token and a real order (`0BN11980TR384063M`) are proven in `artifacts/paypal-sandbox-proof.json`. | Run `backend/scripts/verify_paypal_sandbox.py --wait-for-approval 120` before recording to complete the capture by hand. |
+| 2 | AI is meaningful | **PASS** | Gemini (`GEMINI_MODEL`, default `gemini-2.5-flash`) classifies the buyer claim and drafts the rebuttal from a locked fact pack; a deterministic validator rejects any invented number or date; failures degrade to a keyword classifier and template with `degraded=true` plus a reason. Dossier footer stamps `Narrative source: ai:<model>` or `template`. See [ai-disclosure.md](ai-disclosure.md). | **Record the video with `GEMINI_API_KEY` set** so step 6 shows the live model path. |
+| 3 | Working prototype | **PASS** | `make test` runs the backend pytest, frontend vitest and SDK suites; `make demo` asserts the full judge flow end to end; every UI route renders real API data. Run them for current counts rather than quoting a fixed number. | — |
 | 4 | Documented | **PASS** | README, architecture, ADRs, API surface, demo script. | — |
 | 5 | Judges can run it | **PASS** | `make stack` (no keys) or `docker compose up --build`; both verified in this repo. | — |
 | 6 | Public repo + license in About | **PASS** | GitHub API reports `visibility: public`, `license: MIT`; `LICENSE` at the root. | Repository description/topics set for clarity. |
 | 7 | Text description | **READY** | `docs/submission.md` (copy-paste). | Paste into the Devpost form. |
 | 8 | Tools field | **READY** | `docs/submission.md` lists runtime AI tools and development tools. | Paste; keep the AI-assistance disclosure line. |
-| 9 | Functional demo | **PASS** | Local run instructions are complete and tested; no hosted URL is claimed. | — |
+| 9 | Functional demo | **PASS** | Local run instructions are complete and tested (`make stack` + `make web`, or `docker compose up --build`). A hosted fallback at <https://verdictpay-web.onrender.com> is documented in the README; it sleeps on the free tier, so warm `/api/v1/health` first. | — |
 | 10 | Demo video < 3 min, YouTube | **MISSING** | Shot-by-shot script exists in `docs/demo.md` and `docs/submission.md`. | **Record and upload before Nov 12.** |
 | 11 | New work / meaningful progress in window | **PASS** | All implementation commits are dated 2026-11-05/06, inside Oct 01 – Nov 12. The concept brief predates; the code does not. | — |
 | 12 | Official Rules (eligibility, regions, team, IP) | **UNVERIFIED** | Rules page is Cloudflare-gated. | Confirm in a browser: 18+, excluded regions, team size, IP/publicity terms. |
@@ -86,9 +86,9 @@ Judging: Technological Implementation · Design · Potential Impact · Innovatio
 ## 5. Evidence commands
 
 ```bash
-make verify        # ruff + 296 pytest + eslint + tsc + next build + 224 vitest + 26 E2E assertions
+make verify        # ruff + pytest + eslint + tsc + next build + vitest + SDK build + scripted demo
 make demo          # the judge flow alone, green/red
 make stack         # seed + API + UI, zero keys
-make verify-live   # real PayPal sandbox check (requires PAYPAL_MODE=live + credentials)
+make verify-live   # real PayPal sandbox check (requires PAYPAL_MODE=PAYPAL_SANDBOX + credentials)
 docker compose up --build   # full stack, verified in this repo
 ```

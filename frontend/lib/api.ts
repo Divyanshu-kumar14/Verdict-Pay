@@ -12,13 +12,20 @@ import { z } from "zod";
 import {
   ActionResponseSchema,
   AnalyzeResponseSchema,
+  CaptureResponseSchema,
   CheckoutResponseSchema,
   CustomerTimelineSchema,
+  DemoResetResponseSchema,
+  DemoRunListSchema,
+  DemoRunSchema,
   DisputeDetailSchema,
   DisputePageSchema,
   DisputeSimulationResponseSchema,
+  DossierManifestSchema,
+  DossierVerificationSchema,
   ErrorEnvelopeSchema,
   HealthResponseSchema,
+  OrderStatusResponseSchema,
   ReportingSummarySchema,
   TriageResponseSchema,
   UsageResponseSchema,
@@ -26,16 +33,25 @@ import {
   type ActionResponse,
   type AnalyzeRequestInput,
   type AnalyzeResponse,
+  type CaptureOrderInput,
+  type CaptureResponse,
   type CheckoutRequestInput,
   type CheckoutResponse,
+  type CreateOrderInput,
   type CustomerTimeline,
+  type DemoResetResponse,
+  type DemoRun,
+  type DemoRunList,
   type DisputeAction,
   type DisputeDetail,
   type DisputePage,
   type DisputeSimulationRequestInput,
   type DisputeSimulationResponse,
+  type DossierManifest,
+  type DossierVerification,
   type ErrorDetail,
   type HealthResponse,
+  type OrderStatusResponse,
   type ReportingSummary,
   type TriageResponse,
   type UsageRequestInput,
@@ -250,6 +266,26 @@ function actionBody(input: ActionRequestInput): Record<string, unknown> {
   return body;
 }
 
+/**
+ * camelCase call sites -> snake_case wire contract.
+ * ``undefined`` is dropped rather than sent as null so the backend defaults apply.
+ */
+function orderBody(input: CreateOrderInput): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  if (input.plan !== undefined) body.plan = input.plan;
+  if (input.payerId !== undefined) body.payer_id = input.payerId;
+  if (input.email !== undefined) body.email = input.email;
+  if (input.tosVersion !== undefined) body.tos_version = input.tosVersion;
+  if (input.runId !== undefined) body.run_id = input.runId;
+  return body;
+}
+
+function captureBody(input: CaptureOrderInput = {}): Record<string, unknown> {
+  const body: Record<string, unknown> = {};
+  if (input.runId !== undefined) body.run_id = input.runId;
+  return body;
+}
+
 /** Every route the UI calls, declared once. */
 export const api = {
   /** GET /health — liveness, gateway mode, database and uptime. */
@@ -257,7 +293,78 @@ export const api = {
     return request("/api/v1/health", { schema: HealthResponseSchema, signal });
   },
 
-  /** POST /sandbox/checkout — creates the simulated PayPal order and payer. */
+  /**
+   * GET /health — same payload as health(), including gateway_status/ai_status.
+   * Both names exist because components already call health().
+   */
+  getHealth(signal?: AbortSignal): Promise<HealthResponse> {
+    return request("/api/v1/health", { schema: HealthResponseSchema, signal });
+  },
+
+  /** POST /sandbox/checkout — creates the PayPal order (CREATED, not yet paid). */
+  createOrder(input: CreateOrderInput = {}, signal?: AbortSignal): Promise<CheckoutResponse> {
+    return request("/api/v1/sandbox/checkout", {
+      method: "POST",
+      body: orderBody(input),
+      schema: CheckoutResponseSchema,
+      signal,
+    });
+  },
+
+  /** GET /sandbox/orders/{id} — live order state; CREATED is not a payment. */
+  getOrder(orderId: string, signal?: AbortSignal): Promise<OrderStatusResponse> {
+    return request(`/api/v1/sandbox/orders/${encodeURIComponent(orderId)}`, {
+      schema: OrderStatusResponseSchema,
+      signal,
+    });
+  },
+
+  /** POST /sandbox/orders/{id}/capture — the only call that moves money. */
+  captureOrder(
+    orderId: string,
+    input: CaptureOrderInput = {},
+    signal?: AbortSignal,
+  ): Promise<CaptureResponse> {
+    return request(`/api/v1/sandbox/orders/${encodeURIComponent(orderId)}/capture`, {
+      method: "POST",
+      body: captureBody(input),
+      schema: CaptureResponseSchema,
+      signal,
+    });
+  },
+
+  /** POST /sandbox/orders/{id}/approve — stands in for the buyer's PayPal screen. */
+  approveOrder(orderId: string, signal?: AbortSignal): Promise<OrderStatusResponse> {
+    return request(`/api/v1/sandbox/orders/${encodeURIComponent(orderId)}/approve`, {
+      method: "POST",
+      schema: OrderStatusResponseSchema,
+      signal,
+    });
+  },
+
+  /** GET /sandbox/runs — isolated judge runs, newest first. */
+  listDemoRuns(signal?: AbortSignal): Promise<DemoRunList> {
+    return request("/api/v1/sandbox/runs", { schema: DemoRunListSchema, signal });
+  },
+
+  /** GET /sandbox/runs/{run_id} — one run and the steps it completed. */
+  getDemoRun(runId: string, signal?: AbortSignal): Promise<DemoRun> {
+    return request(`/api/v1/sandbox/runs/${encodeURIComponent(runId)}`, {
+      schema: DemoRunSchema,
+      signal,
+    });
+  },
+
+  /** POST /sandbox/runs/reset — clears demo runs, keeps merchant records. */
+  resetDemoRuns(signal?: AbortSignal): Promise<DemoResetResponse> {
+    return request("/api/v1/sandbox/runs/reset", {
+      method: "POST",
+      schema: DemoResetResponseSchema,
+      signal,
+    });
+  },
+
+  /** POST /sandbox/checkout — kept for call sites that predate createOrder. */
   sandboxCheckout(input: CheckoutRequestInput, signal?: AbortSignal): Promise<CheckoutResponse> {
     return request("/api/v1/sandbox/checkout", {
       method: "POST",
@@ -357,6 +464,22 @@ export const api = {
     return requestBlob(`/api/v1/disputes/${encodeURIComponent(disputeId)}/dossier.pdf`, signal);
   },
 
+  /** GET /disputes/{id}/dossier/manifest — SHA-256 and provenance of the PDF. */
+  getDossierManifest(disputeId: string, signal?: AbortSignal): Promise<DossierManifest> {
+    return request(`/api/v1/disputes/${encodeURIComponent(disputeId)}/dossier/manifest`, {
+      schema: DossierManifestSchema,
+      signal,
+    });
+  },
+
+  /** GET /disputes/{id}/dossier/verify — re-renders from the frozen snapshot. */
+  verifyDossier(disputeId: string, signal?: AbortSignal): Promise<DossierVerification> {
+    return request(`/api/v1/disputes/${encodeURIComponent(disputeId)}/dossier/verify`, {
+      schema: DossierVerificationSchema,
+      signal,
+    });
+  },
+
   /** GET /reporting/summary — exposure, protection and fee-saved KPIs. */
   reportingSummary(signal?: AbortSignal): Promise<ReportingSummary> {
     return request("/api/v1/reporting/summary", { schema: ReportingSummarySchema, signal });
@@ -385,15 +508,23 @@ export async function analyzeDispute(
 
 /** Endpoint map rendered on /settings so the connection surface is honest. */
 export const API_ENDPOINTS = [
-  { method: "GET", path: "/api/v1/health", purpose: "Gateway mode, database and uptime" },
-  { method: "POST", path: "/api/v1/sandbox/checkout", purpose: "Simulated PayPal order" },
+  { method: "GET", path: "/api/v1/health", purpose: "Gateway mode, readiness and uptime" },
+  { method: "POST", path: "/api/v1/sandbox/checkout", purpose: "Create PayPal order (unpaid)" },
+  { method: "GET", path: "/api/v1/sandbox/orders/{id}", purpose: "Live order lifecycle stage" },
+  { method: "POST", path: "/api/v1/sandbox/orders/{id}/approve", purpose: "Simulate approval" },
+  { method: "POST", path: "/api/v1/sandbox/orders/{id}/capture", purpose: "Capture (moves money)" },
   { method: "POST", path: "/api/v1/sandbox/usage", purpose: "Four chained telemetry events" },
   { method: "POST", path: "/api/v1/sandbox/dispute", purpose: "Open INQUIRY via webhook path" },
+  { method: "GET", path: "/api/v1/sandbox/runs", purpose: "Isolated judge runs" },
+  { method: "GET", path: "/api/v1/sandbox/runs/{id}", purpose: "One run and its steps" },
+  { method: "POST", path: "/api/v1/sandbox/runs/reset", purpose: "Reset demo runs, keep records" },
   { method: "GET", path: "/api/v1/disputes", purpose: "Paginated triage queue" },
   { method: "GET", path: "/api/v1/disputes/{id}", purpose: "Case, EV and allowed actions" },
   { method: "POST", path: "/api/v1/disputes/{id}/triage", purpose: "Recompute deterministic EV" },
   { method: "POST", path: "/api/v1/disputes/{id}/actions/{action}", purpose: "HATEOAS action rail" },
   { method: "GET", path: "/api/v1/disputes/{id}/dossier.pdf", purpose: "Evidence dossier PDF" },
+  { method: "GET", path: "/api/v1/disputes/{id}/dossier/manifest", purpose: "Dossier SHA-256" },
+  { method: "GET", path: "/api/v1/disputes/{id}/dossier/verify", purpose: "Verify dossier bytes" },
   { method: "GET", path: "/api/v1/reporting/summary", purpose: "Exposure and win-rate KPIs" },
   { method: "GET", path: "/api/v1/customers/{payer_id}/timeline", purpose: "Payer telemetry timeline" },
 ] as const;

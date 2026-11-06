@@ -8,8 +8,15 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path
 from fastapi.responses import StreamingResponse
 
+from app.api import schemas
 from app.api.deps import GatewayDep, MerchantDep, NarrativeDep, SessionDep, SettingsDep
-from app.services.evidence_service import EvidenceService
+from app.services.evidence_service import (
+    DOSSIER_MANIFEST_URL_TEMPLATE,
+    DOSSIER_VERIFY_URL_TEMPLATE,
+    EvidenceService,
+    dossier_filename,
+    sha256_hex,
+)
 
 router = APIRouter(tags=["evidence"])
 
@@ -38,14 +45,35 @@ ServiceDep = Annotated[EvidenceService, Depends(get_evidence_service)]
 
 @router.get("/disputes/{dispute_id}/dossier.pdf")
 async def download_dossier(dispute_id: DisputeId, service: ServiceDep) -> StreamingResponse:
-    """Render (or serve the cached) deterministic PDF dossier for a dispute."""
+    """Render (or serve the frozen) deterministic PDF dossier for a dispute."""
     pdf_bytes, _facts = await service.build_dossier(dispute_id)
-    filename = f"VerdictPay_Dossier_{dispute_id}.pdf"
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f'inline; filename="{filename}"',
+            "Content-Disposition": f'inline; filename="{dossier_filename(dispute_id)}"',
             "Content-Length": str(len(pdf_bytes)),
+            # Same digest the manifest publishes, so a judge can hash the body and
+            # compare without a second request.
+            "X-Dossier-SHA256": sha256_hex(pdf_bytes),
         },
     )
+
+
+@router.get("/disputes/{dispute_id}/dossier/manifest", response_model=schemas.DossierManifest)
+async def dossier_manifest(dispute_id: DisputeId, service: ServiceDep) -> schemas.DossierManifest:
+    """Dossier identity: full SHA-256, size, snapshot hash and chain state."""
+    return await service.build_manifest(dispute_id)
+
+
+@router.get("/disputes/{dispute_id}/dossier/verify", response_model=schemas.DossierVerification)
+async def dossier_verify(dispute_id: DisputeId, service: ServiceDep) -> schemas.DossierVerification:
+    """Re-render from the frozen snapshot and report whether the bytes match."""
+    return await service.verify(dispute_id)
+
+
+__all__ = [
+    "DOSSIER_MANIFEST_URL_TEMPLATE",
+    "DOSSIER_VERIFY_URL_TEMPLATE",
+    "router",
+]

@@ -273,11 +273,40 @@ def build_offer_amount(amount: Decimal, currency: str) -> dict[str, str]:
     return {"currency_code": currency.upper(), "value": f"{parse_decimal(amount):.2f}"}
 
 
+def extract_error_issues(body: Mapping[str, Any]) -> list[str]:
+    """The machine-readable ``details[].issue`` codes from a PayPal error.
+
+    PayPal puts the actionable token here — ``ORDER_NOT_APPROVED``,
+    ``INSTRUMENT_DECLINED``, ``DUPLICATE_REQUEST_ID`` — while ``name`` stays the
+    generic ``UNPROCESSABLE_ENTITY``. Callers branch on these tokens, so dropping
+    them makes an approved-order retry indistinguishable from a hard failure.
+    """
+    details = body.get("details")
+    if not isinstance(details, Sequence) or isinstance(details, (str, bytes)):
+        return []
+    issues: list[str] = []
+    for entry in details:
+        if not isinstance(entry, Mapping):
+            continue
+        issue = entry.get("issue")
+        if isinstance(issue, str) and issue and issue not in issues:
+            issues.append(issue)
+    return issues
+
+
 def extract_error_detail(body: Mapping[str, Any]) -> str:
-    """Produce a short, secret-free description of a PayPal error payload."""
+    """Produce a short, secret-free description of a PayPal error payload.
+
+    Includes the ``details[].issue`` codes so the caller can see *why* PayPal
+    refused (for example ``ORDER_NOT_APPROVED``) rather than only the generic
+    status name.
+    """
     name = body.get("name") if isinstance(body.get("name"), str) else "unknown_error"
     message = body.get("message") if isinstance(body.get("message"), str) else ""
     detail = f"{name}: {message}".strip(": ") or "no detail"
+    issues = extract_error_issues(body)
+    if issues:
+        detail = f"{detail} [{' | '.join(issues)}]"
     for marker in ("access_token", "client_secret", "Bearer "):
         if marker in detail:
             return "upstream error redacted"

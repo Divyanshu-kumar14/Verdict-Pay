@@ -87,7 +87,9 @@ class PaypalTransaction(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     client_ip: Mapped[str] = mapped_column(String(64), nullable=False)
     device_fingerprint: Mapped[str] = mapped_column(String(128), nullable=False)
-    source: Mapped[str] = mapped_column(String(16), nullable=False, default="simulator")
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="local_simulator")
+    capture_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    run_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
@@ -100,6 +102,8 @@ class DisputeCase(Base):
 
     dispute_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     merchant_id: Mapped[str] = mapped_column(String(40), ForeignKey("merchants.id"), nullable=False)
+    # Isolates one judge run from every other; NULL marks a non-demo record.
+    run_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     paypal_order_id: Mapped[str] = mapped_column(String(64), nullable=False)
     paypal_subscription_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     paypal_payer_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
@@ -165,6 +169,68 @@ class WebhookEventRecord(Base):
     payload: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class PaypalOrder(Base):
+    """Server-side record of a PayPal order and its capture lifecycle.
+
+    An order is not a payment. ``lifecycle_stage`` records the furthest stage
+    actually confirmed by PayPal (CREATED -> APPROVED -> CAPTURED), so nothing in
+    the product can mistake "order created" for "money received".
+    """
+
+    __tablename__ = "paypal_orders"
+    __table_args__ = (
+        Index("ix_order_run", "run_id"),
+        Index("ix_order_payer", "merchant_id", "payer_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: new_id("ord_"))
+    order_id: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    merchant_id: Mapped[str] = mapped_column(String(40), ForeignKey("merchants.id"), nullable=False)
+    run_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    payer_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    subscription_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    capture_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    amount_usd: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(8), nullable=False, default="USD")
+    status: Mapped[str] = mapped_column(String(48), nullable=False, default="CREATED")
+    lifecycle_stage: Mapped[str] = mapped_column(String(16), nullable=False, default="CREATED")
+    capture_status: Mapped[str | None] = mapped_column(String(48), nullable=True)
+    approval_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+    gateway_mode: Mapped[str] = mapped_column(String(32), nullable=False)
+    provenance: Mapped[str] = mapped_column(String(32), nullable=False, default="local_simulator")
+    paypal_debug_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    raw_response: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
+    captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class DemoRunRecord(Base):
+    """One isolated judge run. Every artifact of the run hangs off this id."""
+
+    __tablename__ = "demo_runs"
+
+    run_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    merchant_id: Mapped[str] = mapped_column(String(40), ForeignKey("merchants.id"), nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="OPEN")
+    gateway_mode: Mapped[str] = mapped_column(String(32), nullable=False)
+    provenance: Mapped[str] = mapped_column(String(32), nullable=False, default="local_simulator")
+    payer_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    order_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    capture_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    order_stage: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    amount_usd: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    currency: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    telemetry_token: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    steps: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, onupdate=utcnow
+    )
 
 
 # --------------------------------------------------------------------------- append-only guard

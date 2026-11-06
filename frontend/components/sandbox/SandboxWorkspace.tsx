@@ -13,7 +13,7 @@ import { useSandboxFlow } from "@/lib/hooks/useSandboxFlow";
 import type { CustomerTimeline, DisputeDetail } from "@/lib/types";
 
 /**
- * /demo: the judge-facing front door. The full-width pipeline shows the five
+ * /demo: the judge-facing front door. The full-width pipeline shows the seven
  * evidence-signal stages; below it the left rail runs the buyer flow that
  * opens the dispute while the live pipeline log and the command centre
  * verdict respond on the right. The command centre reads the real case the
@@ -61,13 +61,19 @@ export function SandboxWorkspace() {
   );
 
   const retry =
-    flow.state.disputeStatus === "error"
-      ? flow.runDispute
-      : flow.state.usageStatus === "error"
-        ? flow.runUsage
-        : flow.state.checkoutStatus === "error"
-          ? flow.runCheckout
-          : null;
+    flow.state.dossierStatus === "error"
+      ? flow.runDossier
+      : flow.state.aiStatus === "error"
+        ? flow.runAI
+        : flow.state.evidenceStatus === "error"
+          ? flow.runEvidence
+          : flow.state.disputeStatus === "error"
+            ? flow.runDispute
+            : flow.state.usageStatus === "error"
+              ? flow.runUsage
+              : flow.state.checkoutStatus === "error"
+                ? flow.runCheckout
+                : null;
   const handleReset = () => {
     flow.reset();
     latest.refresh();
@@ -76,13 +82,15 @@ export function SandboxWorkspace() {
   const checkoutDone = flow.state.checkoutStatus === "success" || flow.state.checkout !== null;
   const usageDone = flow.state.usageStatus === "success" || flow.state.usage !== null;
   const disputeDone = flow.state.disputeStatus === "success" || flow.state.dispute !== null;
-  const facts = caseQuery.data?.facts ?? null;
+  const evidenceDone = flow.state.evidenceStatus === "success";
+  const aiDone = flow.state.aiStatus === "success";
+  const dossierDone = flow.state.dossierStatus === "success";
   const caseReady = caseQuery.data != null;
 
   const pipelineSteps: SignalStep[] = [
     {
       id: "checkout",
-      label: "Checkout",
+      label: "PayPal Checkout",
       state:
         flow.state.checkoutStatus === "error"
           ? "failed"
@@ -108,7 +116,7 @@ export function SandboxWorkspace() {
     },
     {
       id: "dispute",
-      label: "Dispute",
+      label: "Dispute creation",
       state:
         flow.state.disputeStatus === "error"
           ? "failed"
@@ -123,18 +131,49 @@ export function SandboxWorkspace() {
     {
       id: "evidence",
       label: "Evidence verification",
-      state: !disputeDone
-        ? "locked"
-        : facts && facts.chain_valid
-          ? "verified"
-          : facts && !facts.chain_valid
-            ? "failed"
-            : "pending",
+      state:
+        flow.state.evidenceStatus === "error"
+          ? "failed"
+          : evidenceDone
+            ? "verified"
+            : flow.state.evidenceStatus === "running"
+              ? "active"
+              : !disputeDone
+                ? "locked"
+                : "pending",
+    },
+    {
+      id: "ai",
+      label: "AI analysis",
+      state:
+        flow.state.aiStatus === "error"
+          ? "failed"
+          : aiDone
+            ? "verified"
+            : flow.state.aiStatus === "running"
+              ? "active"
+              : !disputeDone
+                ? "locked"
+                : "pending",
     },
     {
       id: "verdict",
-      label: "Verdict",
+      label: "Deterministic verdict",
       state: !disputeDone ? "locked" : caseReady ? "verified" : "pending",
+    },
+    {
+      id: "dossier",
+      label: "Evidence dossier",
+      state:
+        flow.state.dossierStatus === "error"
+          ? "failed"
+          : dossierDone
+            ? "verified"
+            : flow.state.dossierStatus === "running"
+              ? "active"
+              : !disputeDone
+                ? "locked"
+                : "pending",
     },
   ];
 
@@ -142,7 +181,7 @@ export function SandboxWorkspace() {
     <div className="space-y-6">
       <PageHeader
         title="Live demo"
-        description="Aurora Analytics sells a $99.00 Pro plan through PayPal. Run the three steps to open a friendly-fraud dispute; the live pipeline and verdict respond on the right."
+        description="Aurora Analytics sells a $99.00 Pro plan through PayPal. Run the seven steps to open a friendly-fraud dispute, run AI analysis, verify the evidence chain, and download a cryptographically signed dossier."
       />
 
       <DemoPipeline steps={pipelineSteps} />
@@ -154,6 +193,9 @@ export function SandboxWorkspace() {
             onCheckout={flow.runCheckout}
             onUsage={flow.runUsage}
             onDispute={flow.runDispute}
+            onEvidence={flow.runEvidence}
+            onAI={flow.runAI}
+            onDossier={flow.runDossier}
             onReset={handleReset}
           />
           <RealVsSim />

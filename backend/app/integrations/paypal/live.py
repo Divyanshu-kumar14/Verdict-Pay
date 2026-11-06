@@ -14,7 +14,7 @@ import asyncio
 import json
 import time
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -28,6 +28,7 @@ from app.domain.evidence.multipart import build_multipart_related
 from app.domain.protocols import (
     EvidenceSubmission,
     GatewayResponse,
+    OrderCapture,
     PayPalDisputeRecord,
     PayPalTransactionRecord,
     SandboxOrder,
@@ -63,9 +64,19 @@ REPORTING_DATE_FORMAT = "%Y-%m-%dT%H:%M:%S+0000"
 
 
 class LivePayPalGateway:
-    """httpx-backed PayPal gateway selected by PAYPAL_MODE=live."""
+    """httpx-backed gateway for PAYPAL_SANDBOX and PAYPAL_LIVE.
 
-    mode = "live"
+    Both network modes share this adapter; only ``paypal_api_base`` and the
+    reported ``mode`` differ, so sandbox and production exercise identical code.
+    """
+
+    @property
+    def mode(self) -> str:
+        return self._settings.gateway_mode.value
+
+    @property
+    def is_sandbox(self) -> bool:
+        return "sandbox" in self._settings.paypal_api_base.lower()
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
@@ -132,7 +143,15 @@ class LivePayPalGateway:
             "paypal-correlation-id"
         )
         details = [{"field": "paypal_debug_id", "message": debug_id}] if debug_id else []
-        return UpstreamError(message, details=details)
+        # Carry PayPal's machine-readable issue tokens (ORDER_NOT_APPROVED and
+        # friends) on the error itself: a caller retrying an approved capture
+        # must be able to tell that apart from a hard failure.
+        return UpstreamError(
+            message,
+            details=details,
+            issues=wire.extract_error_issues(body),
+            upstream_status=response.status_code,
+        )
 
     def _retry_delay(self, response: httpx.Response, attempt: int) -> float:
         retry_after = response.headers.get("retry-after")
@@ -473,14 +492,29 @@ class LivePayPalGateway:
         amount: Decimal,
         currency: str = "USD",
         description: str = "VerdictPay demo plan",
+        return_url: str | None = None,
+        cancel_url: str | None = None,
     ) -> SandboxOrder:
-        """POST /v2/checkout/orders (the v1 path rejects purchase_units)."""
+        """POST /v2/checkout/orders (the v1 path rejects purchase_units).
+
+        The returned order is *created*, not paid: PayPal reports
+        ``status=CREATED`` until the buyer approves in the PayPal UI.
+        """
         payer = self._require_text(payer_id, "payer_id_required")
         order_amount = wire.parse_decimal(amount)
         if order_amount <= 0:
             raise UpstreamError("invalid_order_amount")
         code = self._require_currency(currency)
         text = self._require_text(description, "description_required")
+        application_context: dict[str, object] = {
+            "brand_name": self._settings.demo_merchant_name,
+            "shipping_preference": "NO_SHIPPING",
+            "user_action": "PAY_NOW",
+        }
+        if return_url:
+            application_context["return_url"] = return_url
+        if cancel_url:
+            application_context["cancel_url"] = cancel_url
         response = await self._request(
             "POST",
             ORDERS_PATH,
@@ -493,6 +527,7 @@ class LivePayPalGateway:
                         "custom_id": payer,
                     }
                 ],
+                "application_context": application_context,
             },
         )
         order_id = response.body.get("id")
@@ -505,9 +540,7 @@ class LivePayPalGateway:
             else CHECKOUT_FALLBACK_PRODUCTION
         )
         approval_url = (
-            links.get("approve")
-            or links.get("payer-action")
-            or f"{fallback}{order_id}"
+            links.get("approve") or links.get("payer-action") or f"{fallback}{order_id}"
         )
         subscription_id = response.body.get("subscription_id")
         return SandboxOrder(
@@ -516,9 +549,66 @@ class LivePayPalGateway:
             payer_id=payer,
             amount=order_amount,
             currency=code,
-            status=str(response.body.get("status") or "COMPLETED"),
+            # NEVER default to COMPLETED: an order that was not approved yet is
+            # the truth PayPal just told us, and defaulting it would fake a sale.
+            status=str(response.body.get("status") or "CREATED"),
             approval_url=approval_url,
             created_at=datetime.now(UTC),
+            lifecycle_stage=_order_stage(str(response.body.get("status") or "CREATED")),
+            paypal_debug_id=response.request_id,
+            raw=dict(response.body),
+        )
+
+    async def get_order(self, order_id: str) -> SandboxOrder:
+        """GET /v2/checkout/orders/{id} — the authoritative order state."""
+        order = self._require_text(order_id, "order_id_required")
+        response = await self._request("GET", f"{ORDERS_PATH}/{order}")
+        body = response.body
+        links = wire.parse_links(body.get("links"))
+        fallback = (
+            CHECKOUT_FALLBACK_SANDBOX
+            if "sandbox" in self._settings.paypal_api_base.lower()
+            else CHECKOUT_FALLBACK_PRODUCTION
+        )
+        amount, currency = _purchase_unit_amount(body)
+        payer_id = _payer_id_from(body)
+        status = str(body.get("status") or "CREATED")
+        return SandboxOrder(
+            order_id=str(body.get("id") or order),
+            subscription_id=None,
+            payer_id=payer_id or "",
+            amount=amount,
+            currency=currency,
+            status=status,
+            approval_url=links.get("approve") or links.get("payer-action") or f"{fallback}{order}",
+            created_at=wire.parse_datetime(body.get("create_time")) or datetime.now(UTC),
+            lifecycle_stage=_order_stage(status),
+            paypal_debug_id=response.request_id,
+            raw=dict(body),
+        )
+
+    async def capture_order(self, order_id: str) -> OrderCapture:
+        """POST /v2/checkout/orders/{id}/capture — the only path that moves money.
+
+        A 422 ``ORDER_NOT_APPROVED`` is surfaced as-is: it means the buyer has not
+        approved the order yet, not that the payment failed silently.
+        """
+        order = self._require_text(order_id, "order_id_required")
+        response = await self._request("POST", f"{ORDERS_PATH}/{order}/capture", json_body={})
+        body = response.body
+        status = str(body.get("status") or "").upper()
+        capture_id, capture_status, captured_at = _capture_details(body)
+        amount, currency = _purchase_unit_amount(body)
+        return OrderCapture(
+            order_id=str(body.get("id") or order),
+            capture_id=capture_id,
+            capture_status=capture_status or status,
+            amount=amount,
+            currency=currency,
+            payer_id=_payer_id_from(body),
+            captured_at=captured_at,
+            raw=dict(body),
+            paypal_debug_id=response.request_id,
         )
 
     async def create_sandbox_dispute(
@@ -570,3 +660,83 @@ class LivePayPalGateway:
         self._token = None
         self._token_expires_at = 0.0
         await self._client.aclose()
+
+
+# ------------------------------------------------------------------ order helpers
+_ORDER_STAGES = {
+    "CREATED": "CREATED",
+    "SAVED": "CREATED",
+    "PAYER_ACTION_REQUIRED": "CREATED",
+    "APPROVED": "APPROVED",
+    "COMPLETED": "CAPTURED",
+}
+
+
+def _order_stage(status: str) -> str:
+    """Map a PayPal order status onto our three honest lifecycle stages."""
+    return _ORDER_STAGES.get(status.upper(), "CREATED")
+
+
+def _purchase_unit_amount(body: Mapping[str, Any]) -> tuple[Decimal, str]:
+    """Read the amount from either an order or a capture-shaped response."""
+    units = body.get("purchase_units")
+    if isinstance(units, Sequence) and not isinstance(units, (str, bytes)):
+        for unit in units:
+            if not isinstance(unit, Mapping):
+                continue
+            payments = unit.get("payments")
+            if isinstance(payments, Mapping):
+                captures = payments.get("captures")
+                if isinstance(captures, Sequence) and not isinstance(captures, (str, bytes)):
+                    for capture in captures:
+                        if isinstance(capture, Mapping):
+                            amount = capture.get("amount")
+                            if isinstance(amount, Mapping):
+                                return (
+                                    wire.parse_decimal(amount.get("value")),
+                                    wire.parse_currency(amount, default="USD"),
+                                )
+            amount = unit.get("amount")
+            if isinstance(amount, Mapping):
+                return (
+                    wire.parse_decimal(amount.get("value")),
+                    wire.parse_currency(amount, default="USD"),
+                )
+    return Decimal("0.00"), "USD"
+
+
+def _capture_details(
+    body: Mapping[str, Any],
+) -> tuple[str | None, str | None, datetime | None]:
+    """Extract (capture_id, capture_status, captured_at) from a capture response."""
+    units = body.get("purchase_units")
+    if not isinstance(units, Sequence) or isinstance(units, (str, bytes)):
+        return None, None, None
+    for unit in units:
+        if not isinstance(unit, Mapping):
+            continue
+        payments = unit.get("payments")
+        if not isinstance(payments, Mapping):
+            continue
+        captures = payments.get("captures")
+        if not isinstance(captures, Sequence) or isinstance(captures, (str, bytes)):
+            continue
+        for capture in captures:
+            if not isinstance(capture, Mapping):
+                continue
+            capture_id = capture.get("id")
+            return (
+                capture_id if isinstance(capture_id, str) else None,
+                str(capture.get("status") or "") or None,
+                wire.parse_datetime(capture.get("create_time")),
+            )
+    return None, None, None
+
+
+def _payer_id_from(body: Mapping[str, Any]) -> str | None:
+    payer = body.get("payer")
+    if isinstance(payer, Mapping):
+        value = payer.get("payer_id")
+        if isinstance(value, str) and value:
+            return value
+    return None

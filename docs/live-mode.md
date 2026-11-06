@@ -1,37 +1,80 @@
-# Live PayPal mode
+# PayPal gateway modes
 
-VerdictPay ships two implementations of the same `PayPalGateway` protocol:
+VerdictPay ships three gateway modes behind one `PayPalGateway` protocol. The mode is chosen by
+`PAYPAL_MODE` and resolved in [`backend/app/config.py`](../backend/app/config.py).
 
 | `PAYPAL_MODE` | Gateway | Network | Use |
 |---|---|---|---|
-| `simulator` (default) | `SimulatorPayPalGateway` | none | demo, tests, judge laptops without accounts |
-| `live` | `LivePayPalGateway` | `api-m.sandbox.paypal.com` | proving the real REST integration |
+| `LOCAL_SIMULATOR` (default) | `SimulatorGateway` | none | demo, tests, judge laptops without accounts |
+| `PAYPAL_SANDBOX` | `LivePayPalGateway` | `api-m.sandbox.paypal.com` | proving the real REST integration and the order lifecycle |
+| `PAYPAL_LIVE` | `LivePayPalGateway` | `api-m.paypal.com` | real money — also needs `ALLOW_PAYPAL_LIVE=true` |
 
-The domain layer never imports `httpx`. Live mode changes only the seam at
+`PAYPAL_SANDBOX` and `PAYPAL_LIVE` share one implementation; only the API base differs. The
+domain layer never imports `httpx`. The network path lives entirely at
 [`backend/app/integrations/paypal/live.py`](../backend/app/integrations/paypal/live.py): OAuth2
 client-credentials with a cached token, idempotency keys on writes, bounded retries and the real
 Disputes v1, Orders v2, Subscriptions v1, Reporting v1 and Notifications v1 shapes.
 
-`PAYPAL_MODE=live` means "call the real PayPal API". The base URL is
-`PAYPAL_API_BASE` and defaults to PayPal's sandbox host, so a sandbox application exercises the
-production code path without moving real money.
+Two safety properties are enforced rather than documented:
+
+- A network mode with missing credentials yields an `UnconfiguredGateway`. The app still boots and
+  `GET /health` returns `gateway_status.blockers` naming exactly what is missing, but every payment
+  call fails loudly. It never degrades to the simulator, because a judge must not believe they are
+  watching a real PayPal call when they are not.
+- `PAYPAL_LIVE` refuses to start unless `ALLOW_PAYPAL_LIVE` is literally `true`.
+
+Legacy values are still accepted and mapped: `simulator` → `LOCAL_SIMULATOR`, `sandbox` →
+`PAYPAL_SANDBOX`, and bare `live` is disambiguated by inspecting `PAYPAL_API_BASE`.
+
+## The order lifecycle
+
+All three modes traverse the same three stages:
+
+```
+POST /api/v1/sandbox/checkout    →  CREATED
+        buyer approves in PayPal →  APPROVED
+POST /api/v1/sandbox/orders/{id}/capture →  CAPTURED
+```
+
+`POST /v2/checkout/orders` returns `status=CREATED`; creating an order is not a payment. Capturing
+before approval returns `409 order_not_approved`, mirroring PayPal's 422 `ORDER_NOT_APPROVED`.
+`POST /api/v1/sandbox/orders/{id}/approve` is a simulator-only test affordance and returns `409
+approve_not_supported` in a network mode.
 
 ## Run it
 
 1. Create a sandbox app at <https://developer.paypal.com/dashboard/applications/sandbox> and copy
    its client ID and secret. Create a sandbox buyer account at the same dashboard; Orders v2 can
    create an order without one, but approving it needs a buyer login.
-2. Put the two values in the gitignored `.env` at the repository root:
+2. Put the values in the gitignored `.env` at the repository root:
 
    ```dotenv
-   PAYPAL_MODE=live
+   PAYPAL_MODE=PAYPAL_SANDBOX
    PAYPAL_CLIENT_ID=<sandbox app client id>
    PAYPAL_CLIENT_SECRET=<sandbox app secret>
+   PAYPAL_RETURN_URL=http://localhost:3000/demo
+   PAYPAL_CANCEL_URL=http://localhost:3000/demo
    ```
 
    Do not commit `.env`; it is ignored by git and by the Docker build context. Never paste
    credentials into a shell command, an issue, a screenshot or a test fixture.
-3. Run the gate (it forces live mode for that command only, so `make stack` stays deterministic):
+3. Prove the lifecycle from the command line:
+
+   ```bash
+   ./backend/.venv/bin/python backend/scripts/verify_paypal_sandbox.py --wait-for-approval 120
+   ```
+
+   It performs an OAuth2 token exchange, creates a USD 99.00 `intent=CAPTURE` order, re-reads it
+   from PayPal, then polls for up to the given window and auto-captures when the order leaves
+   `CREATED`. It refuses a non-sandbox base (exit 2), never prints a token or secret, and never
+   fabricates a capture: with no human approval it exits **0** and writes
+   `"result": "pass_order_creation_capture_blocked"`. Evidence goes to
+   `artifacts/paypal-sandbox-proof.json` and `artifacts/paypal-sandbox-proof.log`.
+
+   Exit codes: `0` verified (capture may be blocked), `1` network or upstream failure,
+   `2` configuration failure.
+4. Run the broader gate (it forces network mode for that command only, so `make stack` stays
+   deterministic):
 
    ```bash
    make verify-live
@@ -133,7 +176,15 @@ the debug ID (which is not a credential).
 
 - `make verify-live`: **passed** — OAuth/dispute list 200 (0 disputes), Reporting 200 (0
   transactions, chunked 275-day lookback), single-dispute fetch skipped.
-- One real Orders v2 `create_order`: **passed** — order `9P139697GE712382K`, status `CREATED`,
-  sandbox approval URL returned. Not approved/captured.
+- `backend/scripts/verify_paypal_sandbox.py`: **passed with capture blocked** — OAuth2 token issued
+  (`token_expires_in` 30969), order `0BN11980TR384063M` created and re-read against
+  `https://api-m.sandbox.paypal.com` with `status=CREATED` and a real
+  `sandbox.paypal.com/checkoutnow` approval URL, `debug_id` recorded. A 120-second approval window
+  polled the order 20 times and never saw `APPROVED`, because no human opened the URL. The capture is
+  therefore reported as **BLOCKED** rather than fabricated. Evidence:
+  `artifacts/paypal-sandbox-proof.json`, `artifacts/paypal-sandbox-proof.log`.
+- Earlier orders `3RT00815AL168210Y` and `9P139697GE712382K` also reached `CREATED` and were not
+  approved; the JSON keeps the ten most recent runs under a `runs` array.
 - No dispute, webhook delivery or evidence submission was created; those remain fixture-only until
-  a buyer account is wired in.
+  a buyer account is wired in. Buyer approval in `PAYPAL_SANDBOX` requires a person to open the
+  approval URL and log in as the sandbox buyer.

@@ -427,17 +427,21 @@ async def test_create_order_parses_approval_link(live: LivePayPalGateway) -> Non
     assert order.amount == Decimal("99.00")
     assert order.currency == "USD"
     assert order.created_at.tzinfo is UTC
+    # A created order is not a captured payment.
+    assert order.lifecycle_stage == "CREATED"
     assert route.calls[0].request.url.path == "/v2/checkout/orders"
-    assert json.loads(route.calls[0].request.content) == {
-        "intent": "CAPTURE",
-        "purchase_units": [
-            {
-                "amount": {"currency_code": "USD", "value": "99.00"},
-                "description": "Pro plan",
-                "custom_id": "YRZ829104KLA",
-            }
-        ],
-    }
+    body = json.loads(route.calls[0].request.content)
+    assert body["intent"] == "CAPTURE"
+    assert body["purchase_units"] == [
+        {
+            "amount": {"currency_code": "USD", "value": "99.00"},
+            "description": "Pro plan",
+            "custom_id": "YRZ829104KLA",
+        }
+    ]
+    # application_context drives the real buyer approval redirect.
+    assert body["application_context"]["user_action"] == "PAY_NOW"
+    assert body["application_context"]["brand_name"]
 
 
 @respx.mock
@@ -616,3 +620,210 @@ async def test_search_transactions_filters_payer_client_side(
 
     assert [record.transaction_id for record in records] == ["TXN-KEEP"]
     assert all("payer_id" not in call.request.url.params for call in route.calls)
+
+
+# --------------------------------------------------------------------- order capture
+_ORDER_JSON = {
+    "id": "5O1EXAMPLEORDER",
+    "status": "CREATED",
+    "create_time": "2026-01-01T00:00:00Z",
+    "purchase_units": [
+        {"amount": {"currency_code": "USD", "value": "99.00"}},
+    ],
+    "links": [
+        {"rel": "approve", "href": "https://sandbox.paypal.com/checkoutnow?token=5O1EX"}
+    ],
+}
+
+_CAPTURE_JSON = {
+    "id": "5O1EXAMPLEORDER",
+    "status": "COMPLETED",
+    "payer": {"payer_id": "YRZ829104KLA"},
+    "purchase_units": [
+        {
+            "amount": {"currency_code": "USD", "value": "99.00"},
+            "payments": {
+                "captures": [
+                    {
+                        "id": "3C679366HH908993F",
+                        "status": "COMPLETED",
+                        "create_time": "2026-01-02T03:04:05Z",
+                        "amount": {"currency_code": "USD", "value": "99.00"},
+                    }
+                ]
+            },
+        }
+    ],
+}
+
+
+@respx.mock
+async def test_get_order_reads_authoritative_status(live: LivePayPalGateway) -> None:
+    respx.post(TOKEN_URL).mock(return_value=_token_ok())
+    route = respx.get(f"{BASE}/v2/checkout/orders/5O1EXAMPLEORDER").mock(
+        return_value=httpx.Response(200, json=_ORDER_JSON)
+    )
+
+    order = await live.get_order("5O1EXAMPLEORDER")
+
+    assert order.order_id == "5O1EXAMPLEORDER"
+    assert order.status == "CREATED"
+    assert order.lifecycle_stage == "CREATED"
+    assert order.amount == Decimal("99.00")
+    assert order.approval_url.endswith("token=5O1EX")
+    assert route.calls[0].request.method == "GET"
+
+
+@respx.mock
+async def test_capture_order_returns_real_capture_id(live: LivePayPalGateway) -> None:
+    respx.post(TOKEN_URL).mock(return_value=_token_ok())
+    route = respx.post(f"{BASE}/v2/checkout/orders/5O1EXAMPLEORDER/capture").mock(
+        return_value=httpx.Response(201, json=_CAPTURE_JSON)
+    )
+
+    capture = await live.capture_order("5O1EXAMPLEORDER")
+
+    assert capture.capture_id == "3C679366HH908993F"
+    assert capture.capture_status == "COMPLETED"
+    assert capture.completed is True
+    assert capture.amount == Decimal("99.00")
+    assert capture.currency == "USD"
+    assert capture.payer_id == "YRZ829104KLA"
+    assert capture.captured_at is not None
+    assert capture.captured_at.tzinfo is not None
+    assert route.calls[0].request.method == "POST"
+    # Idempotency header is mandatory for a money-moving POST.
+    assert route.calls[0].request.headers.get("PayPal-Request-Id")
+
+
+@respx.mock
+async def test_capture_order_surfaces_order_not_approved(live: LivePayPalGateway) -> None:
+    """PayPal 422 ORDER_NOT_APPROVED must propagate, never look like success."""
+    respx.post(TOKEN_URL).mock(return_value=_token_ok())
+    respx.post(f"{BASE}/v2/checkout/orders/5O1EXAMPLEORDER/capture").mock(
+        return_value=httpx.Response(
+            422,
+            json={
+                "name": "UNPROCESSABLE_ENTITY",
+                "details": [
+                    {"issue": "ORDER_NOT_APPROVED", "description": "Payer has not approved."}
+                ],
+            },
+        )
+    )
+
+    with pytest.raises(UpstreamError):
+        await live.capture_order("5O1EXAMPLEORDER")
+
+
+@respx.mock
+async def test_unapproved_capture_is_not_reported_as_completed(live: LivePayPalGateway) -> None:
+    """A non-COMPLETED capture response must not satisfy ``completed``."""
+    respx.post(TOKEN_URL).mock(return_value=_token_ok())
+    respx.post(f"{BASE}/v2/checkout/orders/5O1EXAMPLEORDER/capture").mock(
+        return_value=httpx.Response(
+            201,
+            json={
+                "id": "5O1EXAMPLEORDER",
+                "status": "COMPLETED",
+                "purchase_units": [
+                    {
+                        "payments": {
+                            "captures": [
+                                {
+                                    "id": "CAP-PENDING",
+                                    "status": "PENDING",
+                                    "amount": {"currency_code": "USD", "value": "99.00"},
+                                }
+                            ]
+                        }
+                    }
+                ],
+            },
+        )
+    )
+
+    capture = await live.capture_order("5O1EXAMPLEORDER")
+
+    assert capture.capture_status == "PENDING"
+    assert capture.completed is False
+
+
+async def test_live_gateway_reports_sandbox_mode(live: LivePayPalGateway) -> None:
+    """The adapter reports which network it points at, not a generic 'live'."""
+    assert live.mode == "PAYPAL_SANDBOX"
+    assert live.is_sandbox is True
+
+
+# --------------------------------------------------- machine-readable issue codes
+_ORDER_ID = "5O190127TN364715T"
+
+
+@respx.mock
+async def test_capture_failure_surfaces_order_not_approved_issue(live: LivePayPalGateway) -> None:
+    """PayPal's ORDER_NOT_APPROVED token must reach the caller.
+
+    Live-verified: PayPal answers an unapproved capture with 422 and the issue
+    token inside ``details[]``, while ``message`` stays generic. Losing the token
+    makes "buyer has not approved yet" indistinguishable from a hard failure.
+    """
+    respx.post(TOKEN_URL).mock(return_value=_token_ok())
+    respx.post(f"{BASE}/v2/checkout/orders/{_ORDER_ID}/capture").mock(
+        return_value=httpx.Response(
+            422,
+            json={
+                "name": "UNPROCESSABLE_ENTITY",
+                "message": (
+                    "The requested action could not be performed, semantically "
+                    "incorrect, or failed business validation."
+                ),
+                "details": [
+                    {
+                        "issue": "ORDER_NOT_APPROVED",
+                        "description": "Payer has not yet approved the Order for payment.",
+                    }
+                ],
+            },
+            headers={"paypal-debug-id": "debug-422"},
+        )
+    )
+
+    with pytest.raises(UpstreamError) as excinfo:
+        await live.capture_order(_ORDER_ID)
+
+    error = excinfo.value
+    assert error.has_issue("ORDER_NOT_APPROVED")
+    assert error.upstream_status == 422
+    assert "ORDER_NOT_APPROVED" in error.message
+
+
+@respx.mock
+async def test_duplicate_request_id_issue_is_reported_not_hidden(live: LivePayPalGateway) -> None:
+    respx.post(TOKEN_URL).mock(return_value=_token_ok())
+    respx.post(f"{BASE}/v2/checkout/orders").mock(
+        return_value=httpx.Response(
+            422,
+            json={
+                "name": "UNPROCESSABLE_ENTITY",
+                "message": "Duplicate request id.",
+                "details": [{"issue": "DUPLICATE_REQUEST_ID"}],
+            },
+        )
+    )
+
+    with pytest.raises(UpstreamError) as excinfo:
+        await live.create_order(
+            payer_id="YRZ829104KLA", amount=Decimal("99.00"), currency="USD"
+        )
+
+    assert excinfo.value.has_issue("DUPLICATE_REQUEST_ID")
+
+
+def test_error_payload_never_leaks_a_credential() -> None:
+    from app.integrations.paypal.wire import extract_error_detail
+
+    detail = extract_error_detail(
+        {"name": "AUTH", "message": "bad client_secret for Bearer access_token"}
+    )
+
+    assert detail == "upstream error redacted"

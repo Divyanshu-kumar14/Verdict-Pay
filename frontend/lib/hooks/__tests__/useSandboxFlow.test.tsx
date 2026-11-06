@@ -76,13 +76,20 @@ function errorEnvelope(code: string, message: string, requestId = "req_err_1") {
 // Fixtures matching zod schemas (money as string is allowed via coercion)
 const checkoutFixture = {
   order_id: "ord_123",
+  run_id: "run_test_1",
   subscription_id: "sub_456",
   payer_id: "payer_789",
-  status: "APPROVED",
+  // Creating an order is not a payment: the fixture must not claim APPROVED.
+  status: "CREATED",
   amount_usd: "99.00",
   currency: "USD",
   approval_url: "https://paypal.com/approve/ord_123",
   created_at: "2026-11-06T03:00:00.000Z",
+  gateway_mode: "LOCAL_SIMULATOR",
+  sandbox: false,
+  lifecycle_stage: "CREATED",
+  provenance: "local_simulator",
+  paypal_debug_id: null,
 };
 
 function makeEvent(seq: number, type: string) {

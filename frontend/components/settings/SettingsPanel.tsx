@@ -15,8 +15,8 @@ import {
 } from "lucide-react";
 
 import { PageHeader, PageMeta } from "@/components/PageHeader";
+import { GatewayModes, gatewaySummary } from "@/components/settings/GatewayModes";
 import { EvidenceSignal, type SignalStep } from "@/components/evidence/EvidenceSignal";
-import { SealMark } from "@/components/evidence/SealMark";
 import { Magnetic } from "@/components/motion/Magnetic";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -73,6 +73,37 @@ function formatUptime(seconds: number): string {
   if (hours > 0) return hours + "h " + minutes + "m";
   if (minutes > 0) return minutes + "m " + rest + "s";
   return rest + "s";
+}
+
+/** The backend's gateway enum, in the order the product exposes it. */
+const GATEWAY_MODES = ["LOCAL_SIMULATOR", "PAYPAL_SANDBOX", "PAYPAL_LIVE"] as const;
+
+/**
+ * Canonicalise a gateway mode string. The API sends the enum spelling, but the
+ * legacy `gateway`/`mode` fields used lowercase words ("simulator", "live"), so
+ * both spellings must resolve to the same mode — otherwise a simulator
+ * deployment renders as "PayPal Live", which is the exact inversion to avoid.
+ */
+function normaliseMode(raw: string): string {
+  const value = raw.trim().toUpperCase();
+  if (value === "SIMULATOR" || value === "LOCAL") return "LOCAL_SIMULATOR";
+  if (value === "SANDBOX") return "PAYPAL_SANDBOX";
+  if (value === "LIVE") return "PAYPAL_LIVE";
+  return GATEWAY_MODES.includes(value as (typeof GATEWAY_MODES)[number]) ? value : "unknown";
+}
+
+/** The judge-facing name for a mode, falling back to the raw value when unknown. */
+function gatewayModeLabel(raw: string): string {
+  switch (normaliseMode(raw)) {
+    case "LOCAL_SIMULATOR":
+      return "Local simulator";
+    case "PAYPAL_SANDBOX":
+      return "PayPal Sandbox";
+    case "PAYPAL_LIVE":
+      return "PayPal Live";
+    default:
+      return raw;
+  }
 }
 
 function maskKey(key: string): string {
@@ -351,40 +382,6 @@ function LatencyReadout({ ms }: { ms: number | null }) {
   );
 }
 
-/* ------------------------------ mode overview ------------------------------ */
-
-function ModeCard({
-  label,
-  description,
-  tone,
-  active,
-}: {
-  label: string;
-  description: string;
-  tone: "accent" | "positive";
-  active: boolean;
-}) {
-  return (
-    <div
-      className={cn(
-        "rounded-md border px-4 py-3.5",
-        active ? "border-line bg-raised" : "border-control bg-ground",
-      )}
-    >
-      <div className="flex items-center gap-2">
-        <SealMark size={15} tone={tone} />
-        <span className="text-base font-medium text-ink">{label}</span>
-        {active ? (
-          <Badge tone={tone} size="sm" className="ml-auto">
-            Current
-          </Badge>
-        ) : null}
-      </div>
-      <p className="mt-2 max-w-[42ch] text-sm text-muted">{description}</p>
-    </div>
-  );
-}
-
 /* --------------------------------- the page --------------------------------- */
 
 /** /settings: a read-only report of how this deployment is configured. */
@@ -424,8 +421,17 @@ export function SettingsPanel() {
     return () => observer.disconnect();
   }, []);
 
-  const mode = health.data?.gateway ?? health.data?.mode ?? "unknown";
-  const isSimulator = mode === "simulator";
+  /* The backend spells modes as an enum (LOCAL_SIMULATOR / PAYPAL_SANDBOX /
+     PAYPAL_LIVE). The health payload's own `gateway_status` booleans are the
+     authority; the older `gateway`/`mode` strings are only a fallback for a
+     deployment that predates it. */
+  const gateway = health.data?.gateway_status ?? null;
+  const ai = health.data?.ai_status ?? null;
+  const rawMode = gateway?.mode ?? health.data?.gateway ?? health.data?.mode ?? "unknown";
+  const mode = normaliseMode(rawMode);
+  const isSimulator = mode === "LOCAL_SIMULATOR";
+  const isLive = mode === "PAYPAL_LIVE";
+  const modeLabel = gatewayModeLabel(rawMode);
   const modeKnown = health.data !== null;
   const llm = health.data?.llm ?? "template";
   const database = health.data?.database ?? "sqlite+aiosqlite";
@@ -434,11 +440,7 @@ export function SettingsPanel() {
   const healthy = health.data?.status === "ok";
   const isTemplate = llm === "template";
 
-  const gatewayStatus: { label: string; tone: Tone } = !modeKnown
-    ? { label: "Checking", tone: "neutral" }
-    : isSimulator
-      ? { label: "Simulator", tone: "accent" }
-      : { label: "Live", tone: "positive" };
+  const gatewayStatus = gatewaySummary(gateway);
 
   const healthStatus: { label: string; tone: Tone } = health.error
     ? { label: "Unreachable", tone: "negative" }
@@ -472,10 +474,7 @@ export function SettingsPanel() {
         description="How this deployment reaches PayPal, what the demo key can do, and what changes when the gateway is switched to live."
         meta={
           <>
-            <PageMeta
-              label="Gateway"
-              value={modeKnown ? (isSimulator ? "simulator" : "live") : "-"}
-            />
+            <PageMeta label="Gateway" value={modeKnown ? modeLabel : "-"} />
             <PageMeta label="LLM" value={llm} />
             <PageMeta label="Database" value={database} />
           </>
@@ -527,37 +526,7 @@ export function SettingsPanel() {
           description="Which PayPal adapter answers this deployment, how case prose is produced, and what a live switch would change."
         >
           <div className="space-y-4">
-            <Panel>
-              <PanelHeader
-                title="Mode overview"
-                description="Simulator is a sealed training sandbox — not a failure state. It sits beside live as a first-class mode."
-              />
-              <PanelBody>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <ModeCard
-                    label="Simulator"
-                    description="Sealed local ledger — no funds move and no credentials are needed. Seeded inputs keep every run replayable."
-                    tone="accent"
-                    active={modeKnown && isSimulator}
-                  />
-                  <ModeCard
-                    label="Live"
-                    description="Real PayPal rails — captures and refunds move real funds. Requires client credentials and follows live timing."
-                    tone="positive"
-                    active={modeKnown && !isSimulator}
-                  />
-                </div>
-                {!modeKnown ? (
-                  <p className="mt-3 flex items-start gap-2 text-xs text-muted">
-                    <Info size={13} className="mt-0.5 shrink-0" aria-hidden />
-                    <span>
-                      Mode is resolved from the live health payload — run a health check to see
-                      which is active.
-                    </span>
-                  </p>
-                ) : null}
-              </PanelBody>
-            </Panel>
+            <GatewayModes status={gateway} ai={ai} />
 
             <Panel>
               <PanelHeader
@@ -566,9 +535,22 @@ export function SettingsPanel() {
                 actions={<Badge tone={gatewayStatus.tone}>{gatewayStatus.label}</Badge>}
               />
               <PanelBody className="grid gap-4 sm:grid-cols-2">
-                <Field label="Gateway mode" value={mode} mono />
+                <Field label="Gateway mode" value={mode === "unknown" ? rawMode : mode} mono />
                 <Field label="Database" value={database} mono />
-                <Field label="Narrative" value={isTemplate ? "template" : "generative"} mono />
+                <Field
+                  label="Narrative"
+                  value={
+                    ai ? `${ai.provider} · ${ai.model}` : isTemplate ? "template" : "generative"
+                  }
+                  note={
+                    ai
+                      ? ai.configured
+                        ? "Grounded on the frozen case facts; pricing never depends on it."
+                        : "No usable key, so prose falls back to the deterministic template."
+                      : undefined
+                  }
+                  mono
+                />
                 <Field
                   label="Demo mode"
                   value={demoMode ? "enabled" : "disabled"}
@@ -605,11 +587,28 @@ export function SettingsPanel() {
                     : "Prose is generated by the configured model, so case text leaves the deployment. Pricing and recommendations stay deterministic; see the backend LLM_MODE setting."}
                 </p>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <Field label="Provider" value={llm} mono />
+                  <Field
+                    label="Provider"
+                    value={ai ? ai.provider : llm}
+                    note={ai ? `Model ${ai.model}` : undefined}
+                    mono
+                  />
                   <Field
                     label="Case data leaves box"
-                    value={isTemplate ? "never" : "see LLM_MODE"}
-                    tone={isTemplate ? "positive" : "warning"}
+                    value={isTemplate || ai?.configured === false ? "never" : "to the AI provider"}
+                    tone={isTemplate || ai?.configured === false ? "positive" : "warning"}
+                  />
+                  <Field
+                    label="Timeout"
+                    value={ai ? `${ai.timeout_ms} ms` : "-"}
+                    note="Hard ceiling on one narrative call."
+                    mono
+                  />
+                  <Field
+                    label="Prompt version"
+                    value={ai ? ai.prompt_version : "-"}
+                    note="Grounding prompt revision reported by the API."
+                    mono
                   />
                 </div>
               </PanelBody>
@@ -618,32 +617,35 @@ export function SettingsPanel() {
             <Panel>
               <PanelHeader
                 title="What changes between modes"
-                description="The four moving parts a switch from simulator to live touches."
+                description="The four moving parts that differ across the three modes. Sandbox and live both call the real PayPal API; only live moves real money."
+                actions={<Badge tone={gatewayStatus.tone}>{modeLabel}</Badge>}
               />
               <PanelBody className="space-y-2.5">
                 <SwitchRow
                   title="Money movement"
                   status={{
-                    label: isSimulator ? "Simulated ledger" : "Real PayPal rails",
-                    tone: isSimulator ? "accent" : "warning",
+                    label: isSimulator ? "Local ledger" : isLive ? "Real funds" : "Sandbox funds",
+                    tone: isSimulator ? "accent" : isLive ? "negative" : "positive",
                   }}
                   description={
                     isSimulator
                       ? "Orders, captures and refunds are written to a local ledger. No funds move."
-                      : "Orders, captures and refunds hit the PayPal API and move real funds."
+                      : isLive
+                        ? "Orders, captures and refunds hit the production PayPal API and move real money."
+                        : "Orders, captures and refunds hit the real PayPal API against sandbox accounts. Test funds move; no real money does."
                   }
                   on={!isSimulator}
                 />
                 <SwitchRow
                   title="Credentials"
                   status={{
-                    label: isSimulator ? "None required" : "Client id and secret",
+                    label: isSimulator ? "None required" : isLive ? "Live client id and secret" : "Sandbox client id and secret",
                     tone: isSimulator ? "positive" : "warning",
                   }}
                   description={
                     isSimulator
                       ? "The simulator answers without PayPal credentials."
-                      : "Live calls require PayPal client credentials in the deployment environment."
+                      : "Network modes authenticate with OAuth2 using credentials held in the deployment environment. Presence is reported as a boolean; the values are never rendered."
                   }
                   on={!isSimulator}
                 />
@@ -656,27 +658,31 @@ export function SettingsPanel() {
                   description={
                     isSimulator
                       ? "Inbound events are signed with the local webhook secret."
-                      : "Inbound events are verified against the PayPal signature header."
+                      : "Inbound events are verified against the PayPal signature header, with replay protection keyed on the event id."
                   }
                   on={!isSimulator}
                 />
                 <SwitchRow
                   title="Determinism"
                   status={{
-                    label: isSimulator ? "Seeded, replayable" : "Live network",
+                    label: isSimulator ? "Seeded, replayable" : "Network-timed",
                     tone: isSimulator ? "positive" : "warning",
                   }}
                   description={
                     isSimulator
                       ? "Seeded inputs make every run replayable."
-                      : "Timing and status depend on the live network."
+                      : "Timing and status depend on the live PayPal network; the pricing and EV maths stay deterministic either way."
                   }
                   on={!isSimulator}
                 />
                 <Field
                   label="Switch"
                   value="PAYPAL_MODE env"
-                  note="Simulator is the default. Live requires APP_ENV above local."
+                  note={
+                    isLive
+                      ? "Live is active. Switching back to LOCAL_SIMULATOR stops all network calls."
+                      : "Set PAYPAL_MODE to LOCAL_SIMULATOR, PAYPAL_SANDBOX or PAYPAL_LIVE. Live additionally requires ALLOW_PAYPAL_LIVE=true."
+                  }
                 />
               </PanelBody>
             </Panel>

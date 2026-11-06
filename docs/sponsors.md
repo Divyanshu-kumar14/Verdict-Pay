@@ -24,9 +24,10 @@ replacements are named.
 
 ## Demo guarantees that keep these claims honest
 
-* The judge demo runs with **zero PayPal credentials**: `PAYPAL_MODE=simulator` is the
+* The judge demo runs with **zero PayPal credentials**: `PAYPAL_MODE=LOCAL_SIMULATOR` is the
   default in [backend/app/config.py](../backend/app/config.py), and the E2E flow
   ([backend/scripts/e2e_demo.py](../backend/scripts/e2e_demo.py)) exercises that same gateway.
+  Switching to `PAYPAL_SANDBOX` uses the same protocol against the real API.
 * The SDK's HMAC rule is byte-identical to the backend's
   [compute_signature](../backend/app/security.py) — the SDK test suite and a cross-language
   smoke check verify the same vector.

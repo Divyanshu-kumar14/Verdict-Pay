@@ -335,3 +335,69 @@ async def test_elastic_swallows_transport_errors() -> None:
 
     assert route.call_count == 1
     await index.close()
+
+
+# ------------------------------------------------- Gemini failure must not raise
+class _BoomClient:
+    """A Gemini client whose every call fails, like a real API outage."""
+
+    available = True
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    async def generate_json(self, **_kwargs: Any) -> dict[str, Any]:
+        self.calls += 1
+        raise RuntimeError("gemini is down")
+
+
+async def test_gemini_outage_falls_back_to_template_instead_of_raising() -> None:
+    """A Gemini failure must degrade, not 500 the dossier endpoint.
+
+    Regression: the fallback passed the JSON-shaped ``request.facts`` mapping
+    straight into ``build_template_narrative``, which requires a typed
+    ``CaseFacts`` and raised TypeError. With LLM_MODE=gemini — the deployed
+    configuration — every Gemini hiccup became a 500 on the dossier PDF,
+    manifest and verification routes instead of the documented template path.
+    """
+    from app.integrations.llm.gemini_provider import GeminiNarrativeProvider
+
+    provider = GeminiNarrativeProvider(Settings(app_env="test", llm_mode="gemini", gemini_api_key="k"))
+    provider._client = _BoomClient()  # type: ignore[attr-defined]
+
+    narrative = await provider.compose(_request())
+
+    assert isinstance(narrative, str)
+    assert len(narrative) > 200
+    assert PAYER in narrative
+    # Grounded: $99.00 appears only because it is a locked CE3 fact, and the
+    # template cites it as a prior-matching transaction, not as new evidence.
+    assert "USD 99.00" in narrative
+    assert "TXN1" in narrative
+
+
+async def test_gemini_fallback_hydrates_the_typed_fact_pack() -> None:
+    from app.integrations.llm.gemini_provider import GeminiNarrativeProvider
+
+    provider = GeminiNarrativeProvider(Settings(app_env="test", llm_mode="gemini", gemini_api_key="k"))
+    request = _request()
+
+    hydrated = provider._hydrate_facts(request)
+
+    assert isinstance(hydrated, schemas.CaseFacts)
+    assert hydrated.payer_id == PAYER
+    assert hydrated.chain_head == "a" * 64
+
+
+async def test_gemini_fallback_with_corrupt_facts_asserts_no_figures() -> None:
+    from app.integrations.llm.gemini_provider import GeminiNarrativeProvider
+
+    provider = GeminiNarrativeProvider(Settings(app_env="test", llm_mode="gemini", gemini_api_key="k"))
+    request = replace(_request(), facts={"payer_id": None, "nonsense": object()})
+    provider._client = _BoomClient()  # type: ignore[attr-defined]
+
+    narrative = await provider.compose(request)
+
+    assert isinstance(narrative, str)
+    assert "could not be rehydrated" in narrative
+    assert "99.00" not in narrative

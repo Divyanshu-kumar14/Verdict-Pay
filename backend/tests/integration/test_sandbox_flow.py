@@ -26,7 +26,14 @@ async def test_checkout_usage_dispute_flow(client) -> None:
     checkout = await _checkout(client)
     assert checkout["amount_usd"] == "99.00"
     assert checkout["currency"] == "USD"
-    assert checkout["status"] == "COMPLETED"
+    # Creating an order is NOT a payment. The order starts CREATED and only a
+    # verified capture may report CAPTURED — treating creation as completion was
+    # the bug that let a judge see a "paid" order nobody had paid for.
+    assert checkout["status"] == "CREATED"
+    assert checkout["lifecycle_stage"] == "CREATED"
+    assert checkout["gateway_mode"] == "LOCAL_SIMULATOR"
+    assert checkout["sandbox"] is False
+    assert checkout["provenance"] == "local_simulator"
     assert checkout["payer_id"] == settings.demo_payer_id
     assert checkout["order_id"].startswith("5O1")
     assert checkout["subscription_id"].startswith("I-BW")
