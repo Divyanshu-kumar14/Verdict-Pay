@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { CircleAlert, CircleCheck, ExternalLink } from "lucide-react";
 
+import { Magnetic } from "@/components/motion/Magnetic";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -202,17 +203,18 @@ export function ActionRail({
             <span className="text-muted">Consequence: </span>
             <span className="text-ink">{consequenceFor(primary.action, primary.fee_usd)}</span>
           </p>
-          <Button
-            variant={variantFor(primary.action)}
-            size="md"
-            block
-            disabled={!primary.allowed || running !== null}
-            loading={running === primary.action}
-            onClick={() => openConfirm(primary)}
-            className="mt-3"
-          >
-            {primary.allowed ? ACTION_META[primary.action].label : "Blocked"}
-          </Button>
+          <Magnetic className="mt-3">
+            <Button
+              variant={variantFor(primary.action)}
+              size="md"
+              block
+              disabled={!primary.allowed || running !== null}
+              loading={running === primary.action}
+              onClick={() => openConfirm(primary)}
+            >
+              {primary.allowed ? ACTION_META[primary.action].label : "Blocked"}
+            </Button>
+          </Magnetic>
         </div>
       ) : (
         <div className="row-rule px-4 py-3">

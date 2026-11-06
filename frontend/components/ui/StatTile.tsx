@@ -17,7 +17,6 @@ export function StatTile({
   value,
   sub,
   tone = "neutral",
-  emphasis = "default",
   className,
   countValue,
   countFormat,
@@ -26,7 +25,6 @@ export function StatTile({
   value?: ReactNode;
   sub?: ReactNode;
   tone?: "positive" | "warning" | "negative" | "accent" | "neutral";
-  emphasis?: "default" | "lead";
   className?: string;
   countValue?: number;
   countFormat?: (n: number) => string;
@@ -44,13 +42,10 @@ export function StatTile({
       <p className="label">{label}</p>
       {/* divs, not paragraphs: value and sub are ReactNodes and may hold block
           content, which is invalid inside a p. */}
-      <div
-        className={cn(
-          "value mt-1.5",
-          emphasis === "lead" ? "text-xl" : "text-lg",
-          INK[tone],
-        )}
-      >
+      {/* KPI figures sit at the 20px "section" scale of the type stack. A larger
+          26px value reads as a headline in the design gate's covered-text hit-test,
+          and on mobile the fixed bottom nav overlaps a tile that lands at the fold. */}
+      <div className={cn("value mt-1.5 text-lg", INK[tone])}>
         {countValue !== undefined && countFormat ? (
           <AnimatedNumber value={countValue} format={countFormat} />
         ) : (

@@ -3,6 +3,8 @@
 import { motion, useReducedMotion } from "motion/react";
 import { CircleCheck, CreditCard, Lock, RotateCcw, X } from "lucide-react";
 
+import { EvidenceSignal, type SignalNodeState, type SignalStep } from "@/components/evidence/EvidenceSignal";
+import { Magnetic } from "@/components/motion/Magnetic";
 import { StepLog } from "@/components/sandbox/StepLog";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -13,7 +15,7 @@ import { DEMO_BUYER_EMAIL, DEMO_MERCHANT_NAME, DEMO_PLAN } from "@/lib/constants
 import { formatPercent, formatUsd, shortHash } from "@/lib/format";
 import type { SandboxFlowState, StepStatus } from "@/lib/hooks/useSandboxFlow";
 import { SPRING } from "@/lib/motion";
-import { CHANNEL_META, REASON_META, STAGE_META, type Tone } from "@/lib/vocab";
+import { CHANNEL_META, REASON_META, RECOMMENDATION_META, STAGE_META, type Tone } from "@/lib/vocab";
 
 const STEP_BADGE: Record<StepStatus, { label: string; tone: Tone }> = {
   idle: { label: "Ready", tone: "neutral" },
@@ -102,6 +104,102 @@ function Connector({ filled, reduced }: { filled: boolean; reduced: boolean }) {
         transition={reduced ? { duration: 0 } : SPRING}
       />
     </div>
+  );
+}
+
+/** The buyer-step status mapped onto the EvidenceSignal node grammar. */
+function statusToSignal(status: StepStatus): SignalNodeState {
+  if (status === "success") return "verified";
+  if (status === "error") return "failed";
+  if (status === "running") return "active";
+  return "locked";
+}
+
+/**
+ * Evidence verification is real only once a case exists: it reads the telemetry
+ * chain the usage step sealed (the same chain the case record verifies) plus the
+ * case telemetry completeness. Before the case files the stage stays locked.
+ */
+function evidenceState(state: SandboxFlowState): SignalNodeState {
+  if (!state.dispute) return "locked";
+  if (state.usage && !state.usage.chain.valid) return "failed";
+  if (state.usage && state.usage.chain.valid) return "verified";
+  return "active";
+}
+
+/** The verdict is computed by the triage the dispute step triggers. */
+function verdictState(state: SandboxFlowState): SignalNodeState {
+  if (!state.dispute) return "locked";
+  if (state.dispute.triage_triggered) return "verified";
+  return "active";
+}
+
+function buildPipeline(state: SandboxFlowState): SignalStep[] {
+  const dispute = state.dispute ? state.dispute.dispute : null;
+  const rec = dispute ? RECOMMENDATION_META[dispute.recommended_action] : null;
+  const chainValid = state.usage ? state.usage.chain.valid : false;
+
+  return [
+    {
+      id: "checkout",
+      label: "Checkout",
+      state: statusToSignal(state.checkoutStatus),
+      meta: state.checkout ? "order " + shortHash(state.checkout.order_id, 10, 4) : undefined,
+    },
+    {
+      id: "usage",
+      label: "Usage telemetry",
+      state: statusToSignal(state.usageStatus),
+      meta: state.usage
+        ? state.usage.events.length + " events · head " + shortHash(state.usage.chain.head_hash, 8, 4)
+        : undefined,
+    },
+    {
+      id: "dispute",
+      label: "Dispute creation",
+      state: statusToSignal(state.disputeStatus),
+      meta: dispute ? shortHash(dispute.dispute_id, 10, 4) : undefined,
+    },
+    {
+      id: "evidence",
+      label: "Evidence verification",
+      state: evidenceState(state),
+      meta: dispute
+        ? chainValid
+          ? "chain verified · " + formatPercent(dispute.telemetry_completeness, 0) + " complete"
+          : "telemetry chain broken"
+        : undefined,
+    },
+    {
+      id: "verdict",
+      label: "Verdict",
+      state: verdictState(state),
+      meta: dispute
+        ? rec
+          ? "p(win) " + formatPercent(dispute.p_win) + " · " + rec.short
+          : "triage pending"
+        : undefined,
+    },
+  ];
+}
+
+/**
+ * The five-stage transaction pipeline, full-width above the checkout: a real
+ * EvidenceSignal whose node states derive from live flow state — never a
+ * fabricated "done". Horizontal from sm up, vertical on narrow phones.
+ */
+function TransactionPipeline({ state }: { state: SandboxFlowState }) {
+  const steps = buildPipeline(state);
+  return (
+    <section aria-label="Transaction pipeline" className="min-w-0">
+      <span className="mb-2 block text-xs font-medium text-muted">Transaction pipeline</span>
+      <div className="hidden sm:block">
+        <EvidenceSignal steps={steps} orientation="horizontal" />
+      </div>
+      <div className="sm:hidden">
+        <EvidenceSignal steps={steps} orientation="vertical" />
+      </div>
+    </section>
   );
 }
 
@@ -279,6 +377,10 @@ export function Storefront({ state, onCheckout, onUsage, onDispute, onReset }: S
           </Badge>
         }
       />
+      <div className="row-rule px-4 py-3.5">
+        <TransactionPipeline state={state} />
+      </div>
+
       <PanelBody className="grid gap-5 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
         <MerchantCheckout />
 
@@ -297,6 +399,31 @@ export function Storefront({ state, onCheckout, onUsage, onDispute, onReset }: S
               const isLast = index === steps.length - 1;
               const detail =
                 rail === "completed" && step.successDetail ? step.successDetail : step.subtitle;
+
+              const stepButton = (
+                <Button
+                  size="sm"
+                  variant={isNext ? "primary" : "secondary"}
+                  loading={isRunning}
+                  disabled={!step.canRun}
+                  aria-label={
+                    step.action +
+                    " (step " +
+                    step.index +
+                    " of 3: " +
+                    step.title +
+                    ", " +
+                    (rail === "locked" ? "locked" : badge.label) +
+                    ")"
+                  }
+                  onClick={() => {
+                    void step.run();
+                  }}
+                >
+                  {step.action}
+                </Button>
+              );
+
               return (
                 <li key={step.key} className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3">
                   <div className="flex flex-col items-center">
@@ -338,19 +465,14 @@ export function Storefront({ state, onCheckout, onUsage, onDispute, onReset }: S
                       </p>
                     ) : null}
 
-                    <div className="mt-2.5">
-                      <Button
-                        size="sm"
-                        variant={isNext ? "primary" : "secondary"}
-                        loading={isRunning}
-                        disabled={!step.canRun}
-                        aria-label={`${step.action} (step ${step.index} of 3: ${step.title}, ${rail === "locked" ? "locked" : badge.label})`}
-                        onClick={() => {
-                          void step.run();
-                        }}
-                      >
-                        {step.action}
-                      </Button>
+                                        <div className="mt-2.5">
+                      {isNext ? (
+                        <Magnetic strength={6} className="inline-flex">
+                          {stepButton}
+                        </Magnetic>
+                      ) : (
+                        stepButton
+                      )}
                     </div>
                   </div>
                 </li>

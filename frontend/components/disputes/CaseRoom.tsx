@@ -18,6 +18,7 @@ import { CaseFactsPanel } from "@/components/disputes/CaseFactsPanel";
 import { DossierPanel } from "@/components/disputes/DossierPanel";
 import { EvWaterfall } from "@/components/disputes/EvWaterfall";
 import { WinProbabilityPanel } from "@/components/disputes/WinProbabilityPanel";
+import { EvidenceSignal, type SignalStep } from "@/components/evidence/EvidenceSignal";
 import { PageHeader, PageMeta } from "@/components/PageHeader";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -30,6 +31,7 @@ import { cn } from "@/lib/cn";
 import {
   formatAbsolute,
   formatDueIn,
+  formatInteger,
   formatLatency,
   formatPercent,
   formatUsd,
@@ -144,31 +146,42 @@ function CaseSkeleton() {
   );
 }
 
-/** The chain path is drawn by hand: a rail of slots, hairline rules and dots. */
-function CustodyPath({ detail }: { detail: DisputeDetail }) {
-  const nodes = [
-    { caption: "Ledger", value: shortHash(detail.facts.chain_head, 8, 4) },
-    { caption: "Case", value: shortHash(detail.dispute_id, 8, 4) },
-    { caption: "PayPal", value: "Resolution centre" },
+/**
+ * The provenance path behind the verdict: the signed transaction chain, the
+ * telemetry captured for it, then the deterministic policy recommendation.
+ * Each state maps to a real fact-pack field — nothing is asserted beyond what
+ * the backend returned.
+ */
+function DecisionProvenance({ detail }: { detail: DisputeDetail }) {
+  const steps: SignalStep[] = [
+    {
+      id: "transaction",
+      label: "Transaction",
+      meta: shortHash(detail.facts.chain_head, 10, 4),
+      state: detail.facts.chain_valid ? "verified" : "failed",
+    },
+    {
+      id: "telemetry",
+      label: "Telemetry",
+      meta:
+        formatInteger(detail.facts.event_count) +
+        " events · " +
+        formatPercent(detail.facts.completeness, 0) +
+        " complete",
+      state: detail.facts.event_count > 0 ? "verified" : "locked",
+    },
+    {
+      id: "verdict",
+      label: "Verdict",
+      meta: RECOMMENDATION_META[detail.recommended_action].verb,
+      state: "verified",
+    },
   ];
   return (
-    <ol className="mt-5 flex flex-wrap items-center gap-x-3 gap-y-2" aria-label="Chain of custody">
-      {nodes.map((node, index) => (
-        <li key={node.caption} className="flex min-w-0 items-center gap-3">
-          {index > 0 ? <span aria-hidden className="h-px w-6 shrink-0 bg-rule" /> : null}
-          <span aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-full bg-muted" />
-          <span className="min-w-0">
-            <span className="label block">{node.caption}</span>
-            <span
-              className="num block max-w-[16rem] truncate text-sm text-ink"
-              title={node.value}
-            >
-              {node.value}
-            </span>
-          </span>
-        </li>
-      ))}
-    </ol>
+    <div className="mt-5">
+      <p className="label">How the verdict was reached</p>
+      <EvidenceSignal steps={steps} orientation="horizontal" className="mt-2" />
+    </div>
   );
 }
 
@@ -230,7 +243,7 @@ function VerdictPanel({ detail }: { detail: DisputeDetail }) {
           </div>
         </dl>
 
-        <CustodyPath detail={detail} />
+        <DecisionProvenance detail={detail} />
 
         <h3 className="label mt-5">Why this verdict</h3>
         {detail.rationale.length > 0 ? (
@@ -473,7 +486,7 @@ export function CaseRoom({ caseId }: { caseId: string }) {
         </div>
         <div className="min-w-0 space-y-6">
           <ActionRail detail={detail} onCompleted={refresh} />
-          <WinProbabilityPanel probability={detail.win_probability} />
+          <WinProbabilityPanel probability={detail.win_probability} breakdown={detail.breakdown} />
           <DossierPanel caseId={detail.dispute_id} available={detail.dossier_available} />
         </div>
       </div>

@@ -1,3 +1,4 @@
+import { SealMark } from "@/components/evidence/SealMark";
 import { Badge } from "@/components/ui/Badge";
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/ui/Panel";
 import { formatAbsolute, formatInteger, formatPercent, shortHash } from "@/lib/format";
@@ -130,9 +131,16 @@ export function CaseFactsPanel({ facts }: { facts: CaseFacts }) {
         title="Frozen fact pack"
         description="The snapshot the dossier is built from. No language model can add a fact to this list."
         actions={
-          <Badge tone={facts.chain_valid ? "positive" : "negative"} dot>
-            {facts.chain_valid ? "Chain valid" : "Chain broken"}
-          </Badge>
+          facts.chain_valid ? (
+            <span className="inline-flex items-center gap-1.5">
+              <SealMark size={16} tone="positive" />
+              <span className="text-sm font-medium text-positive">Chain valid</span>
+            </span>
+          ) : (
+            <Badge tone="negative" dot>
+              Chain broken
+            </Badge>
+          )
         }
       />
       <PanelBody className="pt-0">

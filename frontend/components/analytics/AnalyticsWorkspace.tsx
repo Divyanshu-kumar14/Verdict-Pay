@@ -3,22 +3,26 @@
 /**
  * /analytics - the exposure ledger, rebuilt as a premium analytical workspace.
  *
- * The ruled header still carries the five portfolio figures (Open exposure,
- * Open cases, Protected, Fees avoided, Avg p(win)), now as count-up values with
- * a supporting sub-label under each. The breakdown sits behind a sliding-pill
- * Tabs control, the dominant category is read off a DonutGauge, and the intake
- * slope, the high-volume fee cliff and the financial spread are drawn with the
- * hand-built chart kit. The queue closes the page as a compact ruled table that
- * links straight into each dispute. Every number is served by
- * GET /api/v1/reporting/summary or GET /api/v1/disputes - nothing here is mock.
+ * The ruled header carries the five portfolio figures (Open exposure, Open
+ * cases, Protected, Fees avoided, Avg p(win)) as count-up values with a small
+ * supporting label under each, animated 0 -> value on first load and eased in
+ * place on every 5s refresh thereafter. The breakdown sits behind a sliding
+ * pill Tabs control, the dominant category is read off a DonutGauge, and the
+ * intake slope, the high-volume fee cliff and the financial spread are drawn
+ * with the hand-built chart kit. The fee cliff is given an evidence-provenance
+ * treatment: a SealMark certifies the reading, an annotated marker places the
+ * ratio against the threshold, and an EvidenceSignal renders the assessment
+ * chain from the real high_volume fields. The queue closes the page as a
+ * compact ruled table that links straight into each dispute. Every number is
+ * served by GET /api/v1/reporting/summary or GET /api/v1/disputes - nothing
+ * here is mock.
  */
 
 import Link from "next/link";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowRight, RefreshCw } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 
-import { PageHeader, PageMeta } from "@/components/PageHeader";
 import {
   BarChart,
   DonutGauge,
@@ -26,7 +30,10 @@ import {
   ThresholdMeter,
   type BarDatum,
 } from "@/components/charts";
-import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
+import { EvidenceSignal, type SignalStep } from "@/components/evidence/EvidenceSignal";
+import { SealMark } from "@/components/evidence/SealMark";
+import { Magnetic } from "@/components/motion/Magnetic";
+import { PageHeader, PageMeta } from "@/components/PageHeader";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -159,24 +166,80 @@ function Reveal({
   );
 }
 
+const easeOutCubic = (t: number): number => 1 - Math.pow(1 - t, 3);
+
+/**
+ * Counts 0 -> value on first reveal, then eases toward later refreshes in
+ * place, so a poll never replays the entrance or flashes the figure. Falls
+ * straight to the value under reduced motion.
+ */
+function CountUp({
+  value,
+  format,
+  duration = 520,
+}: {
+  value: number;
+  format: (n: number) => string;
+  duration?: number;
+}): React.JSX.Element {
+  const reduced = useReducedMotion() ?? false;
+  const [display, setDisplay] = useState(0);
+  const fromRef = useRef(0);
+  const rafRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!Number.isFinite(value)) {
+      setDisplay(0);
+      return;
+    }
+    const from = fromRef.current;
+    if (reduced || from === value) {
+      fromRef.current = value;
+      setDisplay(value);
+      return;
+    }
+    const start = performance.now();
+    const tick = (now: number): void => {
+      const t = Math.min(1, (now - start) / duration);
+      const next = from + (value - from) * easeOutCubic(t);
+      fromRef.current = next;
+      setDisplay(next);
+      if (t < 1) rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    };
+  }, [value, duration, reduced]);
+
+  return <>{format(display)}</>;
+}
+
 /** A header KPI: a count-up value with a small supporting label beneath it. */
 function Kpi({
   ready,
+  value,
+  format,
+  prefix = "",
   sub,
   skeleton = "h-5 w-28",
-  children,
 }: {
   ready: boolean;
+  value: number;
+  format: (n: number) => string;
+  prefix?: string;
   sub: ReactNode;
   skeleton?: string;
-  children: ReactNode;
 }): React.JSX.Element {
   if (!ready) {
     return <span aria-hidden className={"skeleton inline-block align-middle " + skeleton} />;
   }
   return (
     <>
-      <span className="block">{children}</span>
+      <span className="num block">
+        {prefix}
+        <CountUp value={value} format={format} />
+      </span>
       <span className="mt-0.5 block text-2xs font-normal text-muted">{sub}</span>
     </>
   );
@@ -289,6 +352,35 @@ export function AnalyticsWorkspace(): React.JSX.Element {
     formatUsd(report?.fees_avoided_usd ?? 0) +
     ".";
 
+  const signalSteps: SignalStep[] = highVolume
+    ? [
+        {
+          id: "sales",
+          label: "3-month sales",
+          meta: formatInteger(highVolume.sales_3mo),
+          state: "verified",
+        },
+        {
+          id: "disputes",
+          label: "3-month disputes",
+          meta: formatInteger(highVolume.disputes_3mo),
+          state: "verified",
+        },
+        {
+          id: "ratio",
+          label: "Dispute ratio",
+          meta: formatPercent(highVolume.ratio, 2),
+          state: "verified",
+        },
+        {
+          id: "limit",
+          label: "Within high-volume limit",
+          meta: formatPercent(highVolume.threshold, 2) + " threshold",
+          state: highVolume.flag ? "failed" : "verified",
+        },
+      ]
+    : [];
+
   const tableRows = useMemo(
     () =>
       rows.map((row) => ({
@@ -333,15 +425,13 @@ export function AnalyticsWorkspace(): React.JSX.Element {
             <PageMeta
               label="Open exposure"
               value={
-                <Kpi ready={ready} sub="At risk across open cases">
-                  <span className="num">
-                    -
-                    <AnimatedNumber
-                      value={report?.total_exposure_usd ?? 0}
-                      format={(n) => formatUsd(n)}
-                    />
-                  </span>
-                </Kpi>
+                <Kpi
+                  ready={ready}
+                  value={report?.total_exposure_usd ?? 0}
+                  format={formatUsd}
+                  prefix="-"
+                  sub="At risk across open cases"
+                />
               }
             />
             <PageMeta
@@ -349,56 +439,49 @@ export function AnalyticsWorkspace(): React.JSX.Element {
               value={
                 <Kpi
                   ready={ready}
+                  value={report?.open_cases ?? 0}
+                  format={formatInteger}
                   sub={
                     report
                       ? formatInteger(report.in_inquiry) + " inquiry · " + formatInteger(report.in_claim) + " claim"
                       : ""
                   }
-                >
-                  <AnimatedNumber
-                    value={report?.open_cases ?? 0}
-                    format={(n) => formatInteger(n)}
-                  />
-                </Kpi>
+                />
               }
             />
             <PageMeta
               label="Protected"
               value={
-                <Kpi ready={ready} sub="Recovered via protection">
-                  <span className="num">
-                    +
-                    <AnimatedNumber
-                      value={report?.protected_usd ?? 0}
-                      format={(n) => formatUsd(n)}
-                    />
-                  </span>
-                </Kpi>
+                <Kpi
+                  ready={ready}
+                  value={report?.protected_usd ?? 0}
+                  format={formatUsd}
+                  prefix="+"
+                  sub="Recovered via protection"
+                />
               }
             />
             <PageMeta
               label="Fees avoided"
               value={
-                <Kpi ready={ready} sub="Waived on won claims">
-                  <span className="num">
-                    +
-                    <AnimatedNumber
-                      value={report?.fees_avoided_usd ?? 0}
-                      format={(n) => formatUsd(n)}
-                    />
-                  </span>
-                </Kpi>
+                <Kpi
+                  ready={ready}
+                  value={report?.fees_avoided_usd ?? 0}
+                  format={formatUsd}
+                  prefix="+"
+                  sub="Waived on won claims"
+                />
               }
             />
             <PageMeta
               label="Avg p(win)"
               value={
-                <Kpi ready={ready} sub="Across open cases">
-                  <AnimatedNumber
-                    value={report?.avg_p_win ?? 0}
-                    format={(n) => formatPercent(n, 1)}
-                  />
-                </Kpi>
+                <Kpi
+                  ready={ready}
+                  value={report?.avg_p_win ?? 0}
+                  format={(n) => formatPercent(n, 1)}
+                  sub="Across open cases"
+                />
               }
             />
             <div className="flex items-center gap-2">
@@ -438,31 +521,29 @@ export function AnalyticsWorkspace(): React.JSX.Element {
             />
             <PanelBody className="grid gap-6 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:items-center">
               <div className="min-w-0">
-                <p className="value text-xl text-ink">{formatPercent(highVolume.ratio, 2)}</p>
-                <p className="mt-2 max-w-[44ch] text-sm text-muted">
-                  {formatPercent(highVolume.ratio, 2)} against the{" "}
-                  {formatPercent(highVolume.threshold, 2)} limit,{" "}
-                  {(Math.abs(highVolume.threshold - highVolume.ratio) * 100).toFixed(2)} points{" "}
-                  {highVolume.flag ? "over" : "under"}. Rolling 3-month disputes over sales.
-                </p>
-                <dl className="mt-4 grid grid-cols-2 gap-x-6">
-                  <div className="row-rule flex items-baseline justify-between gap-3 py-2">
-                    <dt className="text-sm text-muted">3-month sales</dt>
-                    <dd className="num text-right text-sm text-ink">{formatInteger(highVolume.sales_3mo)}</dd>
-                  </div>
-                  <div className="row-rule flex items-baseline justify-between gap-3 py-2">
-                    <dt className="text-sm text-muted">3-month disputes</dt>
-                    <dd className="num text-right text-sm text-ink">
-                      {formatInteger(highVolume.disputes_3mo)}
-                    </dd>
-                  </div>
-                  <div className="row-rule col-span-2 flex items-baseline justify-between gap-3 py-2">
-                    <dt className="text-sm text-muted">Fee applied to a fought claim</dt>
-                    <dd className="num text-right text-sm text-ink">
-                      {highVolume.flag ? "$30, not refunded on a win" : "standard fees"}
-                    </dd>
-                  </div>
-                </dl>
+                <div className="flex items-center gap-2.5">
+                  <p className="value text-xl text-ink">{formatPercent(highVolume.ratio, 2)}</p>
+                  <SealMark size={16} tone="accent" />
+                </div>
+                <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm">
+                  <span className="num text-ink">{formatPercent(highVolume.ratio, 2)}</span>
+                  <span className="text-muted">dispute ratio</span>
+                  <span className="text-muted">vs</span>
+                  <span className="num text-warning">{formatPercent(highVolume.threshold, 2)}</span>
+                  <span className="text-muted">threshold</span>
+                  <span
+                    className={cn(
+                      "num rounded-full border px-2 py-0.5 text-2xs",
+                      highVolume.flag
+                        ? "border-negative/40 bg-pill-negative text-negative"
+                        : "border-positive/40 bg-pill-positive text-positive",
+                    )}
+                  >
+                    {(Math.abs(highVolume.threshold - highVolume.ratio) * 100).toFixed(2)} points{" "}
+                    {highVolume.flag ? "over" : "under"}
+                  </span>
+                </div>
+                <EvidenceSignal steps={signalSteps} orientation="vertical" className="mt-4" />
               </div>
               <ThresholdMeter
                 ratio={highVolume.ratio}
@@ -637,13 +718,29 @@ export function AnalyticsWorkspace(): React.JSX.Element {
                   ))}
                 </div>
               ) : (
-                <BarChart
-                  data={financial}
-                  orientation="horizontal"
-                  formatValue={formatUsd}
-                  summary={financialSummary}
-                  maxValue={Math.max(1, financialMax)}
-                />
+                <>
+                  <BarChart
+                    data={financial}
+                    orientation="horizontal"
+                    formatValue={formatUsd}
+                    summary={financialSummary}
+                    maxValue={Math.max(1, financialMax)}
+                  />
+                  <ul className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-2xs text-muted">
+                    <li className="flex items-center gap-1.5">
+                      <span aria-hidden className={cn("h-1.5 w-1.5 rounded-full", TONE_DOT.negative)} />
+                      At risk
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <span aria-hidden className={cn("h-1.5 w-1.5 rounded-full", TONE_DOT.positive)} />
+                      Recovered
+                    </li>
+                    <li className="flex items-center gap-1.5">
+                      <span aria-hidden className={cn("h-1.5 w-1.5 rounded-full", TONE_DOT.accent)} />
+                      Waived
+                    </li>
+                  </ul>
+                </>
               )}
             </PanelBody>
           </Panel>
@@ -816,15 +913,15 @@ export function AnalyticsWorkspace(): React.JSX.Element {
         </span>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
+      <Magnetic>
         <Link
           href="/disputes"
-          className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-sm text-muted transition-colors duration-120 hover:text-ink"
+          className="inline-flex items-center gap-2 rounded-full border border-line bg-raised px-4 py-2 text-sm font-medium text-ink transition-colors duration-120 hover:bg-control"
         >
           Open the full queue
-          <ArrowRight size={12} aria-hidden />
+          <ArrowRight size={14} aria-hidden />
         </Link>
-      </div>
+      </Magnetic>
     </div>
   );
 }

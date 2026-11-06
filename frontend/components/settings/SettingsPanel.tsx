@@ -7,6 +7,7 @@ import {
   Check,
   ChevronDown,
   Copy,
+  Info,
   KeyRound,
   RefreshCw,
   ShieldCheck,
@@ -14,6 +15,9 @@ import {
 } from "lucide-react";
 
 import { PageHeader, PageMeta } from "@/components/PageHeader";
+import { EvidenceSignal, type SignalStep } from "@/components/evidence/EvidenceSignal";
+import { SealMark } from "@/components/evidence/SealMark";
+import { Magnetic } from "@/components/motion/Magnetic";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
@@ -48,6 +52,17 @@ const WEBHOOK_REQUEST_LINES = [
   "POST /api/v1/webhooks/paypal",
   "X-VerdictPay-Signature: sha256=<hex>",
   "clock skew: +/-300s | replay-safe on event_id",
+];
+
+/* The signed-webhook verification pipeline, rendered as a CONFIGURATION
+   ILLUSTRATION: every stage carries its real deployment config, and no live
+   event is being verified, so nothing here invents a passing checkmark. */
+const WEBHOOK_STEPS: SignalStep[] = [
+  { id: "event", label: "PayPal Event", state: "active", meta: "inbound payload + signature header" },
+  { id: "signature", label: "Signature Verification", state: "pending", meta: "HMAC-SHA256 enabled" },
+  { id: "clock", label: "Clock Tolerance", state: "pending", meta: "reject when skew > ±300s" },
+  { id: "replay", label: "Replay Protection", state: "pending", meta: "event_id must be unseen" },
+  { id: "terminal", label: "Accepted / Rejected", state: "failed", meta: "unsigned or invalid traffic → rejected" },
 ];
 
 function formatUptime(seconds: number): string {
@@ -319,6 +334,40 @@ function LatencyReadout({ ms }: { ms: number | null }) {
   );
 }
 
+/* ------------------------------ mode overview ------------------------------ */
+
+function ModeCard({
+  label,
+  description,
+  tone,
+  active,
+}: {
+  label: string;
+  description: string;
+  tone: "accent" | "positive";
+  active: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "rounded-md border px-4 py-3.5",
+        active ? "border-line bg-raised" : "border-control bg-ground",
+      )}
+    >
+      <div className="flex items-center gap-2">
+        <SealMark size={15} tone={tone} />
+        <span className="text-base font-medium text-ink">{label}</span>
+        {active ? (
+          <Badge tone={tone} size="sm" className="ml-auto">
+            Current
+          </Badge>
+        ) : null}
+      </div>
+      <p className="mt-2 max-w-[42ch] text-sm text-muted">{description}</p>
+    </div>
+  );
+}
+
 /* --------------------------------- the page --------------------------------- */
 
 /** /settings: a read-only report of how this deployment is configured. */
@@ -414,15 +463,17 @@ export function SettingsPanel() {
           </>
         }
         actions={
-          <Button
-            variant="secondary"
-            size="sm"
-            loading={health.refreshing}
-            icon={<RefreshCw size={14} aria-hidden />}
-            onClick={health.refresh}
-          >
-            Run health check
-          </Button>
+          <Magnetic strength={8}>
+            <Button
+              variant="secondary"
+              size="sm"
+              loading={health.refreshing}
+              icon={<RefreshCw size={14} aria-hidden />}
+              onClick={health.refresh}
+            >
+              Run health check
+            </Button>
+          </Magnetic>
         }
       />
 
@@ -430,7 +481,7 @@ export function SettingsPanel() {
         aria-label="On this page"
         className="sticky top-14 z-10 -mx-1 mt-4 border-b border-line bg-ground/90 px-1 backdrop-blur-sm"
       >
-        <div className="flex gap-1 overflow-x-auto py-2">
+        <div className="flex gap-1 overflow-x-auto py-2 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {SECTIONS.map((s) => (
             <a
               key={s.id}
@@ -458,6 +509,38 @@ export function SettingsPanel() {
           description="Which PayPal adapter answers this deployment, how case prose is produced, and what a live switch would change."
         >
           <div className="space-y-4">
+            <Panel>
+              <PanelHeader
+                title="Mode overview"
+                description="Simulator is a sealed training sandbox — not a failure state. It sits beside live as a first-class mode."
+              />
+              <PanelBody>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <ModeCard
+                    label="Simulator"
+                    description="Sealed local ledger — no funds move and no credentials are needed. Seeded inputs keep every run replayable."
+                    tone="accent"
+                    active={modeKnown && isSimulator}
+                  />
+                  <ModeCard
+                    label="Live"
+                    description="Real PayPal rails — captures and refunds move real funds. Requires client credentials and follows live timing."
+                    tone="positive"
+                    active={modeKnown && !isSimulator}
+                  />
+                </div>
+                {!modeKnown ? (
+                  <p className="mt-3 flex items-start gap-2 text-xs text-muted">
+                    <Info size={13} className="mt-0.5 shrink-0" aria-hidden />
+                    <span>
+                      Mode is resolved from the live health payload — run a health check to see
+                      which is active.
+                    </span>
+                  </p>
+                ) : null}
+              </PanelBody>
+            </Panel>
+
             <Panel>
               <PanelHeader
                 title="Gateway & environment"
@@ -659,6 +742,22 @@ export function SettingsPanel() {
               }
             />
             <PanelBody className="space-y-4">
+              <div className="rounded-md border border-control bg-ground px-3.5 py-4">
+                <p className="mb-3 flex items-center gap-2 text-2xs font-semibold uppercase tracking-wide text-muted">
+                  <Webhook size={12} aria-hidden />
+                  Verification flow
+                </p>
+                <EvidenceSignal orientation="vertical" steps={WEBHOOK_STEPS} />
+                <p className="mt-4 flex items-start gap-2 text-xs text-muted">
+                  <Info size={13} className="mt-0.5 shrink-0" aria-hidden />
+                  <span>
+                    Configuration illustration, not a live verification. A valid signed event
+                    clears each step in turn and is accepted; anything unsigned, stale, or
+                    replayed is rejected at the terminal.
+                  </span>
+                </p>
+              </div>
+
               <div className="rounded-md border border-control bg-ground px-3 py-2.5">
                 {WEBHOOK_REQUEST_LINES.map((line) => (
                   <div key={line} className="break-all font-mono text-xs text-muted">
@@ -666,12 +765,14 @@ export function SettingsPanel() {
                   </div>
                 ))}
               </div>
+
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label="Algorithm" value="HMAC-SHA256" mono />
                 <Field label="Clock tolerance" value="+/-300s" mono />
                 <Field label="Replay cache" value="event_id unique" mono />
                 <Field label="Unsigned traffic" value="rejected" tone="negative" />
               </div>
+
               <Accordion trigger="When is a signature accepted?">
                 <p className="flex max-w-[60ch] items-start gap-2 text-sm text-muted">
                   <ShieldCheck size={14} className="mt-0.5 shrink-0 text-muted" aria-hidden />

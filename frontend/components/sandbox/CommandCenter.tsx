@@ -39,7 +39,7 @@ import {
 } from "@/lib/format";
 import { useNow } from "@/lib/hooks/useNow";
 import type { PolledQuery } from "@/lib/hooks/usePolledQuery";
-import { stagger, staggerItem } from "@/lib/motion";
+import { SPRING, stagger, staggerItem } from "@/lib/motion";
 import type {
   ActionResponse,
   CustomerTimeline,
@@ -58,34 +58,102 @@ import {
   STATUS_META,
 } from "@/lib/vocab";
 
-function EvColumn({
-  label,
-  value,
-  note,
-  best,
+function EvComparison({
+  breakdown,
+  stage,
+  bestKey,
   maxAbs,
 }: {
-  label: string;
-  value: number;
-  note: string;
-  best: boolean;
+  breakdown: DisputeDetail["breakdown"];
+  stage: DisputeDetail["stage"];
+  bestKey: "fight" | "settle" | "offer" | null;
   maxAbs: number;
 }) {
-  const fraction = maxAbs > 0 ? Math.abs(value) / maxAbs : 0;
+  const reduced = useReducedMotion() ?? false;
+  const columns = [
+    {
+      key: "fight" as const,
+      label: "Fight",
+      value: breakdown.ev_fight_usd,
+      note: fightEvNote(breakdown),
+    },
+    {
+      key: "settle" as const,
+      label: "Settle",
+      value: breakdown.ev_settle_usd,
+      note: settleEvNote(breakdown, stage),
+    },
+    {
+      key: "offer" as const,
+      label: "Offer",
+      value: breakdown.ev_offer_usd,
+      note: offerEvNote(breakdown),
+    },
+  ];
+
   return (
-    <div className="border-t border-rule px-4 py-3.5 first:border-t-0 sm:border-t-0 sm:border-l sm:first:border-l-0">
-      <span className={cn("label inline-block pb-1", best && "sig")}>
-        {label}
-        {best ? <span className="sr-only"> (best expected value)</span> : null}
-      </span>
-      <p className="num value mt-1.5 text-lg text-ink">{formatUsd(value)}</p>
-      <ProgressBar
-        value={fraction}
-        tone="neutral"
-        label={label + " expected value relative to the largest loss"}
-        className="mt-2.5"
-      />
-      <p className="mt-2 text-sm leading-relaxed text-muted">{note}</p>
+    <div className="grid border-t border-rule sm:grid-cols-3">
+      {columns.map((col) => {
+        const best = bestKey === col.key;
+        const positive = col.value >= 0;
+        const fraction = maxAbs > 0 ? Math.abs(col.value) / maxAbs : 0;
+        return (
+          <div
+            key={col.key}
+            className={cn(
+              "relative flex flex-col border-t border-rule px-4 py-3.5 first:border-t-0 sm:border-t-0 sm:border-l sm:first:border-l-0",
+              best && "sm:rounded-card sm:ring-1 sm:ring-inset sm:ring-accent/40",
+            )}
+          >
+            {best ? (
+              <span aria-hidden className="absolute inset-x-3 top-0 h-px bg-accent" />
+            ) : null}
+            <div className="flex items-center justify-between gap-2">
+              <span className={cn("label", best && "sig")}>
+                {col.label}
+                {best ? <span className="sr-only"> (best expected value)</span> : null}
+              </span>
+              {best ? (
+                <Badge tone="accent" size="sm">
+                  Best
+                </Badge>
+              ) : null}
+            </div>
+            <p
+              className={cn(
+                "num mt-2 text-lg font-semibold",
+                positive ? "text-ink" : "text-negative",
+              )}
+            >
+              {formatUsd(col.value)}
+            </p>
+            <div
+              role="img"
+              aria-label={
+                col.label +
+                " expected value " +
+                formatUsd(col.value) +
+                ", magnitude " +
+                formatPercent(fraction, 0) +
+                " of the largest outcome"
+              }
+              className="relative mt-2 h-1.5 w-full overflow-hidden rounded-full bg-rule"
+            >
+              <motion.span
+                className={cn(
+                  "absolute inset-y-0 left-0 rounded-full",
+                  positive ? "bg-positive" : "bg-negative",
+                )}
+                initial={reduced ? false : { scaleX: 0 }}
+                animate={{ scaleX: fraction }}
+                transition={reduced ? { duration: 0 } : SPRING}
+                style={{ transformOrigin: "left" }}
+              />
+            </div>
+            <p className="mt-2.5 text-sm leading-relaxed text-muted">{col.note}</p>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -202,7 +270,6 @@ function VerdictCard({
             <StatTile
               label="Win probability"
               tone="accent"
-              emphasis="lead"
               countValue={detail.p_win}
               countFormat={formatPercent}
               className="px-0 py-0"
@@ -303,7 +370,6 @@ function CaseSummary({ detail, now }: { detail: DisputeDetail; now: number | nul
           <StatTile
             label="Claim amount"
             tone="neutral"
-            emphasis="lead"
             countValue={detail.amount_usd}
             countFormat={formatUsd}
             className="px-0 py-0"
@@ -353,7 +419,7 @@ function TelemetryLedger({
       </div>
 
       <div className="row-rule overflow-hidden">
-        <div className="max-h-[280px] overflow-y-auto">
+        <div className="max-h-[280px] overflow-x-auto overflow-y-auto">
           <table className="w-full border-collapse text-left">
             <caption className="sr-only">
               Hash-chained telemetry events for the disputed payer
@@ -648,9 +714,9 @@ export function CommandCenter({
           variants={stagger}
           initial={revealInitial}
           animate="show"
-          className="grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]"
+          className="grid grid-cols-[minmax(0,1fr)] gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]"
         >
-          <motion.div variants={staggerItem} className="space-y-4">
+          <motion.div variants={staggerItem} className="min-w-0 space-y-4">
             {caseQuery.error ? (
               <ErrorBanner
                 error={caseQuery.error}
@@ -680,33 +746,16 @@ export function CommandCenter({
                   USD, net of non-refundable fees, p(win) {formatPercent(detail.p_win)}
                 </span>
               </div>
-              <div className="grid border-t border-rule sm:grid-cols-3">
-                <EvColumn
-                  label="Fight"
-                  value={detail.breakdown.ev_fight_usd}
-                  note={fightEvNote(detail.breakdown)}
-                  best={bestKey === "fight"}
-                  maxAbs={maxAbs}
-                />
-                <EvColumn
-                  label="Settle"
-                  value={detail.breakdown.ev_settle_usd}
-                  note={settleEvNote(detail.breakdown, detail.stage)}
-                  best={bestKey === "settle"}
-                  maxAbs={maxAbs}
-                />
-                <EvColumn
-                  label="Offer"
-                  value={detail.breakdown.ev_offer_usd}
-                  note={offerEvNote(detail.breakdown)}
-                  best={bestKey === "offer"}
-                  maxAbs={maxAbs}
-                />
-              </div>
+                            <EvComparison
+                breakdown={detail.breakdown}
+                stage={detail.stage}
+                bestKey={bestKey}
+                maxAbs={maxAbs}
+              />
             </Panel>
           </motion.div>
 
-          <motion.div variants={staggerItem} className="space-y-4">
+          <motion.div variants={staggerItem} className="min-w-0 space-y-4">
             <CaseSummary detail={detail} now={now} />
 
             {containmentHeadline ? (
@@ -819,7 +868,7 @@ export function CommandCenter({
             </Panel>
           </motion.div>
 
-          <motion.div variants={staggerItem} className="lg:col-span-2">
+          <motion.div variants={staggerItem} className="min-w-0 lg:col-span-2">
             <TelemetryLedger
               events={events}
               chainValid={chainValid}

@@ -4,6 +4,8 @@ import Link from "next/link";
 import { ArrowUpRight } from "lucide-react";
 import type { ReactNode } from "react";
 
+import { SealMark } from "@/components/evidence/SealMark";
+import { Magnetic } from "@/components/motion/Magnetic";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Drawer } from "@/components/ui/Drawer";
@@ -85,6 +87,12 @@ function CaseOverview({ detail, now }: { detail: DisputeDetail; now: number }) {
         <Badge tone={REASON_META[detail.reason_code].tone}>
           {REASON_META[detail.reason_code].label}
         </Badge>
+        {detail.facts.chain_valid ? (
+          <Badge tone="positive">
+            <SealMark size={13} tone="positive" />
+            Chain verified
+          </Badge>
+        ) : null}
       </div>
 
       <div className="row-rule pt-4">
@@ -156,13 +164,15 @@ export function DisputeDrawer({
           <Button variant="ghost" size="md" onClick={onClose}>
             Close
           </Button>
-          <Link
-            href={"/disputes/" + encodeURIComponent(disputeId)}
-            className="inline-flex h-control items-center justify-center gap-2 rounded-full bg-accent px-3.5 text-base font-medium text-ground transition-colors duration-120 hover:bg-accent/85"
-          >
-            Open case room
-            <ArrowUpRight size={14} aria-hidden />
-          </Link>
+          <Magnetic>
+            <Link
+              href={"/disputes/" + encodeURIComponent(disputeId)}
+              className="inline-flex h-control items-center justify-center gap-2 rounded-full bg-accent px-3.5 text-base font-medium text-ground transition-colors duration-120 hover:bg-accent/85"
+            >
+              Open case room
+              <ArrowUpRight size={14} aria-hidden />
+            </Link>
+          </Magnetic>
         </div>
       }
     >

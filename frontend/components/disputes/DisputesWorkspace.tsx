@@ -6,13 +6,17 @@ import { motion, useReducedMotion } from "motion/react";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { PageHeader, PageMeta } from "@/components/PageHeader";
+import { StackedBar } from "@/components/charts";
 import { DisputesGridLoader } from "@/components/disputes/DisputesGridLoader";
 import { DisputeDrawer } from "@/components/disputes/DisputeDrawer";
+import { SealMark } from "@/components/evidence/SealMark";
+import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { Panel, PanelFooter, PanelHeader } from "@/components/ui/Panel";
+import { ProgressBar } from "@/components/ui/ProgressBar";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { StatTile } from "@/components/ui/StatTile";
 import { api } from "@/lib/api";
@@ -66,8 +70,7 @@ function KpiTile({
   const ready = status === "ready";
   return (
     <StatTile
-      className="h-full bg-surface"
-      emphasis="lead"
+      className="h-full"
       label={label}
       tone={ready ? tone : "neutral"}
       sub={sub}
@@ -137,6 +140,11 @@ export function DisputesWorkspace() {
   const summaryData = summary.data;
   const summaryStatus: KpiStatus = summaryData ? "ready" : summary.error ? "error" : "loading";
 
+  const otherOpen =
+    summaryData && summaryData.open_cases > 0
+      ? Math.max(0, summaryData.open_cases - summaryData.in_inquiry - summaryData.in_claim)
+      : 0;
+
   const gridHeight = Math.min(
     GRID_MAX_HEIGHT,
     Math.max(GRID_MIN_HEIGHT, visible.length * GRID_ROW_HEIGHT + GRID_HEADER_HEIGHT + 2),
@@ -174,31 +182,77 @@ export function DisputesWorkspace() {
         animate="show"
         role="group"
         aria-label="Exposure readings"
-        className="panel grid grid-cols-2 gap-px overflow-hidden bg-rule xl:grid-cols-4"
+        className="grid grid-cols-1 gap-4 xl:grid-cols-3"
       >
-        <motion.div variants={staggerItem} className="bg-surface">
-          <KpiTile
-            label="Open exposure"
-            status={summaryStatus}
-            valueNumber={summaryData ? summaryData.total_exposure_usd : 0}
-            valueFormat={formatUsd}
-            sub={
-              summaryData ? (
-                summaryData.open_cases +
-                " open · " +
-                summaryData.in_inquiry +
-                " in inquiry · " +
-                summaryData.in_claim +
-                " in claim"
-              ) : summaryStatus === "error" ? (
-                "Reporting unavailable"
-              ) : (
-                <KpiSubBar />
-              )
-            }
-          />
-        </motion.div>
-        <motion.div variants={staggerItem} className="bg-surface">
+        <motion.article variants={staggerItem} className="panel-raised p-5 xl:col-span-3">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <p className="label">Open exposure</p>
+                {summaryData ? (
+                  <span className="live-dot h-1.5 w-1.5 rounded-full bg-positive" aria-hidden />
+                ) : null}
+              </div>
+              <div className="value mt-1.5 text-2xl text-ink">
+                {summaryStatus === "error" ? (
+                  "—"
+                ) : (
+                  <AnimatedNumber
+                    value={summaryData ? summaryData.total_exposure_usd : 0}
+                    format={formatUsd}
+                  />
+                )}
+              </div>
+              <p className="mt-1.5 text-xs text-muted">
+                {summaryData ? (
+                  summaryData.open_cases +
+                  " open · " +
+                  summaryData.in_inquiry +
+                  " in inquiry · " +
+                  summaryData.in_claim +
+                  " in claim"
+                ) : summaryStatus === "error" ? (
+                  "Reporting unavailable"
+                ) : (
+                  <KpiSubBar />
+                )}
+              </p>
+            </div>
+
+            {summaryData && summaryData.open_cases > 0 ? (
+              <div className="w-full shrink-0 sm:w-72">
+                <StackedBar
+                  segments={[
+                    {
+                      key: "claim",
+                      label: "In claim",
+                      value: summaryData.in_claim,
+                      tone: "negative",
+                    },
+                    {
+                      key: "inquiry",
+                      label: "In inquiry",
+                      value: summaryData.in_inquiry,
+                      tone: "warning",
+                    },
+                    { key: "other", label: "Other open", value: otherOpen, tone: "neutral" },
+                  ]}
+                  summary={
+                    "Open exposure composition: " +
+                    summaryData.in_claim +
+                    " in claim, " +
+                    summaryData.in_inquiry +
+                    " in inquiry, " +
+                    otherOpen +
+                    " other open."
+                  }
+                />
+              </div>
+            ) : null}
+          </div>
+        </motion.article>
+
+        <motion.article variants={staggerItem} className="panel">
           <KpiTile
             label="Protected"
             tone="positive"
@@ -207,7 +261,10 @@ export function DisputesWorkspace() {
             valueFormat={formatUsd}
             sub={
               summaryData ? (
-                summaryData.chain_verified_customers + " chain-verified customers"
+                <span className="inline-flex items-center gap-1.5">
+                  <SealMark size={14} tone="positive" />
+                  {summaryData.chain_verified_customers} chain-verified customers
+                </span>
               ) : summaryStatus === "error" ? (
                 "Reporting unavailable"
               ) : (
@@ -215,8 +272,9 @@ export function DisputesWorkspace() {
               )
             }
           />
-        </motion.div>
-        <motion.div variants={staggerItem} className="bg-surface">
+        </motion.article>
+
+        <motion.article variants={staggerItem} className="panel">
           <KpiTile
             label="Fees avoided"
             tone="positive"
@@ -233,8 +291,9 @@ export function DisputesWorkspace() {
               )
             }
           />
-        </motion.div>
-        <motion.div variants={staggerItem} className="bg-surface">
+        </motion.article>
+
+        <motion.article variants={staggerItem} className="panel">
           <KpiTile
             label="Average p(win)"
             tone="accent"
@@ -243,7 +302,17 @@ export function DisputesWorkspace() {
             valueFormat={formatPercent}
             sub={
               summaryData ? (
-                "win-rate estimate " + formatPercent(summaryData.win_rate_estimate)
+                <span className="block">
+                  <span className="block">
+                    win-rate estimate {formatPercent(summaryData.win_rate_estimate)}
+                  </span>
+                  <ProgressBar
+                    value={summaryData.avg_p_win}
+                    tone="accent"
+                    label="Average win probability"
+                    className="mt-2"
+                  />
+                </span>
               ) : summaryStatus === "error" ? (
                 "Reporting unavailable"
               ) : (
@@ -251,7 +320,7 @@ export function DisputesWorkspace() {
               )
             }
           />
-        </motion.div>
+        </motion.article>
       </motion.div>
 
       {summary.error ? (

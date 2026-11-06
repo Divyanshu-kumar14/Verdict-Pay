@@ -247,13 +247,17 @@ export function DisputesGrid({
         getRowStyle={(params: RowClassParams<DisputeSummary>) => {
           const data = params.data;
           if (!data) return undefined;
+          const accents: string[] = [];
           const dueMs = isoToMs(data.seller_response_due_date);
-          if (dueMs === null) return undefined;
-          if (dueMs < now) return { boxShadow: "inset 3px 0 0 var(--color-negative)" };
-          if (dueMs - now <= SOON_WINDOW_MS) {
-            return { boxShadow: "inset 3px 0 0 var(--color-warning)" };
+          if (dueMs !== null) {
+            if (dueMs < now) accents.push("inset 3px 0 0 var(--color-negative)");
+            else if (dueMs - now <= SOON_WINDOW_MS) {
+              accents.push("inset 3px 0 0 var(--color-warning)");
+            }
           }
-          return undefined;
+          // Selection reads as a crisp accent ring that keeps the deadline accent beside it.
+          if (params.node.isSelected()) accents.push("inset 0 0 0 1px var(--color-accent)");
+          return accents.length > 0 ? { boxShadow: accents.join(", ") } : undefined;
         }}
         // Columns carry fixed widths that total more than the card at narrow
         // widths, which pushed the header viewport past its container and made

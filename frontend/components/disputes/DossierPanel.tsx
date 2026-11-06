@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Download, FileText, RefreshCw } from "lucide-react";
 
+import { SealMark } from "@/components/evidence/SealMark";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { Drawer } from "@/components/ui/Drawer";
@@ -99,7 +100,16 @@ export function DossierPanel({
         <PanelHeader
           title="Seller-protection PDF"
           description="The dossier is built on demand from the frozen fact pack and cached on the case."
-          actions={<Badge tone={available ? "positive" : "accent"}>{available ? "Sealed" : "On demand"}</Badge>}
+          actions={
+            available ? (
+              <span className="inline-flex items-center gap-1.5">
+                <SealMark size={16} tone="positive" />
+                <span className="text-sm font-medium text-positive">Sealed</span>
+              </span>
+            ) : (
+              <Badge tone="accent">On demand</Badge>
+            )
+          }
         />
 
         <div className="space-y-3 px-4 pb-4">

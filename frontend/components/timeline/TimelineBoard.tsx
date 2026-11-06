@@ -92,10 +92,13 @@ function isoDate(date: string | null): string {
 
 function DayHeader({ now }: { now: number | null }) {
   return (
-    <div className="grid grid-cols-[240px_minmax(0,1fr)] border-b border-rule">
-      <div className="sticky left-0 z-sticky flex items-center gap-2 border-r border-rule bg-surface px-4 py-2.5">
-        <CalendarClock size={12} className="text-muted" aria-hidden />
-        <span className="text-sm text-muted">Case, seller response deadline</span>
+    <div className="grid grid-cols-[180px_minmax(0,1fr)] border-b border-rule md:grid-cols-[240px_minmax(0,1fr)]">
+      <div className="sticky left-0 z-sticky flex items-center gap-2 border-r border-rule bg-surface px-3 py-2.5 md:px-4">
+        <CalendarClock size={12} className="shrink-0 text-muted" aria-hidden />
+        <span className="min-w-0 truncate text-sm text-muted">
+          <span className="hidden md:inline">Case, seller response deadline</span>
+          <span className="md:hidden">Case deadline</span>
+        </span>
       </div>
       <div
         className="relative grid"
@@ -130,6 +133,24 @@ function DayHeader({ now }: { now: number | null }) {
   );
 }
 
+/* The current-time marker: a slow, restrained opacity drift (not a flash),
+   disabled entirely under reduced motion. It reads "alive", never "alerting". */
+function NowLine() {
+  const reduced = useReducedMotion() ?? false;
+  return (
+    <motion.span
+      aria-hidden
+      className="absolute inset-y-0 left-0 w-[2px] bg-accent"
+      animate={reduced ? { opacity: 0.9 } : { opacity: [0.9, 0.42, 0.9] }}
+      transition={
+        reduced
+          ? { duration: 0 }
+          : { duration: 3.2, ease: "easeInOut", repeat: Infinity }
+      }
+    />
+  );
+}
+
 /* The lane backdrop: three severity bands read left-to-right from the now line
    (overdue → due-soon → future), then the 14 column rules and the accent now
    line on top. Rendered per row so every lane stays aligned to the grid. */
@@ -151,7 +172,7 @@ function LaneGrid() {
           style={{ left: index * DAY_PCT + "%" }}
         />
       ))}
-      <span className="absolute inset-y-0 left-0 w-[2px] bg-accent" />
+      <NowLine />
     </div>
   );
 }
@@ -175,10 +196,10 @@ function TimelineRow({ dispute, now }: { dispute: DisputeSummary; now: number })
   return (
     <Link
       href={"/disputes/" + encodeURIComponent(dispute.dispute_id)}
-      className="group grid grid-cols-[240px_minmax(0,1fr)] border-b border-rule transition-colors duration-120 last:border-b-0"
+      className="group grid grid-cols-[180px_minmax(0,1fr)] border-b border-rule transition-colors duration-120 last:border-b-0 md:grid-cols-[240px_minmax(0,1fr)]"
       aria-label={"Open case " + dispute.dispute_id + ", " + (urgency ? urgency.label : "no deadline")}
     >
-      <div className="relative min-w-0 border-r border-rule bg-surface px-4 py-2.5 transition-colors duration-120 group-hover:bg-raised/60">
+      <div className="relative min-w-0 border-r border-rule bg-surface px-3 py-2.5 transition-colors duration-120 group-hover:bg-raised/60 md:px-4">
         {overdue ? (
           <span
             aria-hidden
@@ -186,7 +207,7 @@ function TimelineRow({ dispute, now }: { dispute: DisputeSummary; now: number })
           />
         ) : null}
         <div className="flex items-center justify-between gap-2">
-          <span className="num text-base text-ink" title={dispute.dispute_id}>
+          <span className="num min-w-0 truncate text-base text-ink" title={dispute.dispute_id}>
             {shortHash(dispute.dispute_id, 10, 3)}
           </span>
           <span className="num shrink-0 text-sm text-muted">
@@ -198,7 +219,7 @@ function TimelineRow({ dispute, now }: { dispute: DisputeSummary; now: number })
             {reason.short}
           </Badge>
           {overdue ? <Badge tone="negative">Overdue</Badge> : null}
-          <span className="num text-sm text-muted">
+          <span className="num hidden text-sm text-muted md:inline">
             {isoDate(dispute.seller_response_due_date)}
           </span>
         </div>
