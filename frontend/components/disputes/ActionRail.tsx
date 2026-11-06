@@ -10,7 +10,7 @@ import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { api, toApiError, type ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { formatPercent, formatUsd } from "@/lib/format";
+import { formatLatency, formatPercent, formatUsd } from "@/lib/format";
 import type { ActionResponse, AllowedAction, DisputeAction, DisputeDetail } from "@/lib/types";
 import { ACTION_META, CHANNEL_META, RECOMMENDATION_META, STAGE_META } from "@/lib/vocab";
 import { DISPUTE_ACTIONS } from "@/lib/types";
@@ -53,9 +53,9 @@ export function ActionRail({
       return "Filing costs " + formatUsd(feeUsd) + " and risks " + formatUsd(Math.abs(detail.breakdown.ev_settle_usd)) + " if the claim is lost.";
     }
     if (action === "MAKE_OFFER") {
-      return "Offer outlay " + formatUsd(Math.abs(detail.breakdown.ev_offer_usd)) + " (" + formatPercent(detail.breakdown.offer_ratio, 0) + " of the claim); no dispute fee at INQUIRY.";
+      return "Offer outlay " + formatUsd(Math.abs(detail.breakdown.ev_offer_usd)) + " (" + formatPercent(detail.breakdown.offer_ratio, 0) + " of the claim); no dispute fee at the inquiry stage.";
     }
-    return "No PayPal fee at " + detail.stage + " stage; the inquiry stays open for the buyer response.";
+    return "No PayPal fee at the " + STAGE_META[detail.stage].label.toLowerCase() + " stage; the case stays open for the buyer response.";
   };
 
   const orderedActions: AllowedAction[] = DISPUTE_ACTIONS.map((action) => {
@@ -120,7 +120,7 @@ export function ActionRail({
             {result.status}
           </span>
           <span className="text-muted">{ACTION_META[result.action].label}</span>
-          <span className="num ml-auto text-2xs text-muted">{result.latency_ms}ms</span>
+          <span className="num ml-auto text-2xs text-muted">{formatLatency(result.latency_ms)}</span>
         </div>
       ) : null}
 

@@ -36,6 +36,26 @@ function ValueList({ values, emptyLabel }: { values: string[]; emptyLabel: strin
   );
 }
 
+/* The fact pack is a backend dict, so its keys are snake_case. A reader should never see
+   "matched_on" as a label; known keys get a proper label and anything new is humanised. */
+const RECORD_KEY_LABELS: Record<string, string> = {
+  resource_id: "Resource",
+  sha256: "SHA-256",
+  delivered_at: "Delivered",
+  transaction_id: "Transaction",
+  amount_usd: "Amount (USD)",
+  status: "Status",
+  days_ago: "Days ago",
+  matched_on: "Matched on",
+};
+
+function recordKeyLabel(key: string): string {
+  const known = RECORD_KEY_LABELS[key];
+  if (known) return known;
+  const words = key.replace(/_/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 function renderValue(value: unknown): string | null {
   if (value === null || value === undefined) return null;
   if (typeof value === "string") {
@@ -74,7 +94,7 @@ function RecordList({
     <ul className="space-y-3">
       {records.map((record, index) => {
         const entries = Object.entries(record)
-          .map(([key, value]) => [key, renderValue(value)] as const)
+          .map(([key, value]) => [recordKeyLabel(key), renderValue(value)] as const)
           .filter((entry): entry is readonly [string, string] => entry[1] !== null);
         return (
           <li key={"match-" + String(index)} className="row-rule pt-3 first:border-t-0 first:pt-0">

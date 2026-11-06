@@ -6,6 +6,8 @@
 
 import { z } from "zod";
 
+import { formatLatency } from "./format";
+
 import type { Tone } from "./vocab";
 
 export const ContainmentSchema = z.object({
@@ -35,7 +37,8 @@ export type ContainmentHeadline = {
 /** One-line containment result for the command center. */
 export function describeContainment(containment: Containment): ContainmentHeadline {
   if (containment.suspended) {
-    const latency = containment.latency_ms <= 0 ? "<1ms" : `${containment.latency_ms}ms`;
+    const latency =
+      containment.latency_ms <= 0 ? "<1ms" : formatLatency(containment.latency_ms);
     return {
       text: `Subscription suspended in ${latency}`,
       detail: containment.subscription_id,

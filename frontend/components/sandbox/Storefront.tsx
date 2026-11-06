@@ -11,7 +11,7 @@ import { cn } from "@/lib/cn";
 import { DEMO_BUYER_EMAIL, DEMO_PLAN } from "@/lib/constants";
 import { formatUsd } from "@/lib/format";
 import type { SandboxFlowState, StepStatus } from "@/lib/hooks/useSandboxFlow";
-import type { Tone } from "@/lib/vocab";
+import { CHANNEL_META, REASON_META, STAGE_META, type Tone } from "@/lib/vocab";
 
 const STEP_BADGE: Record<StepStatus, { label: string; tone: Tone }> = {
   idle: { label: "Ready", tone: "neutral" },
@@ -76,7 +76,15 @@ export function Storefront({ state, onCheckout, onUsage, onDispute, onReset }: S
       key: "dispute",
       index: 3,
       title: "File friendly-fraud dispute",
-      subtitle: "SNAD · INQUIRY · internal channel · $99 claim",
+      subtitle:
+        REASON_META.MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED.short +
+        " · " +
+        STAGE_META.INQUIRY.short +
+        " · " +
+        CHANNEL_META.INTERNAL.short +
+        " · " +
+        formatUsd(DEMO_PLAN.priceUsd) +
+        " claim",
       action: "File dispute",
       status: state.disputeStatus,
       canRun: canDispute,

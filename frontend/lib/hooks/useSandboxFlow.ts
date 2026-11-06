@@ -14,6 +14,7 @@ import { api, toApiError, type ApiError } from "../api";
 import { parseContainment } from "../containment";
 import { formatCompactInteger, formatLatency, formatPercent, formatUsd, shortHash } from "../format";
 import type { CheckoutResponse, DisputeSimulationResponse, UsageResponse } from "../types";
+import { CHANNEL_META, REASON_META, RECOMMENDATION_META, STAGE_META } from "../vocab";
 
 export type StepStatus = "idle" | "running" | "success" | "error";
 export type LogLevel = "info" | "ok" | "warn" | "error";
@@ -195,7 +196,15 @@ export function useSandboxFlow(): SandboxFlow {
     const { attempt, signal } = startAttempt();
 
     setState((prev) => ({ ...prev, disputeStatus: "running", error: null }));
-    appendLog("info", "POST /api/v1/sandbox/dispute · SNAD · INQUIRY · INTERNAL");
+    appendLog(
+      "info",
+      "POST /api/v1/sandbox/dispute · " +
+        REASON_META.MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED.short +
+        " · " +
+        STAGE_META.INQUIRY.short +
+        " · " +
+        CHANNEL_META.INTERNAL.short,
+    );
 
     const started = performance.now();
     try {
@@ -214,11 +223,11 @@ export function useSandboxFlow(): SandboxFlow {
       setState((prev) => ({ ...prev, dispute: result, disputeStatus: "success" }));
       appendLog(
         "ok",
-        `INQUIRY ${result.dispute.dispute_id} opened · webhook ${result.webhook_event_id} · ${formatLatency(latency)}`,
+        `${STAGE_META.INQUIRY.short} ${result.dispute.dispute_id} opened · webhook ${result.webhook_event_id} · ${formatLatency(latency)}`,
       );
       appendLog(
         "info",
-        `triage ${result.triage_triggered ? "triggered" : "not triggered"} · ${result.dispute.recommended_action} · p(win) ${formatPercent(result.dispute.p_win)}`,
+        `triage ${result.triage_triggered ? "triggered" : "not triggered"} · ${RECOMMENDATION_META[result.dispute.recommended_action].label} · p(win) ${formatPercent(result.dispute.p_win)}`,
       );
       const containment = parseContainment(result.containment);
       if (containment.suspended) {

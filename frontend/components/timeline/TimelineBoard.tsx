@@ -56,10 +56,13 @@ const LEGEND: Urgency[] = [
   { label: "More than 7 days", tone: "positive" },
 ];
 
+/* The day headers read in the viewer's own time zone, so a deadline cell printed as a
+   UTC ISO date could name the day before or after the column it sits in near midnight.
+   Format it with the same local-day helper the headers use. */
 function isoDate(date: string | null): string {
   const ms = isoToMs(date);
   if (ms === null) return "-";
-  return new Date(ms).toISOString().slice(0, 10);
+  return formatDayLabel(ms);
 }
 
 function DayHeader({ now }: { now: number | null }) {

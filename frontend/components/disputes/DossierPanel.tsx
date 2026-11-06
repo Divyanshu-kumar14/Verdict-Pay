@@ -161,8 +161,8 @@ export function DossierPanel({ caseId, available }: { caseId: string; available:
         )}
 
         <p className="row-rule pt-2.5 text-xs leading-relaxed text-muted">
-          Fetched from GET /api/v1/disputes/{caseId}/dossier.pdf with the X-API-Key header as an
-          authenticated blob, so the key never appears in a URL.
+          Generated on demand from the frozen fact pack and downloaded as an authenticated blob, so
+          the API key never appears in a URL.
         </p>
       </PanelBody>
     </Panel>

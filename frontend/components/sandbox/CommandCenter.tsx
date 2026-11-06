@@ -34,6 +34,7 @@ import {
   formatDelta,
   formatDueIn,
   formatInteger,
+  formatLatency,
   formatPercent,
   formatUsd,
   humaniseAction,
@@ -57,25 +58,7 @@ import {
   RECOMMENDATION_META,
   STAGE_META,
   STATUS_META,
-  type Tone,
 } from "@/lib/vocab";
-
-/**
- * lib/containment.ts still names tones with the retired palette. Map them onto
- * the current vocabulary locally so presentation stays correct without
- * touching a module outside this cluster's scope.
- */
-const LEGACY_TONE: Record<string, Tone> = {
-  emerald: "positive",
-  amber: "warning",
-  rose: "negative",
-  sky: "accent",
-  neutral: "neutral",
-};
-
-function normaliseTone(tone: Tone): Tone {
-  return LEGACY_TONE[tone as string] ?? "neutral";
-}
 
 function EvColumn({
   label,
@@ -174,19 +157,21 @@ function VerdictCard({
           </ul>
         ) : null}
 
-        <div className="mt-4 max-w-xs">
-          <Button
-            variant="primary"
-            size="lg"
-            block
-            loading={acting}
-            disabled={!canAct}
-            onClick={onExecute}
-            trailingIcon={<ArrowRight size={14} aria-hidden />}
-          >
-            {primaryAction ? recMeta.verb : "Monitor case"}
-          </Button>
-        </div>
+        {primaryAction ? (
+          <div className="mt-4 max-w-xs">
+            <Button
+              variant="primary"
+              size="lg"
+              block
+              loading={acting}
+              disabled={!canAct}
+              onClick={onExecute}
+              trailingIcon={<ArrowRight size={14} aria-hidden />}
+            >
+              {recMeta.verb}
+            </Button>
+          </div>
+        ) : null}
 
         {actionError ? (
           <div className="mt-3">
@@ -207,7 +192,7 @@ function VerdictCard({
               <span className="text-ink">{humaniseAction(actionResult.status)}</span>
             </span>
             <span className="text-muted">{ACTION_META[actionResult.action].label}</span>
-            <span className="num text-sm text-muted">{actionResult.latency_ms}ms</span>
+            <span className="num text-sm text-muted">{formatLatency(actionResult.latency_ms)}</span>
             <span className="num text-sm text-muted" title={actionResult.action_id}>
               {shortHash(actionResult.action_id, 10, 4)}
             </span>
@@ -528,7 +513,7 @@ export function CommandCenter({
       const result = await api.triageDispute(detail.dispute_id);
       setTriageNote(
         "EV recomputed. " +
-          result.recommended_action +
+          RECOMMENDATION_META[result.recommended_action].label +
           ", p(win) " +
           formatPercent(result.win_probability.score),
       );
@@ -620,7 +605,7 @@ export function CommandCenter({
           <EmptyState
             icon={<ShieldCheck size={18} aria-hidden />}
             title="No dispute on file"
-            description="Run steps 1–3 on the left to open an INQUIRY through the PayPal webhook path. This panel reads live case state, nothing here is mocked."
+            description="Run steps 1–3 on the left to open an inquiry through the PayPal webhook path. This panel reads live case state, nothing here is mocked."
             action={
               <span className="num text-xs text-muted">
                 GET /api/v1/disputes, refreshed every 2 seconds
@@ -720,7 +705,7 @@ export function CommandCenter({
                     </p>
                   </div>
                   <Badge
-                    tone={normaliseTone(containmentHeadline.tone)}
+                    tone={containmentHeadline.tone}
                     className="ml-auto shrink-0"
                   >
                     Containment
@@ -799,7 +784,7 @@ export function CommandCenter({
                           {ACTION_META[record.action].label}
                         </span>
                         <span className="text-muted">{humaniseAction(record.status)}</span>
-                        <span className="num text-muted">{record.latency_ms}ms</span>
+                        <span className="num text-muted">{formatLatency(record.latency_ms)}</span>
                         <span className="num ml-auto text-muted" title={record.action_id}>
                           {shortHash(record.action_id, 8, 4)}
                         </span>

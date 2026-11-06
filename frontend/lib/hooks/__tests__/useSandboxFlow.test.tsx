@@ -313,7 +313,9 @@ describe("useSandboxFlow", () => {
     await waitFor(() => expect(screen.getByTestId("disputeStatus").textContent).toBe("success"));
     expect(screen.getByTestId("disputeStage").textContent).toBe("INQUIRY");
     expect(screen.getByTestId("disputeId").textContent).toBe("disp_001");
-    expect(screen.getByTestId("logs").textContent).toContain("INQUIRY disp_001 opened");
+    // The step log reads in sentence case, not in the enum the API speaks.
+    expect(screen.getByTestId("logs").textContent).toContain("Inquiry disp_001 opened");
+    expect(screen.getByTestId("logs").textContent).toContain("Not as described · Inquiry · PayPal");
 
     vi.unstubAllGlobals();
   });
