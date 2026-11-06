@@ -36,8 +36,14 @@ class GeminiClient:
         if self._enabled:
             try:
                 from google import genai  # lazy: SDK optional until used
+                from google.genai import types
 
-                self._client = genai.Client(api_key=settings.gemini_api_key)
+                # JSON mode lives in the v1beta API surface; the default v1
+                # rejects response_mime_type="application/json" with a 400.
+                self._client = genai.Client(
+                    api_key=settings.gemini_api_key,
+                    http_options=types.HttpOptions(api_version="v1beta"),
+                )
             except Exception as exc:  # pragma: no cover - SDK import failure
                 logger.warning("gemini client unavailable: %s", type(exc).__name__)
                 self._client = None
