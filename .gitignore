@@ -44,3 +44,8 @@ verdictpay.md
 artifacts/
 *.pdf
 !docs/**/*.pdf
+
+# Design-skill: the dealt direction sheet is committed (make design-gate reads it);
+# the measured output is regenerable.
+.taste-skill/inspect/
+.taste-skill/before/

@@ -8,10 +8,10 @@ import type { DisputesGridProps } from "./DisputesGrid";
 const Grid = dynamic(() => import("./DisputesGrid").then((module) => module.DisputesGrid), {
   ssr: false,
   loading: () => (
-    <div className="space-y-2 p-3" aria-busy="true" aria-label="Loading dispute grid">
-      <Skeleton className="h-8 w-full" />
-      {Array.from({ length: 7 }, (_, index) => (
-        <Skeleton key={index} className="h-10 w-full" />
+    <div className="space-y-2.5 p-4" aria-busy="true" aria-label="Loading dispute grid">
+      <Skeleton className="h-9 w-full" />
+      {Array.from({ length: 8 }, (_, index) => (
+        <Skeleton key={index} className="h-row w-full" />
       ))}
     </div>
   ),

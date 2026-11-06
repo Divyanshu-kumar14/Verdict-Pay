@@ -299,6 +299,8 @@ export const CaseFactsSchema = z.object({
   deliveries: z.array(z.record(z.unknown())),
   usage_units: z.number().int(),
   usage_events: z.number().int(),
+  login_count: z.number().int(),
+  response_due_date: isoDateTimeSchema.nullable(),
   ce3_matches: z.array(z.record(z.unknown())),
   ce3_window_days: z.number().int(),
   signals: z.record(z.boolean()),

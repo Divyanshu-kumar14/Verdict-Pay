@@ -1,14 +1,15 @@
 "use client";
 
 /**
- * Hand-built threshold meter: a ratio drawn against a hard limit, with the
- * limit marked as a flag on the scale. The product's whole point is staying
- * left of PayPal's 1.5 percent high-volume line, so the line is the chart.
+ * A ratio drawn against a hard limit.
+ *
+ * The product's whole point is staying left of PayPal's 1.5 percent
+ * high-volume line, so the limit is a flag on the scale rather than a note in
+ * the caption.
  */
 
 import { formatPercent } from "@/lib/format";
 import { ChartTable } from "./ChartTable";
-import { useReveal } from "./use-reveal";
 
 export function ThresholdMeter({
   ratio,
@@ -29,7 +30,6 @@ export function ThresholdMeter({
   summary: string;
   className?: string;
 }): React.JSX.Element {
-  const { ready, reduce } = useReveal();
   const safeLimit = limit > 0 ? limit : 0.015;
   const max = scaleMax ?? Math.max(safeLimit * 1.4, ratio * 1.1, 0.02);
   const ratioPct = Math.min(100, Math.max(0, (ratio / max) * 100));
@@ -46,20 +46,25 @@ export function ThresholdMeter({
         aria-valuenow={Math.round((ratio / max) * 100)}
         aria-valuetext={formatValue(ratio) + " against a limit of " + formatValue(safeLimit)}
       >
-        <div className="relative h-[14px] overflow-visible rounded-[4px] bg-white/[0.05]">
+        <div className="relative h-3.5 rounded-[2px] bg-raised">
           <div
-            className={over ? "absolute inset-y-0 left-0 rounded-[4px] bg-rose/70" : "absolute inset-y-0 left-0 rounded-[4px] bg-emerald/60"}
+            className="absolute inset-y-0 left-0 rounded-[2px]"
             style={{
-              width: ready ? ratioPct + "%" : "0%",
-              transition: reduce ? undefined : "width 900ms cubic-bezier(0.16, 1, 0.3, 1)",
+              width: ratioPct + "%",
+              backgroundColor: over ? "var(--color-negative)" : "var(--color-positive)",
             }}
           />
-          <div className="absolute -inset-y-[5px] w-[2px] bg-amber" style={{ left: limitPct + "%" }} title={"Limit " + formatValue(safeLimit)} />
+          <div
+            aria-hidden
+            className="absolute -inset-y-1 w-0.5 bg-warning"
+            style={{ left: limitPct + "%" }}
+            title={"Limit " + formatValue(safeLimit)}
+          />
         </div>
-        <div className="mt-1.5 flex items-baseline justify-between font-mono text-[9.5px] text-dim">
-          <span className="tnum">0%</span>
-          <span className="tnum text-amber">LIMIT {formatValue(safeLimit)}</span>
-          <span className="tnum">{formatValue(max)}</span>
+        <div className="mt-2 flex items-baseline justify-between text-xs text-muted">
+          <span className="num">0%</span>
+          <span className="num text-warning">Limit {formatValue(safeLimit)}</span>
+          <span className="num">{formatValue(max)}</span>
         </div>
       </div>
       <ChartTable

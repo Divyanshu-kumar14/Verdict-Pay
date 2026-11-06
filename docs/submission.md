@@ -92,9 +92,9 @@ merchant command center on the right. Button 1 checks out a $99 Pro plan. Button
 tokens, 15 logins and one signed ZIP. Button 3 files a SNAD claim through the real webhook path and
 the case room prices it live: p(win) 90.0%, EV fight -$41.40, EV settle -$99.00, EV offer -$29.70
 with the best-EV badge, recommendation DEFLECT_INQUIRY at a $0.00 fee. The CLI variant files INR
-instead and asserts p(win) 0.95, EV fight -$35.70. Behind those screens: 291 backend tests, 26
-end-to-end assertions against the running simulator, and 24 SDK tests, all reproducible with
-`make verify`.
+instead and asserts p(win) 0.95, EV fight -$35.70. Behind those screens: 296 backend tests, 188 frontend
+unit and component tests, 12 frontend API tests that drive the real server over HTTP, 24 SDK tests, and
+26 end-to-end assertions against the running simulator, all reproducible with `make verify`.
 
 ## 3. Tools
 
@@ -113,7 +113,7 @@ or the PDF layout.
 **How the codebase was built — disclosed, not implied:** VerdictPay was implemented by an AI coding
 agent (DeepSeek-based DSH) working under human direction, with the human owning scope, the frozen
 spec and every merge decision. The agent did not self-certify: each phase closed on executable
-gates, `make verify` runs Ruff, pytest (291), ESLint, `tsc --noEmit`, `next build`, SDK Vitest (24) and the
+gates, `make verify` runs Ruff, pytest (296), ESLint, `tsc --noEmit`, `next build`, Vitest (188 frontend + 24 SDK) and the
 26-assertion E2E script, and an adversarial QA pass ([docs/qa/backend-findings.md](qa/backend-findings.md))
 filed 36 probes, found 2 HIGH bugs, and those two now have regression tests
 (`test_chunked_oversized_body_cannot_bypass_the_cap`,
@@ -202,7 +202,7 @@ Latency and timestamps are the only moving values; EV and p(win) are determinist
 | "Tools" field | §3 |
 | Public open-source repo, license visible in About | [LICENSE](../LICENSE) (MIT) at repo root; repo URL in §1 |
 | Demo video under 3 minutes on YouTube, showing it working | §4 script; video itself is `[ADD YOUTUBE LINK]` |
-| Judging: Technological Implementation | 291 backend tests, 26 E2E assertions, 24 SDK tests, adversarial QA with regressions |
+| Judging: Technological Implementation | 520 tests (296 backend, 188 frontend, 12 API end-to-end, 24 SDK) plus 26 E2E assertions, adversarial QA with regressions |
 | Judging: Design | [frontend/app/page.tsx](../frontend/app/page.tsx), [SandboxWorkspace.tsx](../frontend/components/sandbox/SandboxWorkspace.tsx), AG Grid queue, EV cards, case room |
 | Judging: Potential Impact | EV model + fee-cliff penalty in [ev.py](../backend/app/domain/disputes/ev.py); $15/$30 fees, 1.5% threshold |
 | Judging: Innovation / Idea | Pre-dispute chain as system of record, action priced before the fee, air-gapped narrative |

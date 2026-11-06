@@ -16,76 +16,87 @@ import {
 } from "../vocab";
 import type { Tone } from "../vocab";
 
+const TONES: Tone[] = ["positive", "warning", "negative", "accent", "neutral"];
+const TONE_MAPS = { TONE_TEXT, TONE_BADGE, TONE_DOT, TONE_BAR } as const;
+
 // ------------------------------------------------ Tone maps
 describe("TONE_* maps", () => {
-  const tones: Tone[] = ["emerald", "amber", "rose", "sky", "neutral"];
-
-  it("TONE_TEXT contains all tones with text- prefix", () => {
-    for (const tone of tones) {
-      expect(TONE_TEXT[tone]).toBeDefined();
-      expect(TONE_TEXT[tone]).toContain(tone === "neutral" ? "text-muted" : `text-${tone}`);
+  it("every map covers exactly the five dealt tones", () => {
+    for (const map of Object.values(TONE_MAPS)) {
+      expect(Object.keys(map)).toHaveLength(5);
+      for (const tone of TONES) {
+        expect(map[tone]).toBeDefined();
+        expect(typeof map[tone]).toBe("string");
+        expect(map[tone].length).toBeGreaterThan(0);
+      }
     }
-    expect(TONE_TEXT.emerald).toBe("text-emerald");
+  });
+
+  it("TONE_TEXT carries a text- class per tone", () => {
+    expect(TONE_TEXT.positive).toBe("text-positive");
+    expect(TONE_TEXT.warning).toBe("text-warning");
+    expect(TONE_TEXT.negative).toBe("text-negative");
+    expect(TONE_TEXT.accent).toBe("text-accent");
     expect(TONE_TEXT.neutral).toBe("text-muted");
   });
 
-  it("TONE_BADGE contains border/bg/text for each tone", () => {
-    for (const tone of tones) {
-      const badge = TONE_BADGE[tone];
-      expect(badge).toContain("border-");
-      expect(badge).toContain("bg-");
-      expect(badge).toContain("text-");
+  it("TONE_BADGE is a tinted ground with readable ink, never a hue utility", () => {
+    for (const tone of TONES) {
+      expect(TONE_BADGE[tone]).toContain("bg-pill-");
+      expect(TONE_BADGE[tone]).toContain("text-pill-");
+      expect(TONE_BADGE[tone]).not.toContain("border-");
     }
-    expect(TONE_BADGE.rose).toBe("border-rose/25 bg-rose/10 text-rose");
+    expect(TONE_BADGE.positive).toBe("bg-pill-positive text-pill-positive-ink");
+    expect(TONE_BADGE.neutral).toBe("bg-pill-neutral text-pill-neutral-ink");
   });
 
-  it("TONE_DOT contains bg- class", () => {
-    for (const tone of tones) {
+  it("TONE_DOT and TONE_BAR carry a bg- class per tone", () => {
+    for (const tone of TONES) {
       expect(TONE_DOT[tone]).toContain("bg-");
-    }
-    expect(TONE_DOT.emerald).toBe("bg-emerald");
-    expect(TONE_DOT.neutral).toBe("bg-white/30");
-  });
-
-  it("TONE_BAR contains bg- class", () => {
-    for (const tone of tones) {
       expect(TONE_BAR[tone]).toContain("bg-");
     }
-    expect(TONE_BAR.sky).toBe("bg-sky");
-    expect(TONE_BAR.neutral).toBe("bg-white/25");
+    expect(TONE_DOT.neutral).toBe("bg-muted");
+    // Neutral bars read as a chart mark, not as a status hue.
+    expect(TONE_BAR.neutral).toBe("bg-chart-1");
   });
 
-  it("all TONE maps have exactly 5 entries", () => {
-    expect(Object.keys(TONE_TEXT)).toHaveLength(5);
-    expect(Object.keys(TONE_BADGE)).toHaveLength(5);
-    expect(Object.keys(TONE_DOT)).toHaveLength(5);
-    expect(Object.keys(TONE_BAR)).toHaveLength(5);
+  it("no tone class string smuggles in uppercase or letter-spacing", () => {
+    for (const map of Object.values(TONE_MAPS)) {
+      for (const value of Object.values(map)) {
+        expect(value).toBe(value.toLowerCase());
+        expect(value).not.toContain("tracking-");
+      }
+    }
   });
 });
 
 // ------------------------------------------------ REASON_META
 describe("REASON_META", () => {
-  it("has all 4 reasons with short/label/tone", () => {
+  it("has all 4 reasons with a sentence-case short, a label and a tone", () => {
     expect(Object.keys(REASON_META)).toHaveLength(4);
     expect(REASON_META.MERCHANDISE_OR_SERVICE_NOT_RECEIVED).toEqual({
-      short: "INR",
+      short: "Not received",
       label: "Item not received",
-      tone: "amber",
+      tone: "warning",
     });
     expect(REASON_META.MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED).toEqual({
-      short: "SNAD",
-      label: "Not as described",
-      tone: "rose",
+      short: "Not as described",
+      label: "Item not as described",
+      tone: "negative",
     });
-    expect(REASON_META.UNAUTHORIZED).toEqual({ short: "UA", label: "Unauthorized", tone: "rose" });
-    expect(REASON_META.OTHER).toEqual({ short: "OTHER", label: "Other", tone: "neutral" });
+    expect(REASON_META.UNAUTHORIZED).toEqual({
+      short: "Unauthorized",
+      label: "Unauthorized payment",
+      tone: "negative",
+    });
+    expect(REASON_META.OTHER).toEqual({ short: "Other", label: "Other reason", tone: "neutral" });
   });
 
-  it("every reason meta has required fields", () => {
+  it("every reason meta has required fields on the dealt tone list", () => {
     for (const meta of Object.values(REASON_META)) {
       expect(typeof meta.short).toBe("string");
       expect(typeof meta.label).toBe("string");
-      expect(["emerald", "amber", "rose", "sky", "neutral"]).toContain(meta.tone);
+      expect(TONES).toContain(meta.tone);
     }
   });
 });
@@ -97,11 +108,19 @@ describe("STAGE_META", () => {
   });
 
   it("contains expected short/label/tone for each stage", () => {
-    expect(STAGE_META.INQUIRY).toEqual({ short: "INQUIRY", label: "Inquiry", tone: "amber" });
-    expect(STAGE_META.CHARGEBACK).toEqual({ short: "CHARGEBACK", label: "Chargeback", tone: "rose" });
-    expect(STAGE_META.PRE_ARBITRATION).toEqual({ short: "PRE-ARB", label: "Pre-arbitration", tone: "rose" });
-    expect(STAGE_META.RESOLVED).toEqual({ short: "RESOLVED", label: "Resolved", tone: "emerald" });
-    expect(STAGE_META.CLOSED).toEqual({ short: "CLOSED", label: "Closed", tone: "neutral" });
+    expect(STAGE_META.INQUIRY).toEqual({ short: "Inquiry", label: "Inquiry", tone: "warning" });
+    expect(STAGE_META.CHARGEBACK).toEqual({
+      short: "Chargeback",
+      label: "Chargeback",
+      tone: "negative",
+    });
+    expect(STAGE_META.PRE_ARBITRATION).toEqual({
+      short: "Pre-arbitration",
+      label: "Pre-arbitration",
+      tone: "negative",
+    });
+    expect(STAGE_META.RESOLVED).toEqual({ short: "Resolved", label: "Resolved", tone: "positive" });
+    expect(STAGE_META.CLOSED).toEqual({ short: "Closed", label: "Closed", tone: "neutral" });
   });
 });
 
@@ -110,14 +129,14 @@ describe("CHANNEL_META", () => {
   it("has INTERNAL and EXTERNAL", () => {
     expect(Object.keys(CHANNEL_META)).toHaveLength(2);
     expect(CHANNEL_META.INTERNAL).toEqual({
-      short: "INTERNAL",
+      short: "PayPal",
       label: "PayPal channel",
       tone: "neutral",
     });
     expect(CHANNEL_META.EXTERNAL).toEqual({
-      short: "EXTERNAL",
-      label: "Card / bank channel",
-      tone: "sky",
+      short: "Card / bank",
+      label: "Card or bank channel",
+      tone: "accent",
     });
   });
 });
@@ -129,19 +148,19 @@ describe("STATUS_META", () => {
   });
 
   it("contains expected entries", () => {
-    expect(STATUS_META.OPEN).toEqual({ short: "OPEN", label: "Open", tone: "sky" });
+    expect(STATUS_META.OPEN).toEqual({ short: "Open", label: "Open", tone: "accent" });
     expect(STATUS_META.WAITING_FOR_SELLER_RESPONSE).toEqual({
-      short: "AWAITING REPLY",
+      short: "Awaiting reply",
       label: "Waiting for seller response",
-      tone: "amber",
+      tone: "warning",
     });
     expect(STATUS_META.UNDER_REVIEW).toEqual({
-      short: "UNDER REVIEW",
+      short: "Under review",
       label: "Under review",
-      tone: "sky",
+      tone: "accent",
     });
-    expect(STATUS_META.RESOLVED).toEqual({ short: "RESOLVED", label: "Resolved", tone: "emerald" });
-    expect(STATUS_META.CLOSED).toEqual({ short: "CLOSED", label: "Closed", tone: "neutral" });
+    expect(STATUS_META.RESOLVED).toEqual({ short: "Resolved", label: "Resolved", tone: "positive" });
+    expect(STATUS_META.CLOSED).toEqual({ short: "Closed", label: "Closed", tone: "neutral" });
   });
 });
 
@@ -153,35 +172,35 @@ describe("RECOMMENDATION_META", () => {
 
   it("contains expected mapping for each recommendation", () => {
     expect(RECOMMENDATION_META.DEFLECT_INQUIRY).toEqual({
-      short: "DEFLECT",
+      short: "Deflect",
       label: "Deflect inquiry",
-      tone: "amber",
+      tone: "warning",
       action: "SEND_MESSAGE",
       verb: "Deflect inquiry",
     });
     expect(RECOMMENDATION_META.MAKE_OFFER).toEqual({
-      short: "OFFER",
+      short: "Offer",
       label: "Make offer",
-      tone: "sky",
+      tone: "accent",
       action: "MAKE_OFFER",
       verb: "Make offer",
     });
     expect(RECOMMENDATION_META.ACCEPT_CLAIM).toEqual({
-      short: "ACCEPT",
+      short: "Accept",
       label: "Accept claim",
-      tone: "rose",
+      tone: "negative",
       action: "ACCEPT_CLAIM",
       verb: "Accept claim",
     });
     expect(RECOMMENDATION_META.PROVIDE_EVIDENCE).toEqual({
-      short: "EVIDENCE",
+      short: "Evidence",
       label: "Provide evidence",
-      tone: "emerald",
+      tone: "positive",
       action: "PROVIDE_EVIDENCE",
       verb: "Provide evidence",
     });
     expect(RECOMMENDATION_META.MONITOR).toEqual({
-      short: "MONITOR",
+      short: "Monitor",
       label: "Monitor",
       tone: "neutral",
       action: null,
@@ -189,12 +208,12 @@ describe("RECOMMENDATION_META", () => {
     });
   });
 
-  it("every recommendation has short/label/tone/verb", () => {
+  it("every recommendation has short/label/tone/verb on the dealt tone list", () => {
     for (const meta of Object.values(RECOMMENDATION_META)) {
       expect(typeof meta.short).toBe("string");
       expect(typeof meta.label).toBe("string");
       expect(typeof meta.verb).toBe("string");
-      expect(["emerald", "amber", "rose", "sky", "neutral"]).toContain(meta.tone);
+      expect(TONES).toContain(meta.tone);
     }
   });
 });
@@ -207,17 +226,17 @@ describe("ACTION_META", () => {
 
   it("contains expected labels and descriptions", () => {
     expect(ACTION_META.SEND_MESSAGE.label).toBe("Send message");
-    expect(ACTION_META.SEND_MESSAGE.tone).toBe("amber");
-    expect(ACTION_META.SEND_MESSAGE.description).toContain("PayPal resolution centre");
+    expect(ACTION_META.SEND_MESSAGE.tone).toBe("warning");
+    expect(ACTION_META.SEND_MESSAGE.description).toContain("resolution centre");
 
     expect(ACTION_META.MAKE_OFFER.label).toBe("Make offer");
-    expect(ACTION_META.MAKE_OFFER.tone).toBe("sky");
+    expect(ACTION_META.MAKE_OFFER.tone).toBe("accent");
 
     expect(ACTION_META.ACCEPT_CLAIM.label).toBe("Accept claim");
-    expect(ACTION_META.ACCEPT_CLAIM.tone).toBe("rose");
+    expect(ACTION_META.ACCEPT_CLAIM.tone).toBe("negative");
 
     expect(ACTION_META.PROVIDE_EVIDENCE.label).toBe("Provide evidence");
-    expect(ACTION_META.PROVIDE_EVIDENCE.tone).toBe("emerald");
+    expect(ACTION_META.PROVIDE_EVIDENCE.tone).toBe("positive");
     expect(ACTION_META.PROVIDE_EVIDENCE.description).toContain("dossier");
   });
 });
@@ -229,10 +248,10 @@ describe("EVENT_META", () => {
   });
 
   it("contains expected short/label for each event", () => {
-    expect(EVENT_META.TOS_ACCEPTED).toEqual({ short: "TOS", label: "Terms accepted" });
-    expect(EVENT_META.SESSION_AUTH).toEqual({ short: "AUTH", label: "Session authenticated" });
-    expect(EVENT_META.ASSET_DELIVERED).toEqual({ short: "DELIVER", label: "Asset delivered" });
-    expect(EVENT_META.USAGE_METERED).toEqual({ short: "USAGE", label: "Metered usage" });
+    expect(EVENT_META.TOS_ACCEPTED).toEqual({ short: "Terms", label: "Terms accepted" });
+    expect(EVENT_META.SESSION_AUTH).toEqual({ short: "Session", label: "Session authenticated" });
+    expect(EVENT_META.ASSET_DELIVERED).toEqual({ short: "Delivery", label: "Asset delivered" });
+    expect(EVENT_META.USAGE_METERED).toEqual({ short: "Usage", label: "Metered usage" });
   });
 });
 

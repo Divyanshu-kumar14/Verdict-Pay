@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { SandboxWorkspace } from "@/components/sandbox/SandboxWorkspace";
 
 export const metadata: Metadata = {
-  title: "Judge sandbox",
+  title: "Command centre",
 };
 
 export default function SandboxPage() {

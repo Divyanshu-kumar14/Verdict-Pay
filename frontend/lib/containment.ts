@@ -39,7 +39,7 @@ export function describeContainment(containment: Containment): ContainmentHeadli
     return {
       text: `Subscription suspended in ${latency}`,
       detail: containment.subscription_id,
-      tone: "emerald",
+      tone: "positive",
       suspended: true,
     };
   }
@@ -55,14 +55,14 @@ export function describeContainment(containment: Containment): ContainmentHeadli
     return {
       text: `Containment failed: ${containment.error}`,
       detail: containment.subscription_id,
-      tone: "rose",
+      tone: "negative",
       suspended: false,
     };
   }
   return {
     text: "Containment ran without suspending billing",
     detail: containment.subscription_id,
-    tone: "amber",
+    tone: "warning",
     suspended: false,
   };
 }

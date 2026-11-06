@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import { DisputesWorkspace } from "@/components/disputes/DisputesWorkspace";
 
 export const metadata: Metadata = {
-  title: "Triage queue",
+  title: "Dispute exposure",
 };
 
 export default function DisputesPage() {

@@ -1,18 +1,18 @@
 import type { ReactNode } from "react";
 
-import { FieldLabel } from "@/components/premium/FieldLabel";
 import { cn } from "@/lib/cn";
 
-/** Page-level instrument masthead: rule, kicker, display title and meta rail. */
+/**
+ * The screen's title, in sentence case at 26px, with the numbers that qualify it
+ * on the right. A screen is named, not announced: no kicker sits above this.
+ */
 export function PageHeader({
-  kicker,
   title,
   description,
   meta,
   actions,
   className,
 }: {
-  kicker: string;
   title: string;
   description?: ReactNode;
   meta?: ReactNode;
@@ -22,21 +22,21 @@ export function PageHeader({
   return (
     <header
       className={cn(
-        "relative border-b border-hairline pb-5 pt-4 lg:flex lg:items-end lg:justify-between lg:gap-10",
+        "pb-6 lg:flex lg:items-end lg:justify-between lg:gap-10",
         className,
       )}
     >
-      <span aria-hidden className="rule-instrument absolute inset-x-0 top-0 h-px" />
-      <div className="min-w-0 max-w-3xl">
-        <FieldLabel rule>{kicker}</FieldLabel>
-        <h1 className="mt-3 text-hero font-semibold text-ink">{title}</h1>
+      <div className="min-w-0 max-w-[70ch]">
+        <h1 className="text-xl font-semibold text-ink">{title}</h1>
         {description ? (
-          <p className="mt-2 text-[13px] leading-relaxed text-muted">{description}</p>
+          <p className="mt-2 text-base text-muted">{description}</p>
         ) : null}
-        {actions ? <div className="mt-4 flex flex-wrap items-center gap-2">{actions}</div> : null}
+        {actions ? (
+          <div className="mt-4 flex flex-wrap items-center gap-2">{actions}</div>
+        ) : null}
       </div>
       {meta ? (
-        <div className="mt-5 flex shrink-0 flex-wrap items-end gap-x-7 gap-y-4 lg:mt-0 lg:border-l lg:border-hairline lg:pl-7">
+        <div className="mt-5 flex shrink-0 flex-wrap items-end gap-x-8 gap-y-4 lg:mt-0">
           {meta}
         </div>
       ) : null}
@@ -46,9 +46,11 @@ export function PageHeader({
 
 export function PageMeta({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="min-w-[72px]">
-      <FieldLabel>{label}</FieldLabel>
-      <div className="tnum mt-1.5 font-mono text-[13px] leading-none text-ink">{value}</div>
+    <div className="min-w-[80px]">
+      <p className="label">{label}</p>
+      {/* a div, not a p: value is a ReactNode and a caller may pass block content
+          (a loading placeholder), which is invalid inside a paragraph. */}
+      <div className="num mt-1.5 text-lg font-semibold text-ink">{value}</div>
     </div>
   );
 }

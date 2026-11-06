@@ -20,8 +20,9 @@ while this was written (277 → 306 → 174), so line numbers are indicative; se
 | 6 | Inconsistent voice | "click in order" (L29) next to "Requires Python 3.12+" (L90); noun-phrase headings next to a claim heading; sentences run 8 to 90 words | Third person to describe, imperative to instruct, <= 35 words per sentence |
 
 Two blockers outside the six: `<!-- BADGES -->` (L9) and `<!-- DIAGRAM: PIPELINE -->` (L45) ship as invisible
-gaps on the page — fill or delete them before merge. "291 backend tests" is asserted in three places; 219
-`def test_` functions exist, so confirm `make test` prints 291 (parametrisation) or write "290+".
+gaps on the page — fill or delete them before merge. The test count is asserted in three places; it is
+now the measured 520 (296 pytest + 188 frontend unit + 12 frontend API + 24 SDK), re-confirmed by
+collecting rather than by counting `def test_` functions, which undercounts parametrisation.
 
 ## 2. Hero spec
 
@@ -54,15 +55,15 @@ gaps on the page — fill or delete them before merge. "291 backend tests" is as
   <p>Pre-dispute telemetry for PayPal digital-goods disputes.<br/>
   Runs locally: no PayPal account, no model key, no cloud.</p>
 
-  <p><sub>291 backend tests &nbsp;·&nbsp; 26 end-to-end assertions &nbsp;·&nbsp; MIT</sub></p>
+  <p><sub>520 tests &nbsp;·&nbsp; 26 end-to-end assertions &nbsp;·&nbsp; MIT</sub></p>
 
   <p>
-    <img src="https://img.shields.io/badge/PayPal-Disputes%20v1%20%C2%B7%20Orders%20v2%20%C2%B7%20Subscriptions%20v1-1B2430?style=flat-square&labelColor=0E141B" alt="PayPal APIs: Disputes v1, Orders v2, Subscriptions v1" />
-    <img src="https://img.shields.io/badge/AI-OpenAI--compatible%20%2B%20local%20Ollama-1B2430?style=flat-square&labelColor=0E141B" alt="AI: OpenAI-compatible or local Ollama" />
-    <img src="https://img.shields.io/badge/Python-3.12%2B-1B2430?style=flat-square&labelColor=0E141B" alt="Python 3.12 or newer" />
-    <img src="https://img.shields.io/badge/Next.js-15-1B2430?style=flat-square&labelColor=0E141B" alt="Next.js 15" />
-    <img src="https://img.shields.io/badge/tests-291%20passing-34D399?style=flat-square&labelColor=0E141B" alt="291 tests passing" />
-    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-34D399?style=flat-square&labelColor=0E141B" alt="License: MIT" /></a>
+    <img src="https://img.shields.io/badge/PayPal-Disputes%20v1%20%C2%B7%20Orders%20v2%20%C2%B7%20Subscriptions%20v1-222224?style=flat-square&labelColor=131217" alt="PayPal APIs: Disputes v1, Orders v2, Subscriptions v1" />
+    <img src="https://img.shields.io/badge/AI-OpenAI--compatible%20%2B%20local%20Ollama-222224?style=flat-square&labelColor=131217" alt="AI: OpenAI-compatible or local Ollama" />
+    <img src="https://img.shields.io/badge/Python-3.12%2B-222224?style=flat-square&labelColor=131217" alt="Python 3.12 or newer" />
+    <img src="https://img.shields.io/badge/Next.js-15-222224?style=flat-square&labelColor=131217" alt="Next.js 15" />
+    <img src="https://img.shields.io/badge/tests-520%20passing-44A282?style=flat-square&labelColor=131217" alt="520 tests passing" />
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-44A282?style=flat-square&labelColor=131217" alt="License: MIT" /></a>
   </p>
 
   <img src="design/og-image.svg" width="760" alt="VerdictPay card: the headline Win the dispute before the fee attaches, the shield mark, and three chips reading 0-fee deflection, $15/$30 fee-cliff EV, and SHA-256 chain of custody." />
@@ -74,8 +75,8 @@ gaps on the page — fill or delete them before merge. "291 backend tests" is as
 
 - Six is the cap. Order is product claim -> stack -> status: PayPal, AI, Python, Next.js, tests, license.
 - `style=flat-square` on every badge, no exceptions. Never `for-the-badge`, never mixed styles.
-- `labelColor=0E141B` on all six, so the row reads as one object in both themes.
-- Two message colours only: `1B2430` for capability, `34D399` for verifiable status. No PayPal blue, no Python
+- `labelColor=131217` on all six, so the row reads as one object in both themes.
+- Two message colours only: `222224` for capability, `44A282` for verifiable status. No PayPal blue, no Python
   blue, no `000000` — an earlier draft used four colours and its black Next.js badge vanished in dark mode.
 - No logos in badges: at 20px they add noise, and a wrong Simple Icons slug renders nothing.
 - Em dashes and middle dots are percent-encoded (`%C2%B7`); a literal `-` in a message must be written `--`.
@@ -92,8 +93,8 @@ the trade accepted here: poster above, command immediately below. Do not add a t
 | File | Role | Format | Used |
 |---|---|---|---|
 | `design/logo-mark.svg` | source geometry, 24-unit grid, `currentColor` | SVG | never referenced directly |
-| `docs/assets/mark-ink.svg` | mark for dark UI (`#E6EDF3`) | SVG | hero, via `<picture>` |
-| `docs/assets/mark-void.svg` | mark for light UI (`#080B0F`) | SVG | hero, via `<picture>` |
+| `docs/assets/mark-ink.svg` | mark for dark UI (`#ffffff`) | SVG | hero, via `<picture>` |
+| `docs/assets/mark-void.svg` | mark for light UI (`#171719`) | SVG | hero, via `<picture>` |
 | `design/og-image.svg` | 1200x630 banner | SVG | hero, width 760 |
 | `docs/assets/og-card.png` | social / `og:image` only | PNG 1200x630 | not in README |
 | `docs/assets/logo-mark.png`, `@4x` | **unusable**: baked black | PNG | delete or re-render |
@@ -105,8 +106,8 @@ the trade accepted here: poster above, command immediately below. Do not add a t
 Produce two colour-locked copies (do not edit the source):
 
 ```bash
-sed 's/fill="currentColor"/fill="#E6EDF3"/' design/logo-mark.svg > docs/assets/mark-ink.svg
-sed 's/fill="currentColor"/fill="#080B0F"/' design/logo-mark.svg > docs/assets/mark-void.svg
+sed 's/fill="currentColor"/fill="#ffffff"/' design/logo-mark.svg > docs/assets/mark-ink.svg
+sed 's/fill="currentColor"/fill="#171719"/' design/logo-mark.svg > docs/assets/mark-void.svg
 ```
 
 `<picture>` swaps them with `prefers-color-scheme`, which GitHub supports and maps to the reader's theme.
@@ -116,13 +117,13 @@ Without `<picture>`, keep the mark out of the README entirely rather than ship a
 
 Ship the banner as SVG: 5 KB instead of 90 KB, sharp at 760 on a 2x display, and one source of truth with the
 design file. Keep `og-card.png` because `og:image` and most social parsers will not accept SVG, and because it
-is the fallback if a corporate proxy blocks SVG. Re-render the PNG after any SVG edit, with Inter installed so
+is the fallback if a corporate proxy blocks SVG. Re-render the PNG after any SVG edit, with Public Sans installed so
 the headline matches the brand face.
 
 ### 3.3 GitHub SVG caveats
 
 - `currentColor` is black in `<img>`; there is no page colour to inherit. Hence 3.1.
-- No external fonts load. Inter falls back to the system sans; absolute coordinates mean no reflow, only
+- No external fonts load. Public Sans falls back to the system sans; absolute coordinates mean no reflow, only
   slightly different letterforms. Accept it, or bake the wordmark to paths in a copy.
 - Scripts and external references are inert. These assets are already self-contained; keep them so.
 - Camo caches by URL. When the art changes, rename the file rather than overwrite it.
@@ -226,11 +227,11 @@ The OG card is dark by brand; cap it at 760 so it reads as a card rather than a 
 
 - Alt text: the banner states the claim and the chip text; the mark is `alt=""` (decorative, the H1 names the
   product). Never "image of" and never the filename.
-- Link text: badge alt is the meaning ("License: MIT", "291 tests passing"), not "badge" or "here"; file links
+- Link text: badge alt is the meaning ("License: MIT", "520 tests passing"), not "badge" or "here"; file links
   name the file (`hashing.py`, not "this file").
 - Heading order: one H1, twelve H2, at most two H3, no H4. `<summary>` is a disclosure label, not a heading.
 - Tables: a header row always, no empty header cell, sentence-case heads, three columns maximum.
-- Colour is never the only signal: emerald means verified or preserved, and every colour cue also carries a word
+- Colour is never the only signal: positive means verified or preserved, and every colour cue also carries a word
   ("Implemented", "Not used") — the earlier compliance table's check-mark column is exactly what not to do.
 - Diagrams: one sentence before each carries the meaning, because Mermaid renders as an image to assistive tech;
   the prose must stand alone if the diagram fails.

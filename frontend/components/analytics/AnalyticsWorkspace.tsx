@@ -1,75 +1,80 @@
 "use client";
 
 /**
- * /analytics - exposure canvas. A ruled ledger of what is at risk, the fee
- * cliff as the sealed centrepiece, then the decision mix, win-rate gauge,
- * intake slope, stage stack and the live queue. Every number is served by
+ * /analytics - the research ledger. A ruled header carries the portfolio
+ * figures, the breakdown the reader scans first sits beside the intake slope,
+ * the high-volume fee cliff is the centrepiece, and the queue closes the page
+ * as a full-width ruled table. Every number is served by
  * GET /api/v1/reporting/summary or GET /api/v1/disputes.
  */
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState } from "react";
-import { animate } from "motion/react";
-import { ArrowRight } from "lucide-react";
+import { useMemo, useState } from "react";
+import { ArrowRight, RefreshCw } from "lucide-react";
 
 import { PageHeader, PageMeta } from "@/components/PageHeader";
-import { BarChart, DonutGauge, LineSpark, StackedBar, ThresholdMeter } from "@/components/charts";
-import type { BarDatum } from "@/components/charts";
-import type { StackSegment } from "@/components/charts";
-import { DisputesGridLoader } from "@/components/disputes/DisputesGridLoader";
-import { FieldLabel, LiquidGlass, NumberTicker, Reveal } from "@/components/premium";
+import { LineSpark, ThresholdMeter } from "@/components/charts";
 import { Badge } from "@/components/ui/Badge";
+import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { Panel, PanelBody, PanelHeader } from "@/components/ui/Panel";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { formatDayLabel, formatInteger, formatPercent, formatUsd, isoToMs } from "@/lib/format";
+import {
+  formatDayLabel,
+  formatInteger,
+  formatPercent,
+  formatUsd,
+  isoToMs,
+  shortHash,
+} from "@/lib/format";
 import { useNow } from "@/lib/hooks/useNow";
 import { usePolledQuery } from "@/lib/hooks/usePolledQuery";
-import type { DisputeStage, DisputeSummary, RecommendedAction } from "@/lib/types";
-import { RECOMMENDATION_META, RECOMMENDATION_ORDER, STAGE_META, TONE_DOT, TONE_TEXT } from "@/lib/vocab";
+import {
+  DISPUTE_REASONS,
+  type DisputeStage,
+  type DisputeSummary,
+  type RecommendedAction,
+} from "@/lib/types";
+import {
+  REASON_META,
+  RECOMMENDATION_META,
+  RECOMMENDATION_ORDER,
+  STAGE_META,
+} from "@/lib/vocab";
 
-const STAGE_ORDER: DisputeStage[] = ["INQUIRY", "CHARGEBACK", "PRE_ARBITRATION", "RESOLVED", "CLOSED"];
+const STAGE_ORDER: DisputeStage[] = [
+  "INQUIRY",
+  "CHARGEBACK",
+  "PRE_ARBITRATION",
+  "RESOLVED",
+  "CLOSED",
+];
 const DAY_MS = 86_400_000;
+const RANGE_OPTIONS = [7, 14, 30] as const;
+type RangeDays = (typeof RANGE_OPTIONS)[number];
 
-/** Money that resolves with the same spring as NumberTicker, but grouped. */
-function MoneyTicker({ value, className }: { value: number; className?: string }): React.JSX.Element {
-  const [text, setText] = useState(() => formatUsd(0));
-  useEffect(() => {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      setText(formatUsd(value));
-      return;
-    }
-    const controls = animate(0, value, {
-      duration: 0.9,
-      ease: [0.16, 1, 0.3, 1],
-      onUpdate: (latest) => setText(formatUsd(latest)),
-      onComplete: () => setText(formatUsd(value)),
-    });
-    return () => controls.stop();
-  }, [value]);
-  return <span className={cn("tnum font-mono", className)}>{text}</span>;
+type Grouping = "stage" | "reason" | "recommendation";
+const GROUPINGS: Array<{ key: Grouping; label: string; heading: string }> = [
+  { key: "stage", label: "By stage", heading: "Cases by stage" },
+  { key: "reason", label: "By reason", heading: "Cases by reason" },
+  { key: "recommendation", label: "By recommendation", heading: "Cases by recommendation" },
+];
+
+/** "2026-11-06" for a ruled table cell. A missing date reads as a grey dash. */
+function isoDate(value: string | null | undefined): string {
+  const ms = isoToMs(value);
+  return ms === null ? "-" : new Date(ms).toISOString().slice(0, 10);
 }
 
-function MeasuredRow({ label, value, tone }: { label: string; value: string; tone?: "emerald" | "amber" | "rose" | "sky" }): React.JSX.Element {
-  return (
-    <div className="flex items-baseline justify-between gap-4 border-b border-hairline/60 py-2 last:border-b-0">
-      <span className="text-[10px] font-medium uppercase tracking-[0.14em] text-dim">{label}</span>
-      <span className={cn("tnum text-right font-mono text-[12px] text-ink", tone === "emerald" && "text-emerald", tone === "amber" && "text-amber", tone === "rose" && "text-rose", tone === "sky" && "text-sky")}>
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function bucketIntake(rows: DisputeSummary[], nowMs: number): { labels: string[]; points: number[] } {
+/** Daily arrivals counted from case creation timestamps, one bucket per day. */
+function bucketIntake(rows: DisputeSummary[], nowMs: number, days: number): { labels: string[]; points: number[] } {
   const dayStart = Math.floor(nowMs / DAY_MS) * DAY_MS;
   const labels: string[] = [];
   const points: number[] = [];
-  for (let back = 13; back >= 0; back -= 1) {
+  for (let back = days - 1; back >= 0; back -= 1) {
     const start = dayStart - back * DAY_MS;
     labels.push(formatDayLabel(start));
     let count = 0;
@@ -82,233 +87,522 @@ function bucketIntake(rows: DisputeSummary[], nowMs: number): { labels: string[]
   return { labels, points };
 }
 
-/** /analytics - exposure canvas: KPI ledger, fee cliff, decision mix and queue. */
+type RankItem = { key: string; label: string; value: number };
+
+function rankItems(rows: DisputeSummary[], grouping: Grouping): RankItem[] {
+  if (grouping === "stage") {
+    return STAGE_ORDER.map((stage) => ({
+      key: stage,
+      label: STAGE_META[stage].short,
+      value: rows.filter((row) => row.stage === stage).length,
+    }));
+  }
+  if (grouping === "reason") {
+    return DISPUTE_REASONS.map((reason) => ({
+      key: reason,
+      label: REASON_META[reason].short,
+      value: rows.filter((row) => row.reason_code === reason).length,
+    }));
+  }
+  return RECOMMENDATION_ORDER.map((action: RecommendedAction) => ({
+    key: action,
+    label: RECOMMENDATION_META[action].short,
+    value: rows.filter((row) => row.recommended_action === action).length,
+  }));
+}
+
+/** /analytics - the exposure ledger: ranked breakdown, intake, fee cliff, queue. */
 export function AnalyticsWorkspace(): React.JSX.Element {
-  const router = useRouter();
   const now = useNow(30000);
-  const summary = usePolledQuery("analytics:summary", (signal) => api.reportingSummary(signal), { intervalMs: 5000 });
-  const queue = usePolledQuery("analytics:queue", (signal) => api.listDisputes({ page: 1, perPage: 100 }, signal), { intervalMs: 5000 });
+  const summary = usePolledQuery("analytics:summary", (signal) => api.reportingSummary(signal), {
+    intervalMs: 5000,
+  });
+  const queue = usePolledQuery(
+    "analytics:queue",
+    (signal) => api.listDisputes({ page: 1, perPage: 100 }, signal),
+    { intervalMs: 5000 },
+  );
+
+  const [grouping, setGrouping] = useState<Grouping>("stage");
+  const [range, setRange] = useState<RangeDays>(14);
 
   const queueData = queue.data?.data;
   const rows = useMemo(() => queueData ?? [], [queueData]);
   const meta = queue.data?.meta ?? null;
-  const highVolume = summary.data?.high_volume ?? null;
+  const report = summary.data;
+  const highVolume = report?.high_volume ?? null;
   const nowMs = now ?? Date.now();
 
-  const bars: BarDatum[] = useMemo(
-    () =>
-      RECOMMENDATION_ORDER.map((action: RecommendedAction) => {
-        const count = rows.filter((row) => row.recommended_action === action).length;
-        const total = rows.length;
-        return { key: action, label: RECOMMENDATION_META[action].short, value: count, tone: RECOMMENDATION_META[action].tone, hint: total > 0 ? formatPercent(count / total, 0) + " of queue" : "0% of queue" };
-      }),
-    [rows],
-  );
-  const barSummary = useMemo(() => {
-    const parts = RECOMMENDATION_ORDER.map((action) => {
-      const found = bars.find((bar) => bar.key === action);
-      return RECOMMENDATION_META[action].label + " " + (found ? found.value : 0);
-    });
-    return "Cases by recommendation: " + parts.join(", ") + ". Total " + rows.length + " cases.";
-  }, [bars, rows.length]);
+  const groupingLabel = GROUPINGS.find((item) => item.key === grouping)?.heading ?? "Cases by stage";
+  const ranked = useMemo(() => rankItems(rows, grouping), [rows, grouping]);
+  const rankedPeak = ranked.reduce((peak, item) => Math.max(peak, item.value), 0);
 
-  const segments: StackSegment[] = useMemo(
-    () => STAGE_ORDER.map((stage) => ({ key: stage, label: STAGE_META[stage].label, value: rows.filter((row) => row.stage === stage).length, tone: STAGE_META[stage].tone })),
-    [rows],
-  );
-  const stageSummary = useMemo(() => {
-    const parts = segments.map((item) => item.label + " " + item.value);
-    return "Queue by stage: " + parts.join(", ") + ". Total " + rows.length + " cases.";
-  }, [segments, rows.length]);
-
-  const intake = useMemo(() => bucketIntake(rows, nowMs), [rows, nowMs]);
+  const intake = useMemo(() => bucketIntake(rows, nowMs, range), [rows, nowMs, range]);
   const intakeTotal = intake.points.reduce((sum, value) => sum + value, 0);
   const intakePeak = intake.points.reduce((peak, value) => Math.max(peak, value), 0);
   const intakePeakIndex = intake.points.indexOf(intakePeak);
   const intakePeakLabel = intakePeakIndex >= 0 ? (intake.labels[intakePeakIndex] ?? "") : "";
-  const intakeSummary = "New cases per day, last 14 days: total " + intakeTotal + ", peak " + intakePeak + (intakePeakLabel === "" ? "" : " on " + intakePeakLabel) + ".";
+  const intakeSummary =
+    "New cases per day, last " +
+    range +
+    " days: total " +
+    intakeTotal +
+    ", peak " +
+    intakePeak +
+    (intakePeakLabel === "" ? "" : " on " + intakePeakLabel) +
+    ".";
 
-  const loading = summary.loading;
-  const openCases = summary.data?.open_cases ?? 0;
-  const avgPWin = summary.data?.avg_p_win ?? Number.NaN;
+  const tableRows = useMemo(
+    () =>
+      rows.map((row) => ({
+        id: row.dispute_id,
+        reason: REASON_META[row.reason_code].short,
+        stage: STAGE_META[row.stage].short,
+        stageTone: STAGE_META[row.stage].tone,
+        amount: formatUsd(row.amount_usd),
+        pWin: formatPercent(row.p_win, 1),
+        evFight: formatUsd(row.ev_fight_usd),
+        due: isoDate(row.seller_response_due_date),
+        opened: isoDate(row.created_at),
+      })),
+    [rows],
+  );
+  const tableTotal = rows.reduce((sum, row) => sum + row.amount_usd, 0);
+
+  const readouts: Array<[string, string]> = [
+    ["Cases on file", meta ? formatInteger(meta.total) : "-"],
+    ["In inquiry", report ? formatInteger(report.in_inquiry) : "-"],
+    ["In claim", report ? formatInteger(report.in_claim) : "-"],
+    ["Win-rate estimate", report ? formatPercent(report.win_rate_estimate, 1) : "-"],
+    ["Verified customers", report ? formatInteger(report.chain_verified_customers) : "-"],
+    ["Suspended subscriptions", report ? formatInteger(report.subscription_suspensions) : "-"],
+  ];
+  const readoutsLoading = summary.loading || report === null;
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <PageHeader
-        kicker="Exposure canvas | Aurora Analytics"
-        title="Portfolio exposure"
-        description="Money at risk, money protected and the fee cliff that decides whether fighting a claim is rational. All figures come from the reporting and triage APIs."
-        meta={<>
-          <PageMeta label="Open cases" value={summary.data ? String(openCases) : "-"} />
-          <PageMeta label="Queue" value={meta ? String(meta.total) : "-"} />
-          <PageMeta label="As of" value={now === null ? "-" : new Date(now).toLocaleTimeString("en-GB", { hour12: false })} />
-        </>}
+        title="Analytics"
+        description={
+          <span className="title-section">
+            Last {range} days to {formatDayLabel(nowMs)}
+          </span>
+        }
+        meta={
+          <>
+            <PageMeta
+              label="Open exposure"
+              value={
+                summary.loading || report === null ? (
+                  <span aria-hidden className="skeleton inline-block h-5 w-28 align-middle" />
+                ) : (
+                  "-" + formatUsd(report.total_exposure_usd)
+                )
+              }
+            />
+            <PageMeta
+              label="Open cases"
+              value={
+                summary.loading || report === null ? (
+                  <span aria-hidden className="skeleton inline-block h-5 w-10 align-middle" />
+                ) : (
+                  formatInteger(report.open_cases)
+                )
+              }
+            />
+            <PageMeta
+              label="Protected"
+              value={
+                summary.loading || report === null ? (
+                  <span aria-hidden className="skeleton inline-block h-5 w-28 align-middle" />
+                ) : (
+                  "+" + formatUsd(report.protected_usd)
+                )
+              }
+            />
+            <PageMeta
+              label="Fees avoided"
+              value={
+                summary.loading || report === null ? (
+                  <span aria-hidden className="skeleton inline-block h-5 w-28 align-middle" />
+                ) : (
+                  "+" + formatUsd(report.fees_avoided_usd)
+                )
+              }
+            />
+            <PageMeta
+              label="Avg p(win)"
+              value={
+                summary.loading || report === null ? (
+                  <span aria-hidden className="skeleton inline-block h-5 w-14 align-middle" />
+                ) : (
+                  formatPercent(report.avg_p_win, 1)
+                )
+              }
+            />
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                loading={summary.refreshing}
+                icon={<RefreshCw size={12} aria-hidden />}
+                onClick={summary.refresh}
+              >
+                Refresh
+              </Button>
+            </div>
+          </>
+        }
       />
 
-      <Reveal>
-        <Panel className="overflow-hidden">
-          <div className="grid divide-y divide-hairline md:grid-cols-[1.45fr_1fr_1fr_1fr] md:divide-x md:divide-y-0">
-            <div className="p-5">
-              <FieldLabel rule tone="rose">Open exposure</FieldLabel>
-              <div className="mt-3 text-[34px] font-medium leading-none tracking-[-0.02em] text-ink">
-                {loading || summary.data === null ? <span aria-label="Loading open exposure">-</span> : <MoneyTicker value={summary.data.total_exposure_usd} />}
-              </div>
-              <p className="mt-2 text-[11px] leading-snug text-muted">
-                {summary.data ? summary.data.open_cases + " open cases | " + summary.data.in_inquiry + " inquiry / " + summary.data.in_claim + " claim" : "Reporting is unreachable; no exposure figure is shown rather than a guess."}
-              </p>
-            </div>
-            <div className="p-5">
-              <FieldLabel rule tone="emerald">Protected</FieldLabel>
-              <div className="tnum mt-3 font-mono text-[22px] font-medium leading-none text-emerald">
-                {loading || summary.data === null ? <span aria-label="Loading protected value">-</span> : <MoneyTicker value={summary.data.protected_usd} className="text-emerald" />}
-              </div>
-              <p className="mt-2 text-[11px] leading-snug text-muted">Value defended by the deterministic path.</p>
-            </div>
-            <div className="p-5">
-              <FieldLabel rule tone="emerald">Fees avoided</FieldLabel>
-              <div className="tnum mt-3 font-mono text-[22px] font-medium leading-none text-emerald">
-                {loading || summary.data === null ? <span aria-label="Loading fees avoided">-</span> : <MoneyTicker value={summary.data.fees_avoided_usd} className="text-emerald" />}
-              </div>
-              <p className="mt-2 text-[11px] leading-snug text-muted">Saved versus fighting every inquiry.</p>
-            </div>
-            <div className="p-5">
-              <FieldLabel rule tone="ice">Avg p(win)</FieldLabel>
-              <div className="tnum mt-3 font-mono text-[22px] font-medium leading-none text-ink">
-                {loading || summary.data === null ? <span aria-label="Loading average win probability">-</span> : <NumberTicker key={Math.round(avgPWin * 1000)} value={avgPWin * 100} decimals={1} suffix="%" />}
-              </div>
-              <p className="mt-2 text-[11px] leading-snug text-muted">
-                {summary.data ? "Win-rate estimate " + formatPercent(summary.data.win_rate_estimate) + " | " + summary.data.chain_verified_customers + " verified customers" : "Reporting is unreachable."}
-              </p>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-hairline bg-chrome px-5 py-2 font-mono text-[9.5px] text-dim">
-            <span>GET /api/v1/reporting/summary</span>
-            <span aria-hidden>|</span>
-            <span>{summary.updatedAt ? "read " + new Date(summary.updatedAt).toLocaleTimeString("en-GB", { hour12: false }) : "awaiting first read"}</span>
-            <span aria-hidden>|</span>
-            <span>polling 5s | paused while hidden</span>
-          </div>
-        </Panel>
-      </Reveal>
-
-      {summary.error ? <ErrorBanner error={summary.error} context="Portfolio KPIs could not be refreshed." onRetry={summary.refresh} /> : null}
-
-      <Reveal>
-        {highVolume !== null ? (
-          <LiquidGlass depth={2} grid accent={highVolume.flag ? "rose" : "emerald"}>
-            <div className="grid lg:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
-              <div className="border-b border-white/10 p-6 lg:border-b-0 lg:border-r">
-                <FieldLabel rule tone={highVolume.flag ? "rose" : "emerald"}>Rolling dispute ratio</FieldLabel>
-                <div className="mt-3 flex flex-wrap items-end gap-x-4 gap-y-2">
-                  <span className="tnum font-mono text-[44px] font-medium leading-none tracking-[-0.02em] text-ink">{formatPercent(highVolume.ratio, 2)}</span>
-                  <Badge tone={highVolume.flag ? "rose" : "emerald"} dot>{highVolume.flag ? "ABOVE THRESHOLD" : "BELOW THRESHOLD"}</Badge>
-                </div>
-                <p className="mt-3 max-w-xl text-[12px] leading-relaxed text-muted">High-volume merchants pay a $30 fee that is not refunded on a win: above the line, a $25 claim can lose money even when fought. Every fight decision is priced against this line first.</p>
-                <ThresholdMeter ratio={highVolume.ratio} limit={highVolume.threshold} summary={"Rolling dispute ratio " + formatPercent(highVolume.ratio, 2) + " against the high-volume limit " + formatPercent(highVolume.threshold, 2)} className="mt-4" />
-              </div>
-              <div className="p-6">
-                <FieldLabel rule>Measured inputs</FieldLabel>
-                <div className="mt-2">
-                  <MeasuredRow label="3-month sales" value={formatInteger(highVolume.sales_3mo)} />
-                  <MeasuredRow label="3-month disputes" value={formatInteger(highVolume.disputes_3mo)} />
-                  <MeasuredRow label="High-volume line" value={formatPercent(highVolume.threshold, 2)} tone="amber" />
-                  <MeasuredRow label="Headroom" value={highVolume.flag ? "+" + formatPercent(highVolume.ratio - highVolume.threshold, 2) + " over" : formatPercent(highVolume.threshold - highVolume.ratio, 2) + " under"} tone={highVolume.flag ? "rose" : "emerald"} />
-                  <MeasuredRow label="Status" value={highVolume.flag ? "fee cliff applies" : "standard fees"} tone={highVolume.flag ? "rose" : "emerald"} />
-                </div>
-              </div>
-            </div>
-          </LiquidGlass>
-        ) : (
-          <Panel>
-            <PanelHeader kicker="Fee cliff" title="Rolling dispute ratio" />
-            <PanelBody>{summary.loading ? <Skeleton className="h-[150px] w-full" /> : <p className="text-[11.5px] text-muted">High-volume status is unavailable.</p>}</PanelBody>
-          </Panel>
-        )}
-      </Reveal>
-
-      <div className="grid gap-4 xl:grid-cols-2">
-        <Reveal className="min-w-0">
-          <Panel className="h-full">
-            <PanelHeader kicker="Decision mix" title="Cases by recommendation" description={meta ? "Live queue: " + rows.length + " of " + meta.total + " cases, counted from the triage API." : "Live triage queue."} actions={<span className="inline-flex items-center gap-1.5 font-mono text-[9.5px] text-dim"><span aria-hidden className="h-1.5 w-1.5 rounded-full bg-emerald live-dot" />polling 5s</span>} />
-            <PanelBody>
-              {queue.loading ? <Skeleton className="h-[190px] w-full" /> : rows.length === 0 ? <EmptyState title="No cases to chart" description="The analytics canvas reads the live triage queue. Open an inquiry in the sandbox to populate it." action={<Link href="/" className="inline-flex h-8 items-center rounded-md border border-emerald/30 bg-emerald/10 px-3 text-[12px] font-medium text-emerald transition-colors hover:bg-emerald/15">Run the sandbox flow</Link>} /> : <BarChart data={bars} orientation="horizontal" formatValue={(value) => formatInteger(value)} summary={barSummary} />}
-            </PanelBody>
-          </Panel>
-        </Reveal>
-        <Reveal className="min-w-0" delay={0.06}>
-          <Panel className="h-full">
-            <PanelHeader kicker="Calibration" title="Win-rate estimate" description="Share of decided cases the model expects to win, from the reporting API." />
-            <PanelBody>
-              {summary.loading || summary.data === null ? <Skeleton className="h-[190px] w-full" /> : (
-                <div className="grid items-center gap-6 sm:grid-cols-[auto_minmax(0,1fr)]">
-                  <DonutGauge value={summary.data.win_rate_estimate} formatValue={(value) => formatPercent(value, 0)} summary={"Win-rate estimate " + formatPercent(summary.data.win_rate_estimate, 1) + " of decided cases."} tone="emerald" caption="of decided cases" />
-                  <div>
-                    <FieldLabel rule>Model readouts</FieldLabel>
-                    <div className="mt-2">
-                      <MeasuredRow label="Avg p(win)" value={formatPercent(summary.data.avg_p_win, 1)} tone="sky" />
-                      <MeasuredRow label="Verified customers" value={formatInteger(summary.data.chain_verified_customers)} />
-                      <MeasuredRow label="Suspended subscriptions" value={formatInteger(summary.data.subscription_suspensions)} tone="amber" />
-                      <MeasuredRow label="Total cases" value={formatInteger(summary.data.total_cases)} />
-                    </div>
-                  </div>
-                </div>
-              )}
-            </PanelBody>
-          </Panel>
-        </Reveal>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-2">
-        <Reveal className="min-w-0">
-          <Panel className="h-full">
-            <PanelHeader kicker="Intake" title="New cases per day" description="Queue arrivals over the last 14 days, bucketed from case creation timestamps." />
-            <PanelBody>
-              {queue.loading ? <Skeleton className="h-[120px] w-full" /> : (<>
-                <LineSpark points={intake.points} labels={intake.labels} formatValue={(value) => formatInteger(value)} summary={intakeSummary} tone="sky" height={84} />
-                <p className="tnum mt-2 font-mono text-[10px] text-dim">{intakeTotal === 0 ? "No arrivals in the last 14 days." : "Total " + intakeTotal + " arrivals | peak " + intakePeak + (intakePeakLabel === "" ? "" : " on " + intakePeakLabel) + "."}</p>
-              </>)}
-            </PanelBody>
-          </Panel>
-        </Reveal>
-        <Reveal className="min-w-0" delay={0.06}>
-          <Panel className="h-full">
-            <PanelHeader kicker="Composition" title="Queue by stage" description="Where the live queue sits in the dispute lifecycle." />
-            <PanelBody>
-              {queue.loading ? <Skeleton className="h-[120px] w-full" /> : rows.length === 0 ? <p className="text-[11.5px] text-muted">No cases on the queue.</p> : <StackedBar segments={segments} formatValue={(value) => formatInteger(value)} summary={stageSummary} />}
-            </PanelBody>
-          </Panel>
-        </Reveal>
-      </div>
-
-      <Panel className="overflow-hidden">
-        <PanelHeader kicker="Queue snapshot" title="Triage queue" description="Compact view of the live queue; filters and full EV columns live on the triage page." actions={<Link href="/disputes" className="inline-flex items-center gap-1 text-[11px] text-muted transition-colors hover:text-ink">Full queue<ArrowRight size={11} aria-hidden /></Link>} />
-        <div className="border-t border-hairline">
-          {queue.loading ? (
-            <div className="space-y-2 p-3" aria-busy="true" aria-label="Loading queue snapshot">
-              <Skeleton className="h-8 w-full" />
-              {Array.from({ length: 5 }, (_, index) => <Skeleton key={index} className="h-10 w-full" />)}
-            </div>
-          ) : rows.length === 0 ? (
-            <div className="p-4"><EmptyState title="No cases on the queue" description="Run the sandbox flow to create a dispute, then this canvas will price it." /></div>
-          ) : (
-            <DisputesGridLoader rows={rows} now={nowMs} height={300} compact onRowClick={(disputeId) => { router.push("/disputes/" + encodeURIComponent(disputeId)); }} />
-          )}
-        </div>
-        {queue.error ? <div className="p-3"><ErrorBanner error={queue.error} context="The queue snapshot could not be refreshed." onRetry={queue.refresh} /></div> : null}
-      </Panel>
-
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-lg border border-hairline bg-white/[0.012] px-3 py-2.5 text-[9.5px] text-dim">
-        {RECOMMENDATION_ORDER.map((action) => {
-          const item = RECOMMENDATION_META[action];
+      <div
+        role="tablist"
+        aria-label="Breakdown"
+        className="mt-5 flex flex-wrap items-end gap-x-6 gap-y-1"
+      >
+        {GROUPINGS.map((item) => {
+          const active = item.key === grouping;
           return (
-            <span key={action} className="inline-flex items-center gap-1.5">
-              <span aria-hidden className={cn("h-1.5 w-1.5 rounded-full", TONE_DOT[item.tone])} />
-              <span className={TONE_TEXT[item.tone]}>{item.short}</span>
-              <span className="text-dim">|</span>
-              <span>{item.label}</span>
-            </span>
+            <button
+              key={item.key}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => setGrouping(item.key)}
+              className={cn(
+                "relative pb-2.5 text-sm transition-colors duration-120",
+                active ? "sig text-ink" : "text-muted hover:text-ink",
+              )}
+            >
+              {item.label}
+            </button>
           );
         })}
+      </div>
+      <div aria-hidden className="h-px w-full bg-rule" />
+
+      {summary.error ? (
+        <ErrorBanner
+          error={summary.error}
+          context="Portfolio KPIs could not be refreshed."
+          onRetry={summary.refresh}
+        />
+      ) : null}
+
+      {highVolume !== null ? (
+        <Panel>
+          <PanelHeader
+            title="High-volume fee cliff"
+            description="Above PayPal's rolling threshold the $30 fee is not refunded on a win, so a small claim can lose money even when it is fought."
+            actions={
+              <Badge tone={highVolume.flag ? "negative" : "positive"} dot>
+                {highVolume.flag ? "Above threshold" : "Below threshold"}
+              </Badge>
+            }
+          />
+          <PanelBody className="grid gap-6 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:items-center">
+            <div className="min-w-0">
+              <p className="value text-xl text-ink">{formatPercent(highVolume.ratio, 2)}</p>
+              <p className="mt-2 max-w-[44ch] text-sm text-muted">
+                {formatPercent(highVolume.ratio, 2)} against the{" "}
+                {formatPercent(highVolume.threshold, 2)} limit,{" "}
+                {(Math.abs(highVolume.threshold - highVolume.ratio) * 100).toFixed(2)} points{" "}
+                {highVolume.flag ? "over" : "under"}. Rolling 3-month disputes over sales.
+              </p>
+              <dl className="mt-4 grid grid-cols-2 gap-x-6">
+                <div className="row-rule flex items-baseline justify-between gap-3 py-2">
+                  <dt className="text-sm text-muted">3-month sales</dt>
+                  <dd className="num text-right text-sm text-ink">{formatInteger(highVolume.sales_3mo)}</dd>
+                </div>
+                <div className="row-rule flex items-baseline justify-between gap-3 py-2">
+                  <dt className="text-sm text-muted">3-month disputes</dt>
+                  <dd className="num text-right text-sm text-ink">{formatInteger(highVolume.disputes_3mo)}</dd>
+                </div>
+                <div className="row-rule col-span-2 flex items-baseline justify-between gap-3 py-2">
+                  <dt className="text-sm text-muted">Fee applied to a fought claim</dt>
+                  <dd className="num text-right text-sm text-ink">
+                    {highVolume.flag ? "$30, not refunded on a win" : "standard fees"}
+                  </dd>
+                </div>
+              </dl>
+            </div>
+            <ThresholdMeter
+              ratio={highVolume.ratio}
+              limit={highVolume.threshold}
+              summary={
+                "Rolling dispute ratio " +
+                formatPercent(highVolume.ratio, 2) +
+                " against the high-volume limit " +
+                formatPercent(highVolume.threshold, 2)
+              }
+            />
+          </PanelBody>
+        </Panel>
+      ) : (
+        <Panel>
+          <PanelHeader title="High-volume fee cliff" />
+          <PanelBody>
+            {summary.loading ? (
+              <Skeleton className="h-20 w-full" />
+            ) : (
+              <p className="text-sm text-muted">High-volume status is unavailable.</p>
+            )}
+          </PanelBody>
+        </Panel>
+      )}
+
+      <div className="grid gap-6 lg:grid-cols-[43fr_57fr]">
+        <div className="min-w-0">
+          <div className="flex items-baseline justify-between gap-3">
+            <p className="label">{groupingLabel}</p>
+            <p className="num text-2xs text-muted">
+              {formatInteger(rows.length)}
+              {meta ? " of " + formatInteger(meta.total) : ""} cases
+            </p>
+          </div>
+          {queue.loading ? (
+            <div className="mt-3 space-y-2" aria-busy="true" aria-label="Loading breakdown">
+              {Array.from({ length: 5 }, (_, index) => (
+                <Skeleton key={index} className="h-5 w-full" />
+              ))}
+            </div>
+          ) : (
+            <ul className="mt-3">
+              {ranked.map((item) => {
+                const share = rankedPeak > 0 ? (item.value / rankedPeak) * 100 : 0;
+                const percent = rows.length > 0 ? (item.value / rows.length) * 100 : 0;
+                return (
+                  <li key={item.key} className="flex h-7 items-center gap-3">
+                    <span className="w-[104px] shrink-0 truncate text-sm text-ink" title={item.label}>
+                      {item.label}
+                    </span>
+                    <span aria-hidden className="h-0.5 min-w-0 flex-1 rounded-full bg-raised">
+                      <span className="block h-full rounded-full bg-chart-1" style={{ width: share + "%" }} />
+                    </span>
+                    <span className="num w-12 shrink-0 text-right text-sm text-muted">
+                      {percent.toFixed(1)}%
+                    </span>
+                    <span className="num w-10 shrink-0 text-right text-sm text-ink">
+                      {formatInteger(item.value)}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <dl className="mt-6 grid grid-cols-2 gap-x-6">
+            {readouts.map(([label, value]) => (
+              <div key={label} className="row-rule flex items-baseline justify-between gap-3 py-2">
+                <dt className="text-sm text-muted">{label}</dt>
+                <dd className="num text-right text-sm text-ink">
+                  {readoutsLoading ? (
+                    <Skeleton className="h-3 w-12" />
+                  ) : (
+                    value
+                  )}
+                </dd>
+              </div>
+            ))}
+          </dl>
+        </div>
+
+        <Panel className="min-w-0">
+          <PanelHeader
+            title="New cases per day"
+            description="Arrivals bucketed from case creation timestamps."
+            actions={
+              <span className="inline-flex items-center gap-1.5 text-sm text-muted">
+                <span aria-hidden className="h-[5px] w-[5px] rounded-full bg-chart-1" />
+                New cases
+              </span>
+            }
+          />
+          <PanelBody>
+            {queue.loading ? (
+              <Skeleton className="h-[120px] w-full" />
+            ) : (
+              <>
+                <LineSpark
+                  points={intake.points}
+                  labels={intake.labels}
+                  formatValue={formatInteger}
+                  summary={intakeSummary}
+                  tone="neutral"
+                  height={96}
+                />
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                  <div className="flex items-center gap-4" role="group" aria-label="Chart range">
+                    {RANGE_OPTIONS.map((days) => {
+                      const active = days === range;
+                      return (
+                        <button
+                          key={days}
+                          type="button"
+                          aria-pressed={active}
+                          onClick={() => setRange(days)}
+                          className={cn(
+                            "pb-0.5 text-sm transition-colors duration-120",
+                            active ? "sig text-ink" : "text-muted hover:text-ink",
+                          )}
+                        >
+                          {days} days
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <span className="text-2xs text-muted">Updated daily</span>
+                </div>
+                <p className="num mt-2 text-2xs text-muted">
+                  Total {formatInteger(intakeTotal)} arrivals
+                  {intakePeakLabel === "" ? "" : " | peak " + formatInteger(intakePeak) + " on " + intakePeakLabel}
+                </p>
+              </>
+            )}
+          </PanelBody>
+        </Panel>
+      </div>
+
+      <div className="space-y-3">
+        <h2 className="title-section">Cases in the queue</h2>
+        <Panel className="overflow-hidden">
+          <table className="w-full border-collapse">
+            <caption className="sr-only">
+              Cases on the triage queue with stage, reason, amount, win probability, expected
+              value of fighting and deadlines.
+            </caption>
+            <thead>
+              <tr className="h-[38px] text-2xs text-muted">
+                <th scope="col" className="pl-4 pr-3 text-left font-medium">
+                  Case
+                </th>
+                <th scope="col" className="hidden px-3 text-left font-medium md:table-cell">
+                  Reason
+                </th>
+                <th scope="col" className="px-3 text-left font-medium">
+                  Stage
+                </th>
+                <th scope="col" className="px-3 text-right font-medium">
+                  Amount
+                </th>
+                <th scope="col" className="hidden px-3 text-right font-medium md:table-cell">
+                  p(win)
+                </th>
+                <th scope="col" className="hidden px-3 text-right font-medium lg:table-cell">
+                  EV to fight
+                </th>
+                <th scope="col" className="px-3 text-right font-medium">
+                  Seller due
+                </th>
+                <th scope="col" className="hidden pl-3 pr-4 text-right font-medium lg:table-cell">
+                  Opened
+                </th>
+              </tr>
+            </thead>
+            {queue.loading ? (
+              <tbody>
+                {Array.from({ length: 6 }, (_, index) => (
+                  <tr key={index} className="row-rule h-row">
+                    <td colSpan={8} className="px-4">
+                      <Skeleton className="h-3 w-full" />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            ) : tableRows.length === 0 ? (
+              <tbody>
+                <tr className="row-rule">
+                  <td colSpan={8}>
+                    <EmptyState
+                      title="No cases on the queue"
+                      description="Run the sandbox flow to open an inquiry, then this ledger will price it."
+                      action={
+                        <Link
+                          href="/"
+                          className="inline-flex h-8 items-center rounded-full border border-control bg-raised px-3 text-sm font-medium text-ink transition-colors duration-120 hover:bg-[#29282c]"
+                        >
+                          Run the sandbox flow
+                        </Link>
+                      }
+                    />
+                  </td>
+                </tr>
+              </tbody>
+            ) : (
+              <>
+                <tbody>
+                  {tableRows.map((row) => (
+                    <tr key={row.id} className="row-rule h-row">
+                      <th scope="row" className="pl-4 pr-3 text-left font-normal">
+                        <Link
+                          href={"/disputes/" + encodeURIComponent(row.id)}
+                          className="num text-sm text-ink transition-colors duration-120 hover:text-accent"
+                          title={row.id}
+                        >
+                          {shortHash(row.id, 10, 4)}
+                        </Link>
+                      </th>
+                      <td className="hidden px-3 text-sm text-muted md:table-cell">{row.reason}</td>
+                      <td className="px-3">
+                        <Badge tone={row.stageTone}>{row.stage}</Badge>
+                      </td>
+                      <td className="num px-3 text-right text-sm text-muted">{row.amount}</td>
+                      <td className="num hidden px-3 text-right text-sm text-muted md:table-cell">
+                        {row.pWin}
+                      </td>
+                      <td className="num hidden px-3 text-right text-sm text-muted lg:table-cell">
+                        {row.evFight}
+                      </td>
+                      <td className="num px-3 text-right text-sm text-muted">{row.due}</td>
+                      <td className="num hidden pl-3 pr-4 text-right text-sm text-muted lg:table-cell">
+                        {row.opened}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="row-rule h-row">
+                    <th scope="row" colSpan={3} className="pl-4 pr-3 text-left text-sm font-medium text-ink">
+                      Total, {formatInteger(tableRows.length)} cases
+                    </th>
+                    <td className="num px-3 text-right text-sm text-ink">{formatUsd(tableTotal)}</td>
+                    <td className="hidden px-3 text-right text-sm text-muted md:table-cell">-</td>
+                    <td className="hidden px-3 text-right text-sm text-muted lg:table-cell">-</td>
+                    <td className="px-3 text-right text-sm text-muted">-</td>
+                    <td className="hidden pl-3 pr-4 text-right text-sm text-muted lg:table-cell">-</td>
+                  </tr>
+                </tfoot>
+              </>
+            )}
+          </table>
+        </Panel>
+        {queue.error ? (
+          <ErrorBanner
+            error={queue.error}
+            context="The queue could not be refreshed."
+            onRetry={queue.refresh}
+          />
+        ) : null}
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-2 text-2xs text-muted">
+        <span className="num">
+          GET /api/v1/reporting/summary | GET /api/v1/disputes | polled every 5s while visible
+        </span>
+        <span className="num">
+          {summary.updatedAt
+            ? "Reporting read " + new Date(summary.updatedAt).toLocaleTimeString("en-GB", { hour12: false })
+            : "Awaiting the first reporting read"}
+        </span>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3">
+        <Link
+          href="/disputes"
+          className="inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-sm text-muted transition-colors duration-120 hover:text-ink"
+        >
+          Open the full queue
+          <ArrowRight size={12} aria-hidden />
+        </Link>
       </div>
     </div>
   );

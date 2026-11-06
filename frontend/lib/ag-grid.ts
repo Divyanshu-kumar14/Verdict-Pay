@@ -2,43 +2,52 @@
 
 /**
  * AG Grid Community theme, built with the v34 Theming API (no CSS imports).
- * Community only — no enterprise modules are registered anywhere in the app.
+ *
+ * The grid is the product's table, so it uses the house numbers: 42px rows,
+ * 12px sentence-case headers in the muted grey, tabular figures, one rule
+ * colour and no wrapper chrome.
  */
 
 import { AllCommunityModule, ModuleRegistry, themeQuartz } from "ag-grid-community";
 
 ModuleRegistry.registerModules([AllCommunityModule]);
 
+const SURFACE = "#131217";
+const GROUND = "#171719";
+const RAISED = "#212023";
+const RULE = "#1b1a1f";
+
 export const GRID_THEME = themeQuartz.withParams({
-  backgroundColor: "#0b1118",
-  foregroundColor: "#e6edf3",
-  chromeBackgroundColor: "#080d13",
-  borderColor: "rgba(255, 255, 255, 0.07)",
-  headerBackgroundColor: "#080d13",
-  headerTextColor: "#74869b",
-  headerFontSize: "10px",
-  headerFontWeight: 600,
-  headerHeight: "32px",
-  headerRowBorder: { color: "rgba(125, 211, 252, 0.14)" },
+  backgroundColor: SURFACE,
+  foregroundColor: "#ffffff",
+  chromeBackgroundColor: GROUND,
+  borderColor: RULE,
+  headerBackgroundColor: SURFACE,
+  headerTextColor: "#8a8c92",
+  headerFontSize: "12px",
+  headerFontWeight: 500,
+  headerHeight: "38px",
+  headerRowBorder: { color: RAISED },
   headerColumnBorder: false,
-  headerColumnResizeHandleColor: "rgba(255, 255, 255, 0.14)",
-  cellTextColor: "#cbd5e1",
-  cellFontFamily: "var(--font-geist-sans), system-ui, sans-serif",
-  dataFontSize: "12px",
-  fontFamily: "var(--font-geist-sans), system-ui, sans-serif",
-  fontSize: "12px",
-  rowHeight: "40px",
-  rowBorder: { color: "rgba(255, 255, 255, 0.045)" },
+  headerColumnResizeHandleColor: "#3a3a3e",
+  cellTextColor: "#ffffff",
+  cellFontFamily: '"Public Sans", Inter, system-ui, sans-serif',
+  dataFontSize: "13px",
+  fontFamily: '"Public Sans", Inter, system-ui, sans-serif',
+  fontSize: "13px",
+  rowHeight: "42px",
+  rowBorder: { color: RULE },
   columnBorder: false,
-  oddRowBackgroundColor: "#0a0f16",
-  rowHoverColor: "#141c26",
-  selectedRowBackgroundColor: "#12251f",
-  accentColor: "#2ee6a8",
-  cellHorizontalPadding: "8px",
+  oddRowBackgroundColor: SURFACE,
+  rowHoverColor: RAISED,
+  selectedRowBackgroundColor: "#1b2233",
+  accentColor: "#4a8ad6",
+  checkboxCheckedBackgroundColor: "#4a8ad6",
+  cellHorizontalPadding: "12px",
   wrapperBorder: false,
   wrapperBorderRadius: 0,
-  menuBackgroundColor: "#121a23",
-  tooltipBackgroundColor: "#121a23",
-  tooltipTextColor: "#e6edf3",
-  columnHoverColor: "rgba(255, 255, 255, 0.02)",
+  menuBackgroundColor: RAISED,
+  tooltipBackgroundColor: RAISED,
+  tooltipTextColor: "#ffffff",
+  columnHoverColor: "#1b1a1f",
 });

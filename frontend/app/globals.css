@@ -1,117 +1,166 @@
 @import "tailwindcss";
 
+/* ===========================================================================
+   Public Sans — self-hosted variable face (wght 100-900, latin + latin-ext).
+   The variable file's default instance is wght 100, so every rule that
+   renders text sets an explicit weight, and font-synthesis is off so the
+   browser never fakes a weight the axis already carries.
+   =========================================================================== */
+@font-face {
+  font-family: "Public Sans";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/public-sans-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304,
+    U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: "Public Sans";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/public-sans-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308,
+    U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113,
+    U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ===========================================================================
+   "Data terminal" — a research/monitoring surface read in long sessions.
+   Cards sit DARKER than the ground, digits are tabular and stack in columns,
+   polarity is carried by a sign in the text rather than by colour, and every
+   selection in the product is the same 1px accent line.
+   =========================================================================== */
 @theme {
-  /* Surfaces — depth is a hex step, never a shadow. */
-  --color-void: #080b0f;
-  --color-panel: #0e141b;
-  --color-raised: #121a23;
-  --color-chrome: #0b1117;
-  --color-sunken: #06090c;
-  --color-row-alt: #0c1219;
-  --color-overlay: rgba(8, 11, 15, 0.72);
+  /* Ground and surfaces — a luminance ladder, never a shadow */
+  --color-ground: #171719;
+  --color-surface: #131217;
+  --color-raised: #212023;
+  --color-line: #222224;
+  --color-rule: #1b1a1f;
+  --color-control: #3a3a3e;
 
-  /* Borders */
-  --color-hairline: rgba(255, 255, 255, 0.07);
-  --color-hairline-strong: rgba(255, 255, 255, 0.12);
-  --color-line: #1b2430;
-  --color-border: rgba(255, 255, 255, 0.07);
-  --color-border-strong: #5a6b7f;
+  /* Ink */
+  --color-ink: #ffffff;
+  --color-muted: #8a8c92;
 
-  /* Text */
-  --color-ink: #e6edf3;
-  --color-muted: #8b98a5;
-  --color-dim: #74869b;
-  --color-inverse: #080b0f;
+  /* One hue, one meaning. Nothing else carries colour. */
+  --color-accent: #4a8ad6;
+  --color-positive: #44a282;
+  --color-negative: #e5566f;
+  --color-warning: #d9a441;
 
-  /* Accents — one meaning per hue. */
-  --color-emerald: #34d399;
-  --color-amber: #fbbf24;
-  --color-rose: #fb7185;
-  --color-sky: #7dd3fc;
-  --color-positive: #34d399;
-  --color-warning: #fbbf24;
-  --color-critical: #fb7185;
-  --color-danger: #fb7185;
-  --color-info: #7dd3fc;
-  --color-focus: #a7b6c6;
+  /* Chart series — three, in this order */
+  --color-chart-1: #f2f2f3;
+  --color-chart-2: #e5566f;
+  --color-chart-3: #4a8ad6;
 
-  /* Radii — child never larger than parent. */
-  --radius-chip: 4px;
-  --radius-control: 6px;
-  --radius-inner: 8px;
-  --radius-panel: 10px;
-  --radius-pill: 999px;
+  /* Status pills: a tinted ground and its readable ink */
+  --color-pill-positive: #1b2828;
+  --color-pill-positive-ink: #5fc39c;
+  --color-pill-negative: #2c1a20;
+  --color-pill-negative-ink: #e5566f;
+  --color-pill-warning: #2a2416;
+  --color-pill-warning-ink: #d9a441;
+  --color-pill-neutral: #212023;
+  --color-pill-neutral-ink: #bdbdc0;
+  --color-pill-accent: #1b2233;
+  --color-pill-accent-ink: #7fb0ef;
 
-  /* Elevation — used only on raised popovers. */
-  --shadow-raised: 0 24px 60px -32px rgba(0, 0, 0, 0.85);
+  /* Radii — one for rectangles, full round for controls and pills */
+  --radius-card: 6px;
+  --radius-control: 999px;
+
+  /* The only shadow in the system, and only things that really float get it */
+  --shadow-float: 0 12px 28px rgba(0, 0, 0, 0.2);
+
+  /* Type — seven steps. Nothing renders below 11px. */
+  --text-2xs: 11px;
+  --text-2xs--line-height: 1.35;
+  --text-xs: 12px;
+  --text-xs--line-height: 1.4;
+  --text-sm: 13px;
+  --text-sm--line-height: 1.45;
+  --text-base: 14px;
+  --text-base--line-height: 1.5;
+  --text-md: 16px;
+  --text-md--line-height: 1.4;
+  --text-lg: 20px;
+  --text-lg--line-height: 1.25;
+  --text-xl: 26px;
+  --text-xl--line-height: 1.15;
+  --text-xl--letter-spacing: -0.02em;
+
+  --font-sans: "Public Sans", Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+
+  /* Density */
+  --spacing-row: 42px;
+  --spacing-control: 34px;
+  --spacing-rail: 55px;
+  --spacing-pad: 32px;
+  --spacing-gap: 24px;
+
+  /* Motion — state feedback only, snapped, never choreographed */
+  --ease-snap: cubic-bezier(0.2, 0, 0, 1);
+  --default-transition-duration: 120ms;
+  --default-transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
 
   /* Stacking */
   --z-sticky: 10;
   --z-overlay: 30;
   --z-modal: 40;
   --z-toast: 50;
-
-  /* Type */
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, "Segoe UI",
-    sans-serif;
-  --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", "JetBrains Mono", Menlo,
-    monospace;
-
-  --text-2xs: 10px;
-  --text-2xs--line-height: 1.4;
-  --text-2xs--letter-spacing: 0.16em;
-  --text-xs: 11px;
-  --text-xs--line-height: 1.45;
-  --text-sm: 12px;
-  --text-sm--line-height: 1.5;
-  --text-base: 13px;
-  --text-base--line-height: 1.55;
-  --text-md: 14px;
-  --text-lg: 16px;
-  --text-lg--line-height: 1.45;
-  --text-lg--letter-spacing: -0.01em;
-  --text-xl: 18px;
-  --text-2xl: 22px;
-  --text-2xl--line-height: 1.25;
-  --text-2xl--letter-spacing: -0.02em;
-  --text-3xl: 28px;
-  --text-3xl--line-height: 1.2;
-  --text-3xl--letter-spacing: -0.02em;
-
-  /* Motion */
-  --default-transition-duration: 120ms;
-  --default-transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
 }
 
 @layer base {
   html {
     color-scheme: dark;
     -webkit-font-smoothing: antialiased;
-    text-rendering: optimizeLegibility;
   }
 
   body {
-    background-color: var(--color-void);
+    background-color: var(--color-ground);
     color: var(--color-ink);
     font-family: var(--font-sans);
-    font-size: 13px;
+    font-size: 14px;
+    font-weight: 400;
     line-height: 1.5;
+    font-synthesis: none;
+  }
+
+  /* Headings are titles, not statements: they hold to one or two lines. */
+  h1,
+  h2,
+  h3,
+  h4 {
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  /* Digits keep their width wherever a figure can change under the reader. */
+  table,
+  .num,
+  [data-num] {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1;
   }
 
   ::selection {
-    background: rgba(52, 211, 153, 0.24);
-    color: #f5fffb;
+    background: rgba(74, 138, 214, 0.32);
+    color: #ffffff;
   }
 
   :focus-visible {
-    outline: 2px solid var(--color-focus);
+    outline: 2px solid var(--color-accent);
     outline-offset: 2px;
     border-radius: 3px;
   }
 
   * {
     scrollbar-width: thin;
-    scrollbar-color: #263340 transparent;
+    scrollbar-color: var(--color-control) transparent;
   }
 
   ::-webkit-scrollbar {
@@ -124,13 +173,9 @@
   }
 
   ::-webkit-scrollbar-thumb {
-    background: #263340;
-    border: 2px solid var(--color-void);
+    background: var(--color-control);
+    border: 2px solid var(--color-ground);
     border-radius: 999px;
-  }
-
-  ::-webkit-scrollbar-thumb:hover {
-    background: #33445a;
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -146,97 +191,128 @@
 }
 
 @layer components {
+  /* --- Surfaces ---------------------------------------------------------- */
+  /* A card is DARKER than the ground; its 1px line is a whisper, never a box. */
   .panel {
-    border: 1px solid var(--color-hairline);
-    border-radius: var(--radius-panel);
-    background-color: var(--color-panel);
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-card);
   }
 
-  .panel-flat {
-    border: 1px solid var(--color-hairline);
-    background-color: rgba(255, 255, 255, 0.015);
-    border-radius: 8px;
+  .panel-flush {
+    background-color: var(--color-surface);
+    border-radius: var(--radius-card);
   }
 
-  .kicker {
-    font-size: 10px;
+  /* A row that only earns a rule, not a box */
+  .row-rule {
+    border-top: 1px solid var(--color-rule);
+  }
+
+  /* --- Type roles -------------------------------------------------------- */
+  /* Labels are sentence case, readable, and never letter-spaced capitals. */
+  .label {
+    font-size: var(--text-sm);
+    line-height: 1.4;
+    font-weight: 500;
+    color: var(--color-muted);
+  }
+
+  .title-card {
+    font-size: var(--text-md);
+    line-height: 1.4;
     font-weight: 600;
-    letter-spacing: 0.16em;
-    line-height: 1.2;
-    text-transform: uppercase;
-    color: var(--color-dim);
+    color: var(--color-ink);
   }
 
-  .num {
-    font-family: var(--font-mono);
+  .title-section {
+    font-size: var(--text-lg);
+    line-height: 1.25;
+    font-weight: 400;
+    color: var(--color-muted);
+  }
+
+  /* --- Numbers ----------------------------------------------------------- */
+  .value {
+    font-weight: 600;
+    letter-spacing: -0.01em;
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum" 1;
-    letter-spacing: -0.01em;
   }
 
-  .divider {
-    height: 1px;
-    width: 100%;
-    background-color: var(--color-hairline);
-  }
-
-  .skeleton {
+  /* --- The signature: every selection is the same 1px accent line --------- */
+  .sig {
     position: relative;
-    overflow: hidden;
-    border-radius: 4px;
-    background-color: rgba(255, 255, 255, 0.045);
   }
 
-  .skeleton::after {
+  .sig::after {
     content: "";
     position: absolute;
-    inset: 0;
-    transform: translateX(-100%);
-    background-image: linear-gradient(
-      90deg,
-      rgba(255, 255, 255, 0) 0,
-      rgba(255, 255, 255, 0.05) 50%,
-      rgba(255, 255, 255, 0) 100%
-    );
-    animation: vp-shimmer 1.6s ease-in-out infinite;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 1px;
+    background-color: var(--color-accent);
   }
 
-  .bg-grid {
-    background-image:
-      linear-gradient(rgba(255, 255, 255, 0.022) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(255, 255, 255, 0.022) 1px, transparent 1px);
-    background-size: 48px 48px;
-    background-position: center top;
+  .sig-edge {
+    position: relative;
+  }
+
+  .sig-edge::after {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background-color: var(--color-accent);
+  }
+
+  /* --- Live state -------------------------------------------------------- */
+  .live-dot {
+    animation: vp-pulse 2.4s var(--ease-snap) infinite;
+  }
+
+  /* A skeleton breathes; it does not sweep a gradient across the screen. */
+  .skeleton {
+    border-radius: 4px;
+    background-color: rgba(255, 255, 255, 0.05);
+    animation: vp-breathe 1.8s ease-in-out infinite;
   }
 }
 
-@keyframes vp-shimmer {
-  100% {
-    transform: translateX(100%);
-  }
-}
-
-@keyframes vp-pulse-ring {
+@keyframes vp-pulse {
   0% {
-    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.35);
+    opacity: 1;
   }
-  70% {
-    box-shadow: 0 0 0 6px rgba(52, 211, 153, 0);
+  50% {
+    opacity: 0.35;
   }
   100% {
-    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0);
+    opacity: 1;
   }
 }
 
-.live-dot {
-  animation: vp-pulse-ring 2.4s ease-out infinite;
+@keyframes vp-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.55;
+  }
 }
-/* AG Grid: 10px tracked uppercase headers, tabular numerals, right-aligned money heads. */
+
+/* ===========================================================================
+   AG Grid Community — the house table. 12px sentence-case labels, 42px rows,
+   tabular figures, no wrapper chrome, no column borders.
+   =========================================================================== */
 .ag-header-cell-text {
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  font-size: 10px;
-  font-weight: 600;
+  font-size: 12px;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .ag-right-aligned-header .ag-header-cell-label {
@@ -246,187 +322,4 @@
 .ag-cell {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
-}
-
-/* ===========================================================================
-   PREMIUM LAYER — "Forensic Instrument"
-   ---------------------------------------------------------------------------
-   The subject is adjudication: cryptographic evidence, deterministic pricing,
-   a verdict. So the surface is not a SaaS dashboard, it is a precision
-   instrument in a sealed evidence room. Three rules follow:
-
-   1. Depth is optical, not decorative. Glass is used ONLY where it means
-      "sealed / under inspection" (hero, evidence, verdict). Elsewhere depth is
-      still a luminance step, because stacking blur on every panel is the tell
-      of generated UI.
-   2. One hue, one meaning. Emerald = protected. Amber = a decision is open.
-      Rose = money at risk. Ice = the instrument itself (calibration, measure).
-      Nothing else is allowed to carry colour.
-   3. Motion has mass. Springs, not linear easing; staggered reveals; numbers
-      that resolve. Motion confirms state, it never performs.
-   =========================================================================== */
-
-@theme {
-  /* Deeper, cooler substrate — genuinely black, so glass has something to sit on */
-  --color-abyss: #05070a;
-  --color-void: #070a0e;
-  --color-panel: #0b1118;
-  --color-raised: #101822;
-  --color-chrome: #080d13;
-  --color-sunken: #04060a;
-
-  /* Glass: three stops so a surface can be "sealed" by degree */
-  --color-glass-1: rgba(255, 255, 255, 0.035);
-  --color-glass-2: rgba(255, 255, 255, 0.055);
-  --color-glass-3: rgba(255, 255, 255, 0.085);
-  --color-glass-edge: rgba(255, 255, 255, 0.14);
-  --color-glass-inner: rgba(255, 255, 255, 0.06);
-  --color-glass-shade: rgba(0, 0, 0, 0.55);
-
-  /* Instrument accent — the calibration hue. Never used for meaning. */
-  --color-ice: #7dd3fc;
-  --color-ice-deep: #38bdf8;
-  --color-ice-glow: rgba(125, 211, 252, 0.22);
-
-  /* Refined semantics — brighter, higher chroma, still distinguishable */
-  --color-emerald: #2ee6a8;
-  --color-emerald-deep: #10b981;
-  --color-emerald-glow: rgba(46, 230, 168, 0.2);
-  --color-amber: #ffb224;
-  --color-amber-glow: rgba(255, 178, 36, 0.2);
-  --color-rose: #ff5c78;
-  --color-rose-glow: rgba(255, 92, 120, 0.2);
-
-  /* Type — display scale for statements, micro for structure */
-  --text-display: 44px;
-  --text-display--line-height: 1.04;
-  --text-display--letter-spacing: -0.035em;
-  --text-hero: 32px;
-  --text-hero--line-height: 1.08;
-  --text-hero--letter-spacing: -0.03em;
-
-  /* Motion — springs expressed as durations for CSS, physics in JS */
-  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
-  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --duration-fast: 140ms;
-  --duration-base: 240ms;
-  --duration-slow: 420ms;
-
-  /* Optical elevation — a glass surface casts one soft, wide shade */
-  --shadow-glass: 0 1px 0 0 rgba(255, 255, 255, 0.05) inset,
-    0 32px 64px -32px rgba(0, 0, 0, 0.9);
-  --shadow-lift: 0 24px 48px -24px rgba(0, 0, 0, 0.8);
-  --shadow-glow-emerald: 0 0 0 1px rgba(46, 230, 168, 0.25),
-    0 12px 40px -12px rgba(46, 230, 168, 0.3);
-}
-
-@layer components {
-  /* --- Glass: the "sealed evidence" surface ------------------------------ */
-  .glass {
-    position: relative;
-    background: linear-gradient(
-      160deg,
-      var(--color-glass-2) 0%,
-      var(--color-glass-1) 42%,
-      var(--color-glass-shade) 100%
-    );
-    backdrop-filter: blur(20px) saturate(150%);
-    -webkit-backdrop-filter: blur(20px) saturate(150%);
-    border: 1px solid var(--color-glass-edge);
-    box-shadow: var(--shadow-glass);
-  }
-
-  /* Specular highlight along the top edge — reads as a lit bevel, not a border */
-  .glass::before {
-    content: "";
-    position: absolute;
-    inset: 0 0 auto 0;
-    height: 1px;
-    background: linear-gradient(
-      90deg,
-      transparent,
-      var(--color-glass-inner) 18%,
-      rgba(255, 255, 255, 0.28) 50%,
-      var(--color-glass-inner) 82%,
-      transparent
-    );
-    pointer-events: none;
-  }
-
-  .glass-quiet {
-    background: var(--color-glass-1);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    border: 1px solid var(--color-hairline);
-  }
-
-  /* --- Instrument substrate: calibration grid + tick marks ---------------- */
-  .instrument-grid {
-    background-image:
-      linear-gradient(to right, rgba(255, 255, 255, 0.028) 1px, transparent 1px),
-      linear-gradient(to bottom, rgba(255, 255, 255, 0.028) 1px, transparent 1px);
-    background-size: 56px 56px;
-  }
-
-  .instrument-ticks {
-    background-image: repeating-linear-gradient(
-      90deg,
-      rgba(255, 255, 255, 0.14) 0 1px,
-      transparent 1px 8px
-    );
-  }
-
-  /* Fine film grain kills the flat "digital" look of large dark fields */
-  .grain::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    opacity: 0.28;
-    mix-blend-mode: overlay;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
-  }
-
-  /* Hairline instrument rule with a bright origin point */
-  .rule-instrument {
-    height: 1px;
-    background: linear-gradient(
-      90deg,
-      var(--color-ice) 0,
-      rgba(125, 211, 252, 0.35) 6%,
-      var(--color-hairline) 22%,
-      var(--color-hairline) 100%
-    );
-  }
-
-  /* Numerals must never wobble as they update */
-  .tnum {
-    font-variant-numeric: tabular-nums;
-    font-feature-settings: "tnum" 1;
-  }
-
-  /* Gradient text for the one display statement per view */
-  .ink-gradient {
-    background: linear-gradient(180deg, #ffffff 0%, #9fb0c0 100%);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-  }
-
-  .ice-gradient {
-    background: linear-gradient(100deg, var(--color-ice) 0%, var(--color-emerald) 100%);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
-  }
 }

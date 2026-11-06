@@ -12,18 +12,18 @@
 <p>Pre-dispute telemetry for PayPal digital-goods disputes.<br/>
 Runs locally: no PayPal account, no model key, no cloud.</p>
 
-<p><sub>291 backend tests &nbsp;·&nbsp; 26 end-to-end assertions &nbsp;·&nbsp; MIT licensed</sub></p>
+<p><sub>520 tests &nbsp;·&nbsp; 26 end-to-end assertions &nbsp;·&nbsp; MIT licensed</sub></p>
 
 <p>
-  <img src="https://img.shields.io/badge/PayPal-Disputes%20v1%20%C2%B7%20Orders%20v2%20%C2%B7%20Subscriptions%20v1-1B2430?style=flat-square&labelColor=0E141B" alt="PayPal APIs: Disputes v1, Orders v2, Subscriptions v1" />
-  <img src="https://img.shields.io/badge/AI-OpenAI--compatible%20%2B%20local%20Ollama-1B2430?style=flat-square&labelColor=0E141B" alt="AI: OpenAI-compatible or local Ollama" />
-  <img src="https://img.shields.io/badge/Python-3.12%2B-1B2430?style=flat-square&labelColor=0E141B" alt="Python 3.12 or newer" />
-  <img src="https://img.shields.io/badge/Next.js-15-1B2430?style=flat-square&labelColor=0E141B" alt="Next.js 15" />
-  <img src="https://img.shields.io/badge/tests-291%20passing-34D399?style=flat-square&labelColor=0E141B" alt="291 tests passing" />
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-34D399?style=flat-square&labelColor=0E141B" alt="License: MIT" /></a>
+  <img src="https://img.shields.io/badge/PayPal-Disputes%20v1%20%C2%B7%20Orders%20v2%20%C2%B7%20Subscriptions%20v1-222224?style=flat-square&labelColor=131217" alt="PayPal APIs: Disputes v1, Orders v2, Subscriptions v1" />
+  <img src="https://img.shields.io/badge/AI-OpenAI--compatible%20%2B%20local%20Ollama-222224?style=flat-square&labelColor=131217" alt="AI: OpenAI-compatible or local Ollama" />
+  <img src="https://img.shields.io/badge/Python-3.12%2B-222224?style=flat-square&labelColor=131217" alt="Python 3.12 or newer" />
+  <img src="https://img.shields.io/badge/Next.js-15-222224?style=flat-square&labelColor=131217" alt="Next.js 15" />
+  <img src="https://img.shields.io/badge/tests-520%20passing-44A282?style=flat-square&labelColor=131217" alt="520 tests passing" />
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-44A282?style=flat-square&labelColor=131217" alt="License: MIT" /></a>
 </p>
 
-<img src="docs/assets/og-card.png" width="760" alt="VerdictPay card: the headline Win the dispute before the fee attaches, the shield mark, and three chips reading 0-fee deflection, $15/$30 fee-cliff EV, and SHA-256 chain of custody." />
+<img src="design/og-image.svg" width="760" alt="VerdictPay card: the headline Win the dispute before the fee attaches, the shield mark, and three chips reading 0-fee deflection, $15/$30 fee-cliff EV, and SHA-256 chain of custody." />
 
 </div>
 
@@ -235,12 +235,12 @@ Errors use one envelope:
 ## Verification
 
 ```bash
-make verify        # ruff, 291 pytest, eslint, tsc, next build, 24 SDK tests, 26 E2E assertions
+make verify        # ruff, 296 pytest, eslint, tsc, next build, 224 vitest, 26 E2E assertions
 make demo          # the judge flow alone, exits
 make verify-live   # live PayPal sandbox check, needs PAYPAL_MODE=live and credentials
 ```
 
-Backend: 291 pytest tests. SDK: 24 vitest tests. End to end: 26 assertions against the running simulator. Frontend: eslint, `tsc --noEmit` and `next build` green across six routes (/, /disputes, /disputes/[id], /timeline, /analytics, /settings).
+520 tests pass in total: **296** pytest on the backend, **188** frontend unit and component tests (vitest + Testing Library), **12** frontend API tests that run the real server over HTTP, and **24** SDK tests. The judge flow adds 26 assertions against the running simulator. `ruff`, `eslint`, `tsc --noEmit` and `next build` are green across six routes (/, /disputes, /disputes/[id], /timeline, /analytics, /settings).
 
 ## Sponsor tooling, honestly
 

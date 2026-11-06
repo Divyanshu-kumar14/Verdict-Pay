@@ -6,37 +6,35 @@ import { TONE_BADGE, TONE_DOT, type Tone } from "@/lib/vocab";
 export type BadgeProps = {
   children: ReactNode;
   tone?: Tone;
-  mono?: boolean;
   dot?: boolean;
   title?: string;
   className?: string;
-  size?: "xs" | "sm";
+  size?: "sm" | "md";
 };
 
-/** Status chip. Always carries text; colour is a secondary encoding only. */
+/**
+ * Status pill: a tinted ground with readable ink on it. Always carries words,
+ * so colour is a second encoding and never the only one.
+ */
 export function Badge({
   children,
   tone = "neutral",
-  mono = false,
   dot = false,
   title,
   className,
-  size = "xs",
+  size = "sm",
 }: BadgeProps) {
   return (
     <span
       title={title}
       className={cn(
-        "inline-flex items-center gap-1.5 whitespace-nowrap rounded border font-medium",
-        size === "xs"
-          ? "px-1.5 py-[2px] text-[10px] tracking-[0.06em]"
-          : "px-2 py-1 text-[11px] tracking-[0.04em]",
-        mono && "font-mono tracking-normal normal-case",
+        "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full font-medium",
+        size === "sm" ? "h-5 px-2 text-2xs" : "h-6 px-2.5 text-xs",
         TONE_BADGE[tone],
         className,
       )}
     >
-      {dot ? <span aria-hidden className={cn("h-1 w-1 rounded-full", TONE_DOT[tone])} /> : null}
+      {dot ? <span aria-hidden className={cn("h-1.5 w-1.5 rounded-full", TONE_DOT[tone])} /> : null}
       {children}
     </span>
   );

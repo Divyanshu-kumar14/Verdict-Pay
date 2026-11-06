@@ -12,18 +12,16 @@
     "format": "prettier --write .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:unit": "vitest run lib/__tests__ components/ui/__tests__ lib/hooks/__tests__",
+    "test:unit": "vitest run lib components",
     "test:e2e": "vitest run --config vitest.e2e.config.ts"
   },
   "dependencies": {
     "@verdictpay/sdk": "file:../packages/verdictpay-sdk",
     "ag-grid-community": "34.3.1",
     "ag-grid-react": "34.3.1",
-    "geist": "1.9.1",
     "lucide-react": "1.69.0",
     "motion": "^14.9.1",
     "next": "15.5.29",
-    "ogl": "^1.0.11",
     "react": "19.1.10",
     "react-dom": "19.1.10",
     "zod": "3.25.76"

@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 
 import { cn } from "@/lib/cn";
 
-/** Empty states always explain the next action. */
+/** Empty states are unboxed and always name the next action. */
 export function EmptyState({
   icon,
   title,
@@ -17,22 +17,11 @@ export function EmptyState({
   className?: string;
 }) {
   return (
-    <div
-      className={cn(
-        "flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-white/10 px-6 py-12 text-center",
-        className,
-      )}
-    >
-      {icon ? (
-        <div className="grid h-10 w-10 place-items-center rounded-full border border-hairline bg-white/[0.02] text-muted">
-          {icon}
-        </div>
-      ) : null}
-      <div className="space-y-1">
-        <p className="text-[13px] font-medium text-ink">{title}</p>
-        <p className="mx-auto max-w-sm text-[12px] text-muted">{description}</p>
-      </div>
-      {action ? <div className="pt-1">{action}</div> : null}
+    <div className={cn("flex flex-col items-start gap-2 px-4 py-10", className)}>
+      {icon ? <span className="text-muted">{icon}</span> : null}
+      <p className="text-base font-medium text-ink">{title}</p>
+      <p className="max-w-[60ch] text-sm text-muted">{description}</p>
+      {action ? <div className="pt-2">{action}</div> : null}
     </div>
   );
 }

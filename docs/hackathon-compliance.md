@@ -44,7 +44,7 @@ Judging: Technological Implementation · Design · Potential Impact · Innovatio
 |---|---|---|---|---|
 | 1 | PayPal integration is central | **PASS** | Real clients for Disputes v1 (get/list/send-message/make-offer/accept-claim/provide-evidence/require-evidence), Orders v2, Subscriptions v1 suspend, Reporting v1 transaction search, webhook signature verification — `backend/app/integrations/paypal/live.py`. Simulator satisfies the same `PayPalGateway` protocol. | Run `make verify-live` with sandbox credentials before recording. |
 | 2 | AI is meaningful | **PASS, with a visibility caveat** | AI composes the seller-protection rebuttal from a locked fact pack; deterministic validation rejects invented numbers; any OpenAI-compatible endpoint incl. free local Ollama — `backend/app/integrations/llm/`. Dossier footer stamps `Narrative source: ai:<model>`. | The default `LLM_MODE=template` means a keyless judge sees no AI. **Record the video with a model enabled** (local Ollama is free) and say so in the Tools field. |
-| 3 | Working prototype | **PASS** | `make demo` → 26/26 assertions; 291 backend tests; 24 SDK tests; all six UI routes render real data. | — |
+| 3 | Working prototype | **PASS** | `make demo` → 26/26 assertions; 520 tests (296 backend, 188 frontend unit, 12 API end-to-end, 24 SDK); all six UI routes render real data. | — |
 | 4 | Documented | **PASS** | README, architecture, ADRs, API surface, demo script. | — |
 | 5 | Judges can run it | **PASS** | `make stack` (no keys) or `docker compose up --build`; both verified in this repo. | — |
 | 6 | Public repo + license in About | **PASS** | GitHub API reports `visibility: public`, `license: MIT`; `LICENSE` at the root. | Repository description/topics set for clarity. |
@@ -86,7 +86,7 @@ Judging: Technological Implementation · Design · Potential Impact · Innovatio
 ## 5. Evidence commands
 
 ```bash
-make verify        # ruff + 291 pytest + eslint + tsc + next build + 24 SDK tests + 26 E2E assertions
+make verify        # ruff + 296 pytest + eslint + tsc + next build + 224 vitest + 26 E2E assertions
 make demo          # the judge flow alone, green/red
 make stack         # seed + API + UI, zero keys
 make verify-live   # real PayPal sandbox check (requires PAYPAL_MODE=live + credentials)

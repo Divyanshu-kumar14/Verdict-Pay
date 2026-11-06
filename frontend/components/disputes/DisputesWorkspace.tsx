@@ -4,69 +4,60 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight, Search } from "lucide-react";
 import { useMemo, useState, type ReactNode } from "react";
-import { MotionConfig } from "motion/react";
 
 import { PageHeader, PageMeta } from "@/components/PageHeader";
 import { DisputesGridLoader } from "@/components/disputes/DisputesGridLoader";
-import { FieldLabel } from "@/components/premium/FieldLabel";
-import { NumberTicker } from "@/components/premium/NumberTicker";
-import { Reveal, Stagger, StaggerItem } from "@/components/premium/Reveal";
-import { SpotlightCard } from "@/components/premium/SpotlightCard";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { Panel, PanelBody, PanelHeader } from "@/components/ui/Panel";
 import { Skeleton } from "@/components/ui/Skeleton";
+import { StatTile } from "@/components/ui/StatTile";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { formatPercent, isoToMs } from "@/lib/format";
+import { formatPercent, formatUsd, isoToMs } from "@/lib/format";
 import { useNow } from "@/lib/hooks/useNow";
 import { usePolledQuery } from "@/lib/hooks/usePolledQuery";
 import type { DisputeSummary } from "@/lib/types";
 
 const PER_PAGE = 25;
-const GRID_HEIGHT = 560;
 const DAY_MS = 86_400_000;
+// The grid frame follows the page it is showing (theme row height 42 + header 38),
+// capped so a long page scrolls inside the card instead of stretching the panel.
+const GRID_ROW_HEIGHT = 42;
+const GRID_HEADER_HEIGHT = 38;
+const GRID_MIN_HEIGHT = 170;
+const GRID_MAX_HEIGHT = 560;
 
 type QuickFilter = "all" | "due72" | "overdue" | "chargeback" | "nodossier";
 
 const QUICK_FILTERS: Array<{ key: QuickFilter; label: string }> = [
   { key: "all", label: "All" },
-  { key: "due72", label: "Due < 72h" },
+  { key: "due72", label: "Due in 72h" },
   { key: "overdue", label: "Overdue" },
   { key: "chargeback", label: "Chargeback" },
   { key: "nodossier", label: "No dossier" },
 ];
 
-function KpiSkeletons() {
+/** A KPI reading: label over a tabular figure, right-aligned in its column. */
+function Kpi({ label, value, sub }: { label: string; value: ReactNode; sub: ReactNode }) {
   return (
-    <>
-      {Array.from({ length: 4 }, (_, index) => (
-        <Skeleton key={index} className="h-[104px] w-full" />
-      ))}
-    </>
+    <StatTile
+      className="bg-surface"
+      label={label}
+      value={<span className="block text-right">{value}</span>}
+      sub={sub}
+    />
   );
 }
 
-function KpiTile({
-  label,
-  children,
-  sub,
-}: {
-  label: string;
-  children: ReactNode;
-  sub: ReactNode;
-}) {
-  return (
-    <SpotlightCard className="px-4 py-3.5">
-      <FieldLabel>{label}</FieldLabel>
-      <div className="num mt-2 text-[26px] font-medium leading-none tracking-[-0.02em] text-ink">
-        {children}
-      </div>
-      <div className="mt-2 text-[11px] leading-snug text-muted">{sub}</div>
-    </SpotlightCard>
-  );
+function KpiValueBar() {
+  return <span aria-hidden className="skeleton ml-auto block h-5 w-28" />;
+}
+
+function KpiSubBar() {
+  return <span aria-hidden className="skeleton block h-3 w-32" />;
 }
 
 function matchesQuery(row: DisputeSummary, query: string): boolean {
@@ -91,7 +82,7 @@ function matchesQuick(row: DisputeSummary, quick: QuickFilter, now: number): boo
   return dueMs - now <= 3 * DAY_MS;
 }
 
-/** /disputes — the triage queue, priced and sorted by deadline. */
+/** /disputes - the triage queue, priced by the EV engine and read by deadline. */
 export function DisputesWorkspace() {
   const router = useRouter();
   const [page, setPage] = useState(1);
@@ -120,297 +111,264 @@ export function DisputesWorkspace() {
   );
 
   const activeFilterCount = (filter.trim().length > 0 ? 1 : 0) + (quick === "all" ? 0 : 1);
+  const summaryData = summary.data;
+
+  const gridHeight = Math.min(
+    GRID_MAX_HEIGHT,
+    Math.max(GRID_MIN_HEIGHT, visible.length * GRID_ROW_HEIGHT + GRID_HEADER_HEIGHT + 2),
+  );
+  const skeletonRows = Math.max(
+    1,
+    Math.floor((gridHeight - GRID_HEADER_HEIGHT - 12) / GRID_ROW_HEIGHT),
+  );
 
   return (
-    <MotionConfig reducedMotion="user">
-      <div className="space-y-5">
-        <PageHeader
-          kicker="Triage queue · Aurora Analytics"
-          title="Dispute exposure"
-          description="Every case is priced by the deterministic EV engine. Sort or filter any column; click a row to open the case room, or use Open for keyboard navigation."
-          meta={
-            <>
-              <PageMeta label="Cases" value={meta ? meta.total : "—"} />
-              <PageMeta label="Per page" value={PER_PAGE} />
-              <PageMeta label="Refresh" value="2s while visible" />
-            </>
+    <div className="space-y-6">
+      <PageHeader
+        title="Dispute exposure"
+        description="Every case is priced by the deterministic EV engine, with the seller response deadline tracked to the hour."
+        meta={
+          <>
+            <PageMeta label="Cases" value={meta ? meta.total : "-"} />
+            <PageMeta label="Per page" value={PER_PAGE} />
+            <PageMeta label="Refresh" value="2s while visible" />
+          </>
+        }
+        actions={
+          highVolume ? (
+            <Badge tone={highVolume.flag ? "negative" : "positive"} dot>
+              {highVolume.flag ? "High-volume merchant" : "Standard fee tier"}
+              {" · ratio " + formatPercent(highVolume.ratio, 2) + " / " + formatPercent(highVolume.threshold, 2)}
+            </Badge>
+          ) : null
+        }
+      />
+
+      <Panel role="group" aria-label="Exposure readings" className="grid grid-cols-2 gap-px overflow-hidden bg-rule xl:grid-cols-4">
+        <Kpi
+          label="Open exposure"
+          value={summaryData ? formatUsd(summaryData.total_exposure_usd) : summary.loading ? <KpiValueBar /> : "-"}
+          sub={
+            summaryData ? (
+              summaryData.open_cases + " open · " + summaryData.in_inquiry + " inquiry / " + summaryData.in_claim + " claim"
+            ) : summary.loading ? (
+              <KpiSubBar />
+            ) : (
+              "Reporting unavailable"
+            )
           }
+        />
+        <Kpi
+          label="Protected"
+          value={summaryData ? formatUsd(summaryData.protected_usd) : summary.loading ? <KpiValueBar /> : "-"}
+          sub={
+            summaryData ? (
+              summaryData.chain_verified_customers + " chain-verified customers"
+            ) : summary.loading ? (
+              <KpiSubBar />
+            ) : (
+              "Reporting unavailable"
+            )
+          }
+        />
+        <Kpi
+          label="Fees avoided"
+          value={summaryData ? formatUsd(summaryData.fees_avoided_usd) : summary.loading ? <KpiValueBar /> : "-"}
+          sub={
+            summaryData ? (
+              summaryData.subscription_suspensions + " subscriptions suspended"
+            ) : summary.loading ? (
+              <KpiSubBar />
+            ) : (
+              "Reporting unavailable"
+            )
+          }
+        />
+        <Kpi
+          label="Average p(win)"
+          value={summaryData ? formatPercent(summaryData.avg_p_win) : summary.loading ? <KpiValueBar /> : "-"}
+          sub={
+            summaryData ? (
+              "win-rate estimate " +
+              formatPercent(summaryData.win_rate_estimate) +
+              " · ratio " +
+              formatPercent(summaryData.high_volume.ratio, 2) +
+              " / " +
+              formatPercent(summaryData.high_volume.threshold, 2)
+            ) : summary.loading ? (
+              <KpiSubBar />
+            ) : (
+              "Reporting unavailable"
+            )
+          }
+        />
+      </Panel>
+
+      {summary.error ? (
+        <ErrorBanner
+          error={summary.error}
+          context="Exposure readings could not be refreshed."
+          onRetry={summary.refresh}
+        />
+      ) : null}
+
+      <Panel className="overflow-hidden">
+        <PanelHeader
+          title={meta ? meta.total + " cases · page " + meta.page + " of " + totalPages : "Loading cases"}
+          description="Default order: seller response due date, soonest first."
           actions={
-            highVolume ? (
-              <Badge tone={highVolume.flag ? "rose" : "emerald"} dot>
-                {highVolume.flag ? "High-volume merchant" : "Standard fee tier"} · ratio{" "}
-                {formatPercent(highVolume.ratio, 2)} / {formatPercent(highVolume.threshold, 2)}
-              </Badge>
-            ) : null
+            <span className="num text-2xs text-muted">
+              {query.data ? "Polling every 2s" : "Connecting"}
+            </span>
           }
         />
 
-        <Reveal>
-          <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4" aria-label="Exposure indicators">
-            {summary.loading ? (
-              <KpiSkeletons />
-            ) : summary.data ? (
-              <Stagger className="contents" step={0.06}>
-                <StaggerItem className="contents">
-                  <KpiTile
-                    label="Open exposure"
-                    sub={
-                      <span>
-                        {summary.data.open_cases} open · {summary.data.in_inquiry} inquiry /{" "}
-                        {summary.data.in_claim} claim
-                      </span>
-                    }
-                  >
-                    <NumberTicker value={summary.data.total_exposure_usd} decimals={2} prefix="$" />
-                  </KpiTile>
-                </StaggerItem>
-                <StaggerItem className="contents">
-                  <KpiTile
-                    label="Protected"
-                    sub={<span>{summary.data.chain_verified_customers} chain-verified customers</span>}
-                  >
-                    <NumberTicker value={summary.data.protected_usd} decimals={2} prefix="$" />
-                  </KpiTile>
-                </StaggerItem>
-                <StaggerItem className="contents">
-                  <KpiTile
-                    label="Fees avoided"
-                    sub={<span>{summary.data.subscription_suspensions} subscriptions suspended</span>}
-                  >
-                    <NumberTicker value={summary.data.fees_avoided_usd} decimals={2} prefix="$" />
-                  </KpiTile>
-                </StaggerItem>
-                <StaggerItem className="contents">
-                  <KpiTile
-                    label="Dispute ratio vs threshold"
-                    sub={
-                      <span>
-                        win-rate estimate {formatPercent(summary.data.win_rate_estimate)} · avg p(win){" "}
-                        {formatPercent(summary.data.avg_p_win)}
-                      </span>
-                    }
-                  >
-                    <NumberTicker
-                      value={summary.data.high_volume.ratio * 100}
-                      decimals={2}
-                      suffix="%"
-                    />
-                  </KpiTile>
-                </StaggerItem>
-              </Stagger>
-            ) : (
-              <>
-                <KpiTile label="Open exposure" sub={<span>Reporting unavailable</span>}>
-                  —
-                </KpiTile>
-                <KpiTile label="Protected" sub={<span>Reporting unavailable</span>}>
-                  —
-                </KpiTile>
-                <KpiTile label="Fees avoided" sub={<span>Reporting unavailable</span>}>
-                  —
-                </KpiTile>
-                <KpiTile label="Dispute ratio" sub={<span>Reporting unavailable</span>}>
-                  —
-                </KpiTile>
-              </>
-            )}
-          </div>
-        </Reveal>
-
-        {summary.error ? (
-          <ErrorBanner
-            error={summary.error}
-            context="Exposure KPIs could not be refreshed."
-            onRetry={summary.refresh}
-          />
-        ) : null}
-
-        <Panel className="overflow-hidden">
-          <PanelHeader
-            kicker="Triage queue"
-            title={meta ? meta.total + " cases · page " + String(meta.page) + " of " + String(totalPages) : "Loading cases"}
-            description="Default sort: seller response due date, soonest first."
-            actions={
-              <span className="flex items-center gap-1.5 font-mono text-[9.5px] text-dim">
-                <span
-                  aria-hidden
-                  className={
-                    query.data
-                      ? "h-1.5 w-1.5 rounded-full bg-emerald live-dot"
-                      : "h-1.5 w-1.5 rounded-full bg-white/25"
-                  }
-                />
-                {query.data ? "polling 2s" : "connecting"}
-              </span>
-            }
-          />
-          <div aria-hidden className="rule-instrument h-px w-full" />
-
-          <div className="flex flex-wrap items-center gap-2 border-b border-hairline px-3 py-2.5">
-            <div className="relative">
-              <Search
-                size={12}
-                aria-hidden
-                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-dim"
-              />
-              <input
-                type="search"
-                value={filter}
-                onChange={(event) => setFilter(event.target.value)}
-                placeholder="Filter id, payer, reason, stage…"
-                aria-label="Filter dispute cases"
-                className="h-8 w-56 rounded-md border border-border-strong bg-chrome pl-8 pr-2.5 text-[11.5px] text-ink placeholder:text-dim"
-              />
-            </div>
-            <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Quick filters">
-              {QUICK_FILTERS.map((option) => {
-                const active = quick === option.key;
-                return (
-                  <button
-                    key={option.key}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => setQuick(option.key)}
-                    className={cn(
-                      "h-7 rounded-full border px-2.5 font-mono text-[10px] transition-colors",
-                      active
-                        ? "border-ice/40 bg-ice/10 text-ice"
-                        : "border-hairline bg-white/[0.02] text-muted hover:border-white/20 hover:text-ink",
-                    )}
-                  >
-                    {option.label}
-                  </button>
-                );
-              })}
-            </div>
-            <div className="ml-auto flex items-center gap-2">
-              <span className="num font-mono text-[10px] text-dim" aria-live="polite">
-                {visible.length} of {rows.length} rows
-                {activeFilterCount > 0 ? " · filtered" : ""}
-              </span>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={query.refresh}
-                loading={query.refreshing}
-              >
-                Refresh
-              </Button>
-            </div>
+        <div className="row-rule flex flex-wrap items-center gap-x-3 gap-y-2.5 px-4 py-2.5">
+          <div className="relative">
+            <Search
+              size={13}
+              aria-hidden
+              className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted"
+            />
+            <input
+              type="search"
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+              placeholder="Filter id, payer, or reason"
+              aria-label="Filter dispute cases"
+              className="h-control w-64 rounded-card border border-control bg-raised pr-3 pl-8 text-sm text-ink placeholder:text-muted"
+            />
           </div>
 
-          <div className="border-b border-hairline">
-            {query.error && !query.data ? (
-              <div className="p-3">
-                <ErrorBanner
-                  error={query.error}
-                  context="The triage queue could not be loaded."
-                  onRetry={query.refresh}
-                />
-              </div>
-            ) : query.loading ? (
-              <div className="space-y-2 p-3" aria-busy="true" aria-label="Loading disputes">
-                <Skeleton className="h-8 w-full" />
-                {Array.from({ length: 8 }, (_, index) => (
-                  <Skeleton key={index} className="h-10 w-full" />
-                ))}
-              </div>
-            ) : rows.length === 0 ? (
-              <div className="p-4">
-                <div className="rounded-lg border border-hairline bg-sunken px-6 py-8">
-                  <FieldLabel rule tone="ice">
-                    Queue empty · instrument idle
-                  </FieldLabel>
-                  <EmptyState
-                    className="border-0 bg-transparent py-6"
-                    title="No disputes in the queue"
-                    description="The merchant has no open PayPal disputes. Run the three-button sandbox flow to open one through the real webhook path."
-                    action={
-                      <Link
-                        href="/"
-                        className="inline-flex h-8 items-center rounded-md border border-emerald/30 bg-emerald/10 px-3 text-[12px] font-medium text-emerald transition-colors hover:bg-emerald/15"
-                      >
-                        Run the sandbox flow
-                      </Link>
-                    }
-                  />
-                  <p className="text-center font-mono text-[9.5px] text-dim">
-                    GET /api/v1/disputes · page 1 · per_page {PER_PAGE}
-                  </p>
-                </div>
-              </div>
-            ) : visible.length === 0 ? (
-              <div className="p-4">
-                <EmptyState
-                  title="No cases match this filter"
-                  description="Loosen the text query or clear the quick filter to return to the full page."
-                  action={
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => {
-                        setFilter("");
-                        setQuick("all");
-                      }}
-                    >
-                      Clear filters
-                    </Button>
-                  }
-                />
-              </div>
-            ) : (
-              <div className="overflow-hidden" style={{ height: GRID_HEIGHT }}>
-                <DisputesGridLoader
-                  rows={visible}
-                  now={referenceNow}
-                  height={GRID_HEIGHT}
-                  onRowClick={(disputeId) => {
-                    router.push("/disputes/" + encodeURIComponent(disputeId));
-                  }}
-                />
-              </div>
-            )}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1" role="group" aria-label="Quick filters">
+            {QUICK_FILTERS.map((option) => {
+              const active = quick === option.key;
+              return (
+                <button
+                  key={option.key}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => setQuick(option.key)}
+                  className={cn(
+                    "relative py-1 text-sm transition-colors duration-120",
+                    active ? "sig text-ink" : "text-muted hover:text-ink",
+                  )}
+                >
+                  {option.label}
+                </button>
+              );
+            })}
           </div>
 
-          {query.error && query.data ? (
-            <div className="p-3">
+          <div className="ml-auto flex items-center gap-3">
+            <span className="num text-2xs text-muted" aria-live="polite">
+              {visible.length} of {rows.length} rows
+              {activeFilterCount > 0 ? " · filtered" : ""}
+            </span>
+            <Button variant="secondary" size="sm" onClick={query.refresh} loading={query.refreshing}>
+              Refresh
+            </Button>
+          </div>
+        </div>
+
+        <div className="row-rule">
+          {query.error && !query.data ? (
+            <div className="p-4">
               <ErrorBanner
                 error={query.error}
-                context="Showing the last successful queue page while the API recovers."
+                context="The triage queue could not be loaded."
                 onRetry={query.refresh}
               />
             </div>
-          ) : null}
-
-          <PanelBody className="flex flex-wrap items-center justify-between gap-2 border-t border-hairline px-3 py-2.5">
-            <span className="num font-mono text-[10px] text-dim">
-              {meta
-                ? "page " + String(meta.page) + " / " + String(totalPages) + " · " + String(meta.total) + " cases · " + String(meta.per_page) + " per page"
-                : "page —"}
-            </span>
-            <div className="flex items-center gap-1.5">
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={page <= 1}
-                onClick={() => setPage((current) => Math.max(1, current - 1))}
-                icon={<ChevronLeft size={12} aria-hidden />}
-              >
-                Prev
-              </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                disabled={page >= totalPages}
-                onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
-                trailingIcon={<ChevronRight size={12} aria-hidden />}
-              >
-                Next
-              </Button>
+          ) : query.loading ? (
+            <div className="space-y-2.5 p-4" style={{ height: gridHeight }} aria-busy="true" aria-label="Loading disputes">
+              <Skeleton className="h-9 w-full" />
+              {Array.from({ length: skeletonRows }, (_, index) => (
+                <Skeleton key={index} className="h-row w-full" />
+              ))}
             </div>
-          </PanelBody>
-        </Panel>
-      </div>
-    </MotionConfig>
+          ) : rows.length === 0 ? (
+            <EmptyState
+              title="No disputes in the queue"
+              description="The merchant has no open PayPal disputes. Run the three-button sandbox flow to open one through the real webhook path."
+              action={
+                <Link
+                  href="/"
+                  className="inline-flex h-8 items-center rounded-full border border-control bg-raised px-3 text-xs font-medium text-ink transition-colors duration-120 hover:bg-[#29282c]"
+                >
+                  Run the sandbox flow
+                </Link>
+              }
+            />
+          ) : visible.length === 0 ? (
+            <EmptyState
+              title="No cases match this filter"
+              description="Loosen the text query or clear the quick filter to return to the full page."
+              action={
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => {
+                    setFilter("");
+                    setQuick("all");
+                  }}
+                >
+                  Clear filters
+                </Button>
+              }
+            />
+          ) : (
+            <div className="overflow-hidden" style={{ height: gridHeight }}>
+              <DisputesGridLoader
+                rows={visible}
+                now={referenceNow}
+                height={gridHeight}
+                onRowClick={(disputeId) => {
+                  router.push("/disputes/" + encodeURIComponent(disputeId));
+                }}
+              />
+            </div>
+          )}
+        </div>
+
+        {query.error && query.data ? (
+          <div className="row-rule p-4">
+            <ErrorBanner
+              error={query.error}
+              context="Showing the last successful queue page while the API recovers."
+              onRetry={query.refresh}
+            />
+          </div>
+        ) : null}
+
+        <PanelBody className="row-rule flex flex-wrap items-center justify-between gap-2">
+          <span className="num text-2xs text-muted">
+            {meta
+              ? "page " + meta.page + " / " + totalPages + " · " + meta.total + " cases · " + meta.per_page + " per page"
+              : "page -"}
+          </span>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={page <= 1}
+              onClick={() => setPage((current) => Math.max(1, current - 1))}
+              icon={<ChevronLeft size={13} aria-hidden />}
+            >
+              Prev
+            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={page >= totalPages}
+              onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+              trailingIcon={<ChevronRight size={13} aria-hidden />}
+            >
+              Next
+            </Button>
+          </div>
+        </PanelBody>
+      </Panel>
+    </div>
   );
 }

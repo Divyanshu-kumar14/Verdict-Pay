@@ -4,7 +4,7 @@ PY := uv run --directory backend
 API_PORT ?= 8000
 WEB_PORT ?= 3000
 
-.PHONY: help install env api web serve seed stack reset-db test test-backend test-frontend test-sdk test-e2e lint format typecheck check verify verify-live demo e2e docker-build docker-up docker-down clean
+.PHONY: help install env api web serve seed stack reset-db test test-backend test-frontend test-sdk test-e2e lint format typecheck check verify verify-live demo e2e design-gate docker-build docker-up docker-down clean
 E2E_PORT ?= 8199
 
 help: ## Show available targets
@@ -84,6 +84,12 @@ verify-live: ## Prove real PayPal sandbox credentials work (forces live mode)
 
 e2e: ## Run the three-button judge flow against an API you already started
 	$(PY) python scripts/e2e_demo.py
+
+# The design inspector must judge a PRODUCTION build, never a dev server, and the
+# routes poll the API for their data. Boot the API first in another shell:
+#   make stack
+design-gate: ## Judge every route with the design inspector in app mode (needs the API up)
+	node frontend/scripts/design-gate.mjs
 
 demo: ## Verify the full judge flow: seed, boot, assert 26 checks, shut down
 	@echo "==> verifying the VerdictPay judge flow on :$(API_PORT) (simulator mode)"

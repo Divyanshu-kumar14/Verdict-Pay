@@ -25,6 +25,14 @@ const eslintConfig = [
       "@typescript-eslint/no-explicit-any": "error",
     },
   },
+  /* scripts/ holds standalone Node CLIs, not app code: their whole job is to
+     print a report to stdout, so console is the interface, not debug residue. */
+  {
+    files: ["scripts/**/*.mjs"],
+    rules: {
+      "no-console": "off",
+    },
+  },
 ];
 
 export default eslintConfig;

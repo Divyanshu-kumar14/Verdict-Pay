@@ -116,7 +116,7 @@ describe("describeContainment", () => {
     const result = describeContainment(containment);
     expect(result.text).toBe("Subscription suspended in 120ms");
     expect(result.detail).toBe("sub_abc");
-    expect(result.tone).toBe("emerald");
+    expect(result.tone).toBe("positive");
     expect(result.suspended).toBe(true);
   });
 
@@ -171,7 +171,7 @@ describe("describeContainment", () => {
     };
     const result = describeContainment(containment);
     expect(result.text).toContain("Subscription suspended");
-    expect(result.tone).toBe("emerald");
+    expect(result.tone).toBe("positive");
   });
 
   it("returns failed when attempted with error", () => {
@@ -185,11 +185,11 @@ describe("describeContainment", () => {
     const result = describeContainment(containment);
     expect(result.text).toBe("Containment failed: timeout");
     expect(result.detail).toBe("sub_err");
-    expect(result.tone).toBe("rose");
+    expect(result.tone).toBe("negative");
     expect(result.suspended).toBe(false);
   });
 
-  it("returns amber when attempted without error and not suspended", () => {
+  it("returns warning when attempted without error and not suspended", () => {
     const containment: Containment = {
       attempted: true,
       suspended: false,
@@ -200,7 +200,7 @@ describe("describeContainment", () => {
     const result = describeContainment(containment);
     expect(result.text).toBe("Containment ran without suspending billing");
     expect(result.detail).toBe("sub_ok");
-    expect(result.tone).toBe("amber");
+    expect(result.tone).toBe("warning");
     expect(result.suspended).toBe(false);
   });
 
@@ -214,6 +214,6 @@ describe("describeContainment", () => {
     };
     const result = describeContainment(containment);
     expect(result.detail).toBeNull();
-    expect(result.tone).toBe("amber");
+    expect(result.tone).toBe("warning");
   });
 });

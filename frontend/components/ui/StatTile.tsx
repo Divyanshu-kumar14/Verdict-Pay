@@ -1,44 +1,49 @@
 import type { ReactNode } from "react";
 
 import { cn } from "@/lib/cn";
-import { type Tone, TONE_TEXT } from "@/lib/vocab";
 
+/**
+ * A KPI is a label and a figure: no tinted icon square above it, because a boxed
+ * icon on every tile is the tell that the numbers were never the point.
+ */
 export function StatTile({
   label,
   value,
   sub,
   tone = "neutral",
-  mono = true,
-  icon,
   emphasis = "default",
   className,
 }: {
   label: string;
   value: ReactNode;
   sub?: ReactNode;
-  tone?: Tone;
-  mono?: boolean;
-  icon?: ReactNode;
-  emphasis?: "default" | "headline";
+  tone?: "positive" | "warning" | "negative" | "accent" | "neutral";
+  emphasis?: "default" | "lead";
   className?: string;
 }) {
+  const INK = {
+    positive: "text-positive",
+    warning: "text-warning",
+    negative: "text-negative",
+    accent: "text-accent",
+    neutral: "text-ink",
+  } as const;
+
   return (
-    <div className={cn("panel-flat px-3.5 py-3", className)}>
-      <div className="flex items-center justify-between gap-2">
-        <span className="kicker">{label}</span>
-        {icon ? <span className={TONE_TEXT[tone]}>{icon}</span> : null}
-      </div>
+    <div className={cn("px-4 py-3.5", className)}>
+      <p className="label">{label}</p>
+      {/* divs, not paragraphs: value and sub are ReactNodes and may hold block
+          content, which is invalid inside a p. */}
       <div
         className={cn(
-          "mt-1.5 font-medium leading-none tracking-[-0.02em]",
-          emphasis === "headline" ? "text-[28px]" : "text-[19px]",
-          mono && "num",
-          TONE_TEXT[tone] === "text-muted" ? "text-ink" : TONE_TEXT[tone],
+          "value mt-1.5",
+          emphasis === "lead" ? "text-xl" : "text-lg",
+          INK[tone],
         )}
       >
         {value}
       </div>
-      {sub ? <div className="mt-1.5 text-[11px] leading-snug text-muted">{sub}</div> : null}
+      {sub ? <div className="mt-1 text-xs leading-snug text-muted">{sub}</div> : null}
     </div>
   );
 }

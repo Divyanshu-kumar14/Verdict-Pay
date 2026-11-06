@@ -3,76 +3,100 @@ import { describe, expect, it } from "vitest";
 import { render, screen } from "@testing-library/react";
 
 import { Badge } from "../Badge";
+import { TONE_BADGE, TONE_DOT } from "@/lib/vocab";
 
 describe("Badge", () => {
   it("renders the label text", () => {
-    render(<Badge>INQUIRY</Badge>);
-    expect(screen.getByText("INQUIRY")).toBeInTheDocument();
+    render(<Badge>Inquiry</Badge>);
+    expect(screen.getByText("Inquiry")).toBeInTheDocument();
   });
 
-  it("applies emerald tone classes for success stages", () => {
-    const { container } = render(<Badge tone="emerald">RESOLVED</Badge>);
+  it("defaults to the neutral pill", () => {
+    const { container } = render(<Badge>Internal</Badge>);
     const el = container.firstChild as HTMLElement;
-    expect(el.className).toContain("border-emerald");
-    expect(el.className).toContain("bg-emerald");
+    expect(el.className).toContain("bg-pill-neutral");
+    expect(el.className).toContain("text-pill-neutral-ink");
   });
 
-  it("applies amber tone classes for inquiry stages", () => {
-    const { container } = render(<Badge tone="amber">INQUIRY</Badge>);
+  it("applies the positive pill for a resolved case", () => {
+    const { container } = render(<Badge tone="positive">Resolved</Badge>);
     const el = container.firstChild as HTMLElement;
-    expect(el.className).toContain("border-amber");
-    expect(el.className).toContain("bg-amber");
+    expect(el.className).toContain("bg-pill-positive");
+    expect(el.className).toContain("text-pill-positive-ink");
   });
 
-  it("applies rose tone for escalation stages", () => {
-    const { container } = render(<Badge tone="rose">CHARGEBACK</Badge>);
+  it("applies the warning pill for an inquiry stage", () => {
+    const { container } = render(<Badge tone="warning">Inquiry</Badge>);
     const el = container.firstChild as HTMLElement;
-    expect(el.className).toContain("border-rose");
-    expect(el.className).toContain("bg-rose");
+    expect(el.className).toContain("bg-pill-warning");
+    expect(el.className).toContain("text-pill-warning-ink");
   });
 
-  it("applies sky tone for external channel", () => {
-    const { container } = render(<Badge tone="sky">EXTERNAL</Badge>);
+  it("applies the negative pill for an escalation stage", () => {
+    const { container } = render(<Badge tone="negative">Chargeback</Badge>);
     const el = container.firstChild as HTMLElement;
-    expect(el.className).toContain("border-sky");
-    expect(el.className).toContain("bg-sky");
+    expect(el.className).toContain("bg-pill-negative");
+    expect(el.className).toContain("text-pill-negative-ink");
   });
 
-  it("applies neutral tone for internal channel fallback", () => {
-    const { container } = render(<Badge tone="neutral">INTERNAL</Badge>);
+  it("applies the accent pill for the external channel", () => {
+    const { container } = render(<Badge tone="accent">Card / bank</Badge>);
     const el = container.firstChild as HTMLElement;
-    expect(el.className).toContain("border-white/10");
+    expect(el.className).toContain("bg-pill-accent");
+    expect(el.className).toContain("text-pill-accent-ink");
+  });
+
+  it("every tone renders its dealt pill classes and nothing else", () => {
+    const tones = ["positive", "warning", "negative", "accent", "neutral"] as const;
+    for (const tone of tones) {
+      const { container } = render(<Badge tone={tone}>{tone}</Badge>);
+      const el = container.firstChild as HTMLElement;
+      for (const cls of TONE_BADGE[tone].split(" ")) {
+        expect(el.className).toContain(cls);
+      }
+      // An opaque pill ground, never a hairline border or a hue utility.
+      expect(el.className).not.toContain("border-");
+      expect(el.className).not.toMatch(/bg-(positive|warning|negative|accent|muted)\b/);
+    }
+  });
+
+  it("never renders uppercase or letter-spaced type", () => {
+    const { container } = render(<Badge>Resolved</Badge>);
+    const el = container.firstChild as HTMLElement;
+    expect(el.className).not.toContain("uppercase");
+    expect(el.className).not.toContain("tracking-");
   });
 
   it("renders a dot when dot prop is true", () => {
     const { container } = render(
-      <Badge tone="emerald" dot>
+      <Badge tone="positive" dot>
         Live
       </Badge>,
     );
-    // dot is a span with h-1 w-1 rounded-full
-    const dot = container.querySelector("span.h-1.w-1");
+    const dot = container.querySelector("span.h-1\\.5.w-1\\.5");
     expect(dot).toBeInTheDocument();
-    expect(dot?.className).toContain("bg-emerald");
+    expect(dot?.className).toContain(TONE_DOT.positive);
+    expect(dot).toHaveAttribute("aria-hidden");
   });
 
   it("does not render a dot by default", () => {
     const { container } = render(<Badge>Plain</Badge>);
-    const dot = container.querySelector("span.h-1.w-1");
-    expect(dot).not.toBeInTheDocument();
+    expect(container.querySelectorAll("span span")).toHaveLength(0);
   });
 
   it("forwards title attribute for accessibility", () => {
-    render(<Badge title="Inquiry stage">UNIQUE_BADGE_TITLE_TEST</Badge>);
-    const badge = screen.getByText("UNIQUE_BADGE_TITLE_TEST");
+    render(<Badge title="Inquiry stage">Unique badge title</Badge>);
+    const badge = screen.getByText("Unique badge title");
     expect(badge.closest("span")).toHaveAttribute("title", "Inquiry stage");
   });
 
   it("respects size variants", () => {
-    const { container: xs } = render(<Badge size="xs">XS</Badge>);
-    expect((xs.firstChild as HTMLElement).className).toContain("px-1.5");
+    const { container: sm } = render(<Badge size="sm">Small</Badge>);
+    expect((sm.firstChild as HTMLElement).className).toContain("text-2xs");
 
-    const { container: sm } = render(<Badge size="sm">SM</Badge>);
-    expect((sm.firstChild as HTMLElement).className).toContain("px-2");
+    const { container: md } = render(<Badge size="md">Medium</Badge>);
+    const mdClass = (md.firstChild as HTMLElement).className;
+    expect(mdClass).toContain("text-xs");
+    expect(mdClass).toContain("h-6");
   });
 });

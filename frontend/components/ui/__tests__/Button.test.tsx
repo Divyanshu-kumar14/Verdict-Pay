@@ -65,7 +65,7 @@ describe("Button", () => {
   });
 
   it("renders leading icon when not loading", () => {
-    render(<Button icon={<span data-testid="leading">★</span>}>Star</Button>);
+    render(<Button icon={<span data-testid="leading">+</span>}>Star</Button>);
     expect(screen.getByTestId("leading")).toBeInTheDocument();
   });
 });

@@ -225,7 +225,9 @@ describe("CommandCenter", () => {
       />,
     );
     expect(screen.getByText("Subscription active")).toBeInTheDocument();
-    expect(screen.getByText(/containment state synced from the case record/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/containment state synced from the case record/i),
+    ).toBeInTheDocument();
   });
 
   it("shows containment suspended banner when subscription_suspended is true", () => {
@@ -241,7 +243,7 @@ describe("CommandCenter", () => {
         onCaseChanged={vi.fn()}
       />,
     );
-    // CommandCenter renders a neutral/emerald panel with "Subscription suspended" text when case record says suspended
+    // CommandCenter renders a Containment panel with "Subscription suspended" text when the case record says suspended
     expect(screen.getByText("Subscription suspended")).toBeInTheDocument();
     // Ensure we do not show active text
     expect(screen.queryByText("Subscription active")).not.toBeInTheDocument();
@@ -275,7 +277,7 @@ describe("CommandCenter", () => {
     );
     expect(screen.getByText(/Subscription suspended in 42ms/)).toBeInTheDocument();
     // containment label is always present
-    expect(screen.getByText("containment")).toBeInTheDocument();
+    expect(screen.getByText("Containment")).toBeInTheDocument();
   });
 
   it("surfaces loading state without crashing", () => {

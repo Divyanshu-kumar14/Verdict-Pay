@@ -16,17 +16,18 @@ export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
   block?: boolean;
 };
 
+/* Flat fills only. No gradient, no glow, no shadow: a control is a colour. */
 const VARIANTS: Record<Variant, string> = {
-  primary: "bg-emerald text-inverse hover:bg-[#4ade80]",
-  secondary: "border border-hairline bg-white/[0.03] text-ink hover:bg-white/[0.06]",
-  ghost: "text-muted hover:bg-white/[0.04] hover:text-ink",
-  danger: "border border-rose/30 bg-rose/10 text-rose hover:bg-rose/15",
+  primary: "bg-accent text-ground hover:bg-[#5b98e0]",
+  secondary: "border border-control bg-raised text-ink hover:bg-[#29282c]",
+  ghost: "text-muted hover:bg-raised hover:text-ink",
+  danger: "bg-pill-negative text-pill-negative-ink hover:bg-[#38202a]",
 };
 
 const SIZES: Record<Size, string> = {
-  sm: "h-8 px-2.5 text-[12px]",
-  md: "h-9 px-3.5 text-[13px]",
-  lg: "h-11 px-5 text-[13.5px]",
+  sm: "h-8 px-3 text-xs",
+  md: "h-[34px] px-3.5 text-base",
+  lg: "h-11 px-5 text-base",
 };
 
 /** Single button primitive with loading, icon and disabled states. */
@@ -49,7 +50,8 @@ export function Button({
       disabled={disabled || loading}
       aria-busy={loading || undefined}
       className={cn(
-        "inline-flex items-center justify-center gap-2 rounded-md font-medium transition-colors",
+        "inline-flex items-center justify-center gap-2 rounded-full font-medium",
+        "transition-colors duration-120",
         "disabled:cursor-not-allowed disabled:opacity-45",
         VARIANTS[variant],
         SIZES[size],

@@ -32,7 +32,7 @@ Source: backend/app/config.py (env-driven Settings, loads backend/.env then repo
 
 ## Evidence commands
 
-make verify        # full offline gate (ruff + 291 pytest + eslint + tsc + next build + SDK vitest + 26 E2E)
+make verify        # full offline gate (ruff + 296 pytest + eslint + tsc + next build + 224 vitest + 26 E2E)
 make demo          # judge flow, simulator mode, zero keys
 make verify-live   # PAYPAL_MODE=live OAuth + dispute read + Reporting v1 (needs PAYPAL_CLIENT_ID/SECRET)
 

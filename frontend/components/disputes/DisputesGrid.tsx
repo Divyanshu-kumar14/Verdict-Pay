@@ -9,31 +9,26 @@ import {
   type RowClickedEvent,
 } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
-import { FileText } from "lucide-react";
 import { useMemo } from "react";
 
-import { Badge } from "@/components/ui/Badge";
 import { GRID_THEME } from "@/lib/ag-grid";
 import { cn } from "@/lib/cn";
-import { formatAbsolute, formatDueIn, formatPercent, formatUsd, isoToMs, shortHash } from "@/lib/format";
+import { formatAbsolute, formatDueIn, formatUsd, isoToMs, shortHash } from "@/lib/format";
 import type { DisputeSummary } from "@/lib/types";
-import { REASON_META, RECOMMENDATION_META, STAGE_META, CHANNEL_META, TONE_DOT } from "@/lib/vocab";
+import { REASON_META, RECOMMENDATION_META, STAGE_META } from "@/lib/vocab";
 
 const DEFAULT_COL_DEF: ColDef<DisputeSummary> = {
   sortable: true,
   filter: true,
   resizable: true,
   suppressHeaderMenuButton: true,
-  minWidth: 88,
+  // Keep min widths small enough that all seven columns fit a 768px card.
+  minWidth: 80,
 };
 
-type RecommendedEvField = "ev_fight_usd" | "ev_settle_usd" | "ev_offer_usd";
-
-const RECOMMENDED_EV_FIELD: Partial<Record<DisputeSummary["recommended_action"], RecommendedEvField>> = {
-  PROVIDE_EVIDENCE: "ev_fight_usd",
-  MAKE_OFFER: "ev_offer_usd",
-  ACCEPT_CLAIM: "ev_settle_usd",
-};
+// Seller response window: the same 72h arithmetic the workspace filter uses.
+const SOON_WINDOW_MS = 3 * 86_400_000;
+const ISO_DATE_PREFIX = /^[0-9]{4}-[0-9]{2}-[0-9]{2}/;
 
 export type DisputesGridProps = {
   rows: DisputeSummary[];
@@ -43,29 +38,23 @@ export type DisputesGridProps = {
   compact?: boolean;
 };
 
-function IdCell({ params }: { params: ICellRendererParams<DisputeSummary> }) {
+function CaseCell({ params }: { params: ICellRendererParams<DisputeSummary> }) {
   const data = params.data;
   if (!data) return null;
   return (
-    <span className="flex items-center gap-1.5">
-      {data.dossier_available ? (
-        <span aria-hidden className="h-3 w-[2px] rounded-full bg-emerald" />
-      ) : (
-        <span aria-hidden className="h-3 w-[2px] rounded-full bg-white/15" />
-      )}
-      <span className="num text-[11px] text-ink" title={data.dispute_id}>
-        {shortHash(data.dispute_id, 12, 4)}
-      </span>
+    <span className="num block truncate text-sm text-ink" title={data.dispute_id}>
+      {shortHash(data.dispute_id, 12, 4)}
     </span>
   );
 }
 
-function PayerCell({ params }: { params: ICellRendererParams<DisputeSummary> }) {
+function StageCell({ params }: { params: ICellRendererParams<DisputeSummary> }) {
   const data = params.data;
   if (!data) return null;
+  const meta = STAGE_META[data.stage];
   return (
-    <span className="num text-[11px] text-muted" title={data.payer_id}>
-      {shortHash(data.payer_id, 8, 4)}
+    <span className="block truncate text-sm text-muted" title={meta.label}>
+      {meta.short}
     </span>
   );
 }
@@ -75,32 +64,8 @@ function ReasonCell({ params }: { params: ICellRendererParams<DisputeSummary> })
   if (!data) return null;
   const meta = REASON_META[data.reason_code];
   return (
-    <Badge tone={meta.tone} dot title={meta.label}>
+    <span className="block truncate text-sm text-muted" title={meta.label}>
       {meta.short}
-    </Badge>
-  );
-}
-
-function StageCell({ params }: { params: ICellRendererParams<DisputeSummary> }) {
-  const data = params.data;
-  if (!data) return null;
-  const meta = STAGE_META[data.stage];
-  return (
-    <Badge tone={meta.tone} dot title={meta.label}>
-      {meta.short}
-    </Badge>
-  );
-}
-
-function ChannelCell({ params }: { params: ICellRendererParams<DisputeSummary> }) {
-  const data = params.data;
-  if (!data) return null;
-  const meta = CHANNEL_META[data.channel];
-  const rail = data.channel === "EXTERNAL" ? "bg-sky" : "bg-white/25";
-  return (
-    <span className="flex items-center gap-1.5" title={meta.label}>
-      <span aria-hidden className={cn("h-3 w-[2px] rounded-full", rail)} />
-      <span className="font-mono text-[10px] tracking-[0.08em] text-muted">{meta.short}</span>
     </span>
   );
 }
@@ -109,114 +74,53 @@ function AmountCell({ params }: { params: ICellRendererParams<DisputeSummary> })
   const data = params.data;
   if (!data) return null;
   return (
-    <span className="num block text-right text-[12px] font-medium tabular-nums text-ink">
+    <span className="num block truncate text-right text-sm text-muted">
       {formatUsd(data.amount_usd)}
     </span>
   );
 }
 
-function WinProbCell({ params }: { params: ICellRendererParams<DisputeSummary> }) {
+function ExpectedLossCell({ params }: { params: ICellRendererParams<DisputeSummary> }) {
   const data = params.data;
   if (!data) return null;
-  const pct = Math.max(0, Math.min(1, data.p_win));
-  const tone = pct >= 0.55 ? "bg-emerald" : pct >= 0.35 ? "bg-amber" : "bg-rose";
-  const word = pct >= 0.55 ? "strong" : pct >= 0.35 ? "contested" : "weak";
   return (
-    <span
-      className="flex items-center justify-end gap-2"
-      role="img"
-      aria-label={"Win probability " + formatPercent(data.p_win) + ", " + word}
-    >
-      <span aria-hidden className="h-[5px] w-11 overflow-hidden rounded-full bg-white/[0.08]">
-        <span className={cn("block h-full rounded-full", tone)} style={{ width: pct * 100 + "%" }} />
-      </span>
-      <span className="num w-11 text-right text-[11px] tabular-nums text-ink">
-        {formatPercent(data.p_win)}
-      </span>
+    <span className="num block truncate text-right text-sm text-muted">
+      {formatUsd(data.ev_settle_usd)}
     </span>
   );
 }
 
-function EvCell({
-  params,
-  field,
-}: {
-  params: ICellRendererParams<DisputeSummary>;
-  field: RecommendedEvField;
-}) {
-  const data = params.data;
-  if (!data) return null;
-  const highlighted = RECOMMENDED_EV_FIELD[data.recommended_action] === field;
-  return (
-    <span
-      className={cn(
-        "num block text-right text-[11.5px] tabular-nums",
-        highlighted ? "font-semibold text-emerald" : "text-muted",
-      )}
-      title={highlighted ? "Cheapest recommended path" : formatUsd(data[field])}
-      aria-label={highlighted ? formatUsd(data[field]) + ", cheapest path" : undefined}
-    >
-      {formatUsd(data[field])}
-    </span>
-  );
-}
-
-function RecommendationCell({ params }: { params: ICellRendererParams<DisputeSummary> }) {
+function RecommendedCell({ params }: { params: ICellRendererParams<DisputeSummary> }) {
   const data = params.data;
   if (!data) return null;
   const meta = RECOMMENDATION_META[data.recommended_action];
   return (
-    <Badge tone={meta.tone} dot title={meta.label}>
-      {meta.short}
-    </Badge>
+    <span className="block truncate text-sm text-muted" title={meta.label}>
+      {meta.label}
+    </span>
   );
 }
 
 function DueCell({ params, now }: { params: ICellRendererParams<DisputeSummary>; now: number }) {
   const data = params.data;
   if (!data) return null;
-  const dueMs = isoToMs(data.seller_response_due_date);
-  if (dueMs === null) {
-    return <span className="text-[11px] text-dim">no deadline</span>;
+  const due = data.seller_response_due_date;
+  const dueMs = isoToMs(due);
+  if (due === null || dueMs === null) {
+    return <span className="block text-sm text-muted">no deadline</span>;
   }
   const overdue = dueMs < now;
-  const soon = !overdue && dueMs - now < 3 * 86_400_000;
-  const rail = overdue ? "bg-rose" : soon ? "bg-amber" : "bg-ice/60";
-  return (
-    <span className="flex items-center gap-1.5" title={formatAbsolute(data.seller_response_due_date)}>
-      <span aria-hidden className={cn("h-3.5 w-[2px] rounded-full", rail)} />
-      <span
-        className={cn(
-          "num text-[11px] tabular-nums",
-          overdue ? "font-medium text-rose" : soon ? "text-amber" : "text-muted",
-        )}
-      >
-        {formatDueIn(data.seller_response_due_date, now)}
-      </span>
-      {overdue ? (
-        <span aria-hidden className={cn("h-1 w-1 rounded-full", TONE_DOT.rose)} />
-      ) : null}
-    </span>
-  );
-}
-
-function DossierCell({ params }: { params: ICellRendererParams<DisputeSummary> }) {
-  const data = params.data;
-  if (!data) return null;
-  if (!data.dossier_available) {
-    return (
-      <span className="text-[11px] text-dim" aria-label="No dossier yet">
-        —
-      </span>
-    );
-  }
+  const soon = !overdue && dueMs - now < SOON_WINDOW_MS;
+  const label = ISO_DATE_PREFIX.test(due) ? due.slice(0, 10) : formatAbsolute(due);
   return (
     <span
-      className="inline-flex items-center gap-1 text-[10px] font-semibold tracking-[0.08em] text-emerald"
-      aria-label="Dossier available"
+      className={cn(
+        "num block truncate text-sm",
+        overdue ? "text-negative" : soon ? "text-warning" : "text-muted",
+      )}
+      title={formatAbsolute(due) + " · " + formatDueIn(due, now)}
     >
-      <FileText size={12} aria-hidden />
-      PDF
+      {label}
     </span>
   );
 }
@@ -230,163 +134,97 @@ export function DisputesGrid({
   compact = false,
 }: DisputesGridProps) {
   const columnDefs = useMemo<ColDef<DisputeSummary>[]>(() => {
-    const idColumn: ColDef<DisputeSummary> = {
-      headerName: "Dispute",
+    const caseColumn: ColDef<DisputeSummary> = {
+      headerName: "Case",
       field: "dispute_id",
-      width: 122,
-      minWidth: 112,
-      cellRenderer: (params: ICellRendererParams<DisputeSummary>) => <IdCell params={params} />,
+      width: 140,
+      minWidth: 96,
+      cellRenderer: (params: ICellRendererParams<DisputeSummary>) => <CaseCell params={params} />,
     };
-    const queueColumns: ColDef<DisputeSummary>[] = [
-      {
-        headerName: "Payer",
-        field: "payer_id",
-        width: 84,
-        minWidth: 78,
-        cellRenderer: (params: ICellRendererParams<DisputeSummary>) => <PayerCell params={params} />,
+    const stageColumn: ColDef<DisputeSummary> = {
+      headerName: "Stage",
+      field: "stage",
+      width: 128,
+      minWidth: 78,
+      cellRenderer: (params: ICellRendererParams<DisputeSummary>) => <StageCell params={params} />,
+    };
+    const reasonColumn: ColDef<DisputeSummary> = {
+      headerName: "Reason",
+      field: "reason_code",
+      width: 176,
+      minWidth: 84,
+      cellRenderer: (params: ICellRendererParams<DisputeSummary>) => <ReasonCell params={params} />,
+    };
+    const amountColumn: ColDef<DisputeSummary> = {
+      headerName: "Amount",
+      field: "amount_usd",
+      width: 132,
+      minWidth: 82,
+      type: "numericColumn",
+      cellStyle: { textAlign: "right" },
+      headerClass: "ag-right-aligned-header",
+      cellRenderer: (params: ICellRendererParams<DisputeSummary>) => <AmountCell params={params} />,
+    };
+    const lossColumn: ColDef<DisputeSummary> = {
+      headerName: "Expected loss",
+      field: "ev_settle_usd",
+      width: 152,
+      minWidth: 94,
+      type: "numericColumn",
+      cellStyle: { textAlign: "right" },
+      headerClass: "ag-right-aligned-header",
+      cellRenderer: (params: ICellRendererParams<DisputeSummary>) => (
+        <ExpectedLossCell params={params} />
+      ),
+    };
+    const dueColumn: ColDef<DisputeSummary> = {
+      headerName: "Deadline",
+      field: "seller_response_due_date",
+      width: 128,
+      minWidth: 100,
+      sort: "asc",
+      comparator: (left: string | null, right: string | null) => {
+        const leftMs = isoToMs(left) ?? Number.POSITIVE_INFINITY;
+        const rightMs = isoToMs(right) ?? Number.POSITIVE_INFINITY;
+        return leftMs - rightMs;
       },
-      {
-        headerName: "Reason",
-        field: "reason_code",
-        width: 78,
-        minWidth: 72,
-        cellRenderer: (params: ICellRendererParams<DisputeSummary>) => <ReasonCell params={params} />,
-      },
-      {
-        headerName: "Stage",
-        field: "stage",
-        width: 96,
-        minWidth: 88,
-        cellRenderer: (params: ICellRendererParams<DisputeSummary>) => <StageCell params={params} />,
-      },
-      {
-        headerName: "Channel",
-        field: "channel",
-        width: 96,
-        minWidth: 88,
-        cellRenderer: (params: ICellRendererParams<DisputeSummary>) => (
-          <ChannelCell params={params} />
-        ),
-      },
-      {
-        headerName: "Amount",
-        field: "amount_usd",
-        width: 92,
-        minWidth: 84,
-        type: "numericColumn",
-        cellStyle: { textAlign: "right" },
-        headerClass: "ag-right-aligned-header",
-        cellRenderer: (params: ICellRendererParams<DisputeSummary>) => <AmountCell params={params} />,
-      },
-      {
-        headerName: "p(win)",
-        field: "p_win",
-        width: 112,
-        minWidth: 104,
-        type: "numericColumn",
-        headerClass: "ag-right-aligned-header",
-        cellRenderer: (params: ICellRendererParams<DisputeSummary>) => (
-          <WinProbCell params={params} />
-        ),
-      },
-      {
-        headerName: "EV fight",
-        field: "ev_fight_usd",
-        width: 92,
-        minWidth: 84,
-        cellStyle: { textAlign: "right" },
-        headerClass: "ag-right-aligned-header",
-        cellRenderer: (params: ICellRendererParams<DisputeSummary>) => (
-          <EvCell params={params} field="ev_fight_usd" />
-        ),
-      },
-      {
-        headerName: "EV settle",
-        field: "ev_settle_usd",
-        width: 96,
-        minWidth: 88,
-        cellStyle: { textAlign: "right" },
-        headerClass: "ag-right-aligned-header",
-        cellRenderer: (params: ICellRendererParams<DisputeSummary>) => (
-          <EvCell params={params} field="ev_settle_usd" />
-        ),
-      },
-      {
-        headerName: "EV offer",
-        field: "ev_offer_usd",
-        width: 92,
-        minWidth: 84,
-        cellStyle: { textAlign: "right" },
-        headerClass: "ag-right-aligned-header",
-        cellRenderer: (params: ICellRendererParams<DisputeSummary>) => (
-          <EvCell params={params} field="ev_offer_usd" />
-        ),
-      },
-      {
-        headerName: "Recommendation",
-        field: "recommended_action",
-        width: 138,
-        minWidth: 126,
-        cellRenderer: (params: ICellRendererParams<DisputeSummary>) => (
-          <RecommendationCell params={params} />
-        ),
-      },
-      {
-        headerName: "Due",
-        field: "seller_response_due_date",
-        width: 118,
-        minWidth: 108,
-        sort: "asc",
-        comparator: (left: string | null, right: string | null) => {
-          const leftMs = isoToMs(left) ?? Number.POSITIVE_INFINITY;
-          const rightMs = isoToMs(right) ?? Number.POSITIVE_INFINITY;
-          return leftMs - rightMs;
-        },
-        cellRenderer: (params: ICellRendererParams<DisputeSummary>) => (
-          <DueCell params={params} now={now} />
-        ),
-      },
-      {
-        headerName: "PDF",
-        field: "dossier_available",
-        width: 58,
-        minWidth: 52,
-        sortable: false,
-        cellRenderer: (params: ICellRendererParams<DisputeSummary>) => (
-          <DossierCell params={params} />
-        ),
-      },
-    ];
+      cellRenderer: (params: ICellRendererParams<DisputeSummary>) => (
+        <DueCell params={params} now={now} />
+      ),
+    };
+    const recommendedColumn: ColDef<DisputeSummary> = {
+      headerName: "Recommended",
+      field: "recommended_action",
+      width: 168,
+      minWidth: 96,
+      cellRenderer: (params: ICellRendererParams<DisputeSummary>) => (
+        <RecommendedCell params={params} />
+      ),
+    };
 
     if (compact) {
-      return [
-        idColumn,
-        queueColumns[2],
-        queueColumns[4],
-        queueColumns[5],
-        queueColumns[9],
-        queueColumns[10],
-      ].filter((column): column is ColDef<DisputeSummary> => Boolean(column));
+      return [caseColumn, amountColumn, dueColumn, recommendedColumn];
     }
 
-    return [idColumn, ...queueColumns];
+    return [
+      caseColumn,
+      stageColumn,
+      reasonColumn,
+      amountColumn,
+      lossColumn,
+      dueColumn,
+      recommendedColumn,
+    ];
   }, [compact, now]);
 
   return (
-    <div
-      role="region"
-      aria-label="Dispute triage grid"
-      className="w-full"
-      style={{ height }}
-    >
+    <div role="region" aria-label="Dispute triage grid" className="w-full" style={{ height }}>
       <AgGridReact<DisputeSummary>
         theme={GRID_THEME}
         rowData={rows}
         columnDefs={columnDefs}
         defaultColDef={DEFAULT_COL_DEF}
         getRowId={(params) => params.data.dispute_id}
-        rowHeight={40}
-        headerHeight={32}
         animateRows={false}
         suppressCellFocus={false}
         ensureDomOrder

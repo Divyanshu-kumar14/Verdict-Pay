@@ -12,13 +12,7 @@ import {
   Zap,
 } from "lucide-react";
 
-import { LiquidGlass } from "@/components/premium/LiquidGlass";
-import { FieldLabel } from "@/components/premium/FieldLabel";
-import {
-  SafeNumberTicker,
-  SafeStagger,
-  SafeStaggerItem,
-} from "@/components/sandbox/SafeMotion";
+import { CustodyChain } from "@/components/sandbox/CustodyChain";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -26,7 +20,6 @@ import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { Panel } from "@/components/ui/Panel";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { Skeleton, SkeletonLines } from "@/components/ui/Skeleton";
-import { CustodyChain } from "@/components/sandbox/CustodyChain";
 import { api, toApiError, type ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { describeContainment, parseContainment } from "@/lib/containment";
@@ -38,10 +31,12 @@ import {
 } from "@/lib/ev";
 import {
   formatClock,
+  formatDelta,
   formatDueIn,
   formatInteger,
   formatPercent,
   formatUsd,
+  humaniseAction,
   shortHash,
 } from "@/lib/format";
 import { useNow } from "@/lib/hooks/useNow";
@@ -62,67 +57,54 @@ import {
   RECOMMENDATION_META,
   STAGE_META,
   STATUS_META,
-  TONE_TEXT,
   type Tone,
 } from "@/lib/vocab";
 
-const CONTAINMENT_PANEL: Record<Tone, string> = {
-  emerald: "border-emerald/20 bg-emerald/[0.05]",
-  amber: "border-amber/20 bg-amber/[0.05]",
-  rose: "border-rose/25 bg-rose/[0.06]",
-  sky: "border-sky/20 bg-sky/[0.05]",
-  neutral: "border-hairline bg-white/[0.02]",
+/**
+ * lib/containment.ts still names tones with the retired palette. Map them onto
+ * the current vocabulary locally so presentation stays correct without
+ * touching a module outside this cluster's scope.
+ */
+const LEGACY_TONE: Record<string, Tone> = {
+  emerald: "positive",
+  amber: "warning",
+  rose: "negative",
+  sky: "accent",
+  neutral: "neutral",
 };
 
-const VERDICT_ACCENT: Record<Tone, "ice" | "emerald" | "amber" | "rose" | "none"> = {
-  emerald: "emerald",
-  amber: "amber",
-  rose: "rose",
-  sky: "ice",
-  neutral: "ice",
-};
+function normaliseTone(tone: Tone): Tone {
+  return LEGACY_TONE[tone as string] ?? "neutral";
+}
 
-function EvPath({
+function EvColumn({
   label,
   value,
   note,
-  tone,
   best,
   maxAbs,
 }: {
   label: string;
   value: number;
   note: string;
-  tone: Tone;
   best: boolean;
   maxAbs: number;
 }) {
   const fraction = maxAbs > 0 ? Math.abs(value) / maxAbs : 0;
   return (
-    <div className={cn("relative", best && "bg-emerald/[0.05]")}>
-      {best ? <div aria-hidden className="absolute inset-x-0 top-0 h-[2px] bg-emerald" /> : null}
-      <div className="px-3.5 py-3">
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-[9.5px] font-semibold uppercase tracking-[0.14em] text-dim">
-            {label}
-          </span>
-          {best ? (
-            <span className="rounded-sm border border-emerald/30 bg-emerald/10 px-1 py-px text-[8.5px] font-semibold uppercase tracking-[0.12em] text-emerald">
-              Best EV
-            </span>
-          ) : null}
-        </div>
-        <div className="num mt-1 text-[20px] font-medium tracking-[-0.02em] text-ink">
-          {formatUsd(value)}
-        </div>
-        <ProgressBar
-          value={fraction}
-          tone={tone}
-          label={`${label} expected value relative to the largest loss`}
-          className="mt-2 h-1"
-        />
-        <div className="mt-1.5 text-[9.5px] leading-snug text-muted">{note}</div>
-      </div>
+    <div className="border-t border-rule px-4 py-3.5 first:border-t-0 sm:border-t-0 sm:border-l sm:first:border-l-0">
+      <span className={cn("label inline-block pb-1", best && "sig")}>
+        {label}
+        {best ? <span className="sr-only"> (best expected value)</span> : null}
+      </span>
+      <p className="num value mt-1.5 text-lg text-ink">{formatUsd(value)}</p>
+      <ProgressBar
+        value={fraction}
+        tone="neutral"
+        label={label + " expected value relative to the largest loss"}
+        className="mt-2.5"
+      />
+      <p className="mt-2 text-sm leading-relaxed text-muted">{note}</p>
     </div>
   );
 }
@@ -134,6 +116,8 @@ function VerdictCard({
   canAct,
   acting,
   blockedReason,
+  actionResult,
+  actionError,
   onExecute,
 }: {
   detail: DisputeDetail;
@@ -142,72 +126,136 @@ function VerdictCard({
   canAct: boolean;
   acting: boolean;
   blockedReason: string | null;
+  actionResult: ActionResponse | null;
+  actionError: ApiError | null;
   onExecute: () => void;
 }) {
   const recMeta = RECOMMENDATION_META[detail.recommended_action];
   const status = STATUS_META[detail.status];
+  const evRule = RECOMMENDATION_META[detail.breakdown.best_action];
+  const winProbability = detail.win_probability;
+
+  const actionSentence = primaryAction
+    ? ACTION_META[primaryAction].description +
+      " " +
+      (allowedAction ? "PayPal fee " + formatUsd(allowedAction.fee_usd) + "." : "")
+    : blockedReason;
 
   return (
-    <LiquidGlass depth={3} accent={VERDICT_ACCENT[recMeta.tone]} grid>
-      <div className="p-4 sm:p-5">
-        <div className="flex flex-wrap items-center gap-2">
-          <FieldLabel rule tone="ice" className="min-w-40 flex-1">
-            Live verdict
-          </FieldLabel>
+    <Panel className="relative overflow-hidden">
+      <span aria-hidden className="sig-edge absolute inset-y-0 left-0" />
+
+      <div className="px-4 py-4 sm:px-5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="title-section">Live verdict</h2>
           <Badge tone={status.tone} dot>
             {status.short}
           </Badge>
         </div>
 
-        <div className="mt-3 grid gap-5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge tone={recMeta.tone} size="sm">
-                {recMeta.label}
-              </Badge>
-              <span className="font-mono text-[10px] text-dim">
-                {detail.recommended_action}
-              </span>
-            </div>
-            <p className="mt-2 max-w-md text-[12px] leading-relaxed text-muted">
-              {primaryAction
-                ? `${ACTION_META[primaryAction].description} ${
-                    allowedAction ? `PayPal fee ${formatUsd(allowedAction.fee_usd)}.` : ""
-                  }`
-                : blockedReason}
-            </p>
-            {primaryAction && blockedReason ? (
-              <p className="mt-1 max-w-md text-[11px] leading-snug text-amber">{blockedReason}</p>
-            ) : null}
-            <div className="mt-3 max-w-xs">
-              <Button
-                variant="primary"
-                size="lg"
-                block
-                loading={acting}
-                disabled={!canAct}
-                onClick={onExecute}
-                trailingIcon={<ArrowRight size={14} aria-hidden />}
-              >
-                {primaryAction ? recMeta.verb : "Monitor case"}
-              </Button>
-            </div>
-          </div>
-          <div className="sm:min-w-44 sm:text-right">
-            <div className="kicker">Win probability</div>
-            <SafeNumberTicker
-              value={detail.p_win * 100}
-              decimals={1}
-              suffix="%"
-              className="num text-display font-medium tracking-[-0.03em] text-ink"
+        <p className="mt-3 text-xl font-semibold text-ink">{recMeta.label}</p>
+        <p className="mt-1.5 text-sm text-muted">EV rule picks {evRule.label}.</p>
+        <p className="mt-2 max-w-[62ch] text-base leading-relaxed text-muted">
+          {actionSentence}
+        </p>
+        {primaryAction && blockedReason ? (
+          <p className="mt-2 max-w-[62ch] text-sm leading-relaxed text-warning">
+            {blockedReason}
+          </p>
+        ) : null}
+
+        {detail.rationale.length > 0 ? (
+          <ul className="mt-3 max-w-[62ch] space-y-1.5">
+            {detail.rationale.map((item) => (
+              <li key={item.key} className="text-sm leading-relaxed break-words text-muted">
+                <span className="text-ink">{item.label}.</span> {item.detail}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+
+        <div className="mt-4 max-w-xs">
+          <Button
+            variant="primary"
+            size="lg"
+            block
+            loading={acting}
+            disabled={!canAct}
+            onClick={onExecute}
+            trailingIcon={<ArrowRight size={14} aria-hidden />}
+          >
+            {primaryAction ? recMeta.verb : "Monitor case"}
+          </Button>
+        </div>
+
+        {actionError ? (
+          <div className="mt-3">
+            <ErrorBanner
+              error={actionError}
+              context="The PayPal action did not complete. The case was not changed optimistically."
             />
-            <div className="num mt-1 text-[11px] text-muted">
-              completeness {formatPercent(detail.telemetry_completeness, 0)}
-            </div>
           </div>
+        ) : null}
+
+        {actionResult ? (
+          <div
+            role="status"
+            className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-card border border-line bg-raised px-3 py-2 text-sm"
+          >
+            <span className="flex items-center gap-1.5">
+              <CircleCheck size={14} aria-hidden className="text-muted" />
+              <span className="text-ink">{humaniseAction(actionResult.status)}</span>
+            </span>
+            <span className="text-muted">{ACTION_META[actionResult.action].label}</span>
+            <span className="num text-sm text-muted">{actionResult.latency_ms}ms</span>
+            <span className="num text-sm text-muted" title={actionResult.action_id}>
+              {shortHash(actionResult.action_id, 10, 4)}
+            </span>
+          </div>
+        ) : null}
+
+        <div className="row-rule mt-5 pt-4">
+          <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+            <div>
+              <p className="label">Win probability</p>
+              <p className="num value mt-1 text-lg text-ink">
+                {formatPercent(detail.p_win)}
+              </p>
+            </div>
+            <dl className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+              <div>
+                <dt className="label">Completeness</dt>
+                <dd className="num mt-0.5 text-ink">
+                  {formatPercent(detail.telemetry_completeness, 0)}
+                </dd>
+              </div>
+              <div>
+                <dt className="label">Reason multiplier</dt>
+                <dd className="num mt-0.5 text-ink">
+                  {winProbability.reason_multiplier.toFixed(2)}x
+                </dd>
+              </div>
+              <div>
+                <dt className="label">Base</dt>
+                <dd className="num mt-0.5 text-ink">{winProbability.base.toFixed(2)}</dd>
+              </div>
+              <div>
+                <dt className="label">Signal sum</dt>
+                <dd className="num mt-0.5 text-ink">
+                  {formatDelta(winProbability.signal_sum)}
+                </dd>
+              </div>
+            </dl>
+          </div>
+          <ProgressBar
+            value={detail.p_win}
+            tone="neutral"
+            label={"Win probability " + formatPercent(detail.p_win)}
+            className="mt-3"
+          />
         </div>
       </div>
-    </LiquidGlass>
+    </Panel>
   );
 }
 
@@ -218,19 +266,19 @@ function CaseSummary({ detail, now }: { detail: DisputeDetail; now: number | nul
   const status = STATUS_META[detail.status];
 
   return (
-    <div className="rounded-lg border border-hairline bg-[#0b1117] p-3.5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <Panel>
+      <div className="flex flex-wrap items-start justify-between gap-4 px-4 py-3.5">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <span className="kicker">Detected dispute</span>
+          <div className="flex flex-wrap items-center gap-2">
+            <h2 className="title-section">Live case facts</h2>
             <Badge tone={status.tone} dot>
               {status.short}
             </Badge>
           </div>
-          <div className="mt-1.5 flex flex-wrap items-center gap-2">
-            <span className="num text-[14px] text-ink" title={detail.dispute_id}>
-              {shortHash(detail.dispute_id, 14, 4)}
-            </span>
+          <p className="num mt-2 text-base text-ink" title={detail.dispute_id}>
+            {shortHash(detail.dispute_id, 14, 4)}
+          </p>
+          <div className="mt-2 flex flex-wrap items-center gap-2">
             <Badge tone={reason.tone} title={reason.label}>
               {reason.short}
             </Badge>
@@ -241,29 +289,42 @@ function CaseSummary({ detail, now }: { detail: DisputeDetail; now: number | nul
               {channel.short}
             </Badge>
           </div>
-          <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 font-mono text-[10px] text-muted">
-            <span title={detail.payer_id}>payer {shortHash(detail.payer_id, 8, 4)}</span>
-            <span title={detail.order_id}>order {shortHash(detail.order_id, 8, 4)}</span>
-            {detail.subscription_id ? (
-              <span title={detail.subscription_id}>
-                sub {shortHash(detail.subscription_id, 8, 4)}
-              </span>
-            ) : (
-              <span className="text-dim">no subscription</span>
-            )}
-          </div>
+          <dl className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+            <div className="flex gap-1.5">
+              <dt className="text-muted">Payer</dt>
+              <dd className="num text-ink" title={detail.payer_id}>
+                {shortHash(detail.payer_id, 8, 4)}
+              </dd>
+            </div>
+            <div className="flex gap-1.5">
+              <dt className="text-muted">Order</dt>
+              <dd className="num text-ink" title={detail.order_id}>
+                {shortHash(detail.order_id, 8, 4)}
+              </dd>
+            </div>
+            <div className="flex gap-1.5">
+              <dt className="text-muted">Sub</dt>
+              {detail.subscription_id ? (
+                <dd className="num text-ink" title={detail.subscription_id}>
+                  {shortHash(detail.subscription_id, 8, 4)}
+                </dd>
+              ) : (
+                <dd className="text-muted">None on file</dd>
+              )}
+            </div>
+          </dl>
         </div>
         <div className="text-right">
-          <div className="kicker">Claim amount</div>
-          <div className="num mt-1 text-[22px] font-medium tracking-[-0.02em] text-ink">
-            {formatUsd(detail.amount_usd)}
-          </div>
-          <div className="mt-0.5 text-[10.5px] text-muted">
-            {now === null ? "deadline —" : formatDueIn(detail.seller_response_due_date, now)}
-          </div>
+          <p className="label">Claim amount</p>
+          <p className="num value mt-1 text-lg text-ink">{formatUsd(detail.amount_usd)}</p>
+          <p className="mt-1 text-sm text-muted">
+            {now === null
+              ? "Deadline unknown"
+              : formatDueIn(detail.seller_response_due_date, now)}
+          </p>
         </div>
       </div>
-    </div>
+    </Panel>
   );
 }
 
@@ -281,48 +342,46 @@ function TelemetryLedger({
   error: ApiError | null;
 }) {
   return (
-    <section aria-label="Telemetry ledger" className="space-y-2">
-      <FieldLabel rule tone="ice">
-        Telemetry ledger
-      </FieldLabel>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="font-mono text-[9.5px] text-dim">
-          {events.length} events · append-only · sequence 1..{events.length}
-          {events.length > 8 ? " · showing newest 8" : ""}
-        </span>
-        <span className="flex items-center gap-2">
+    <Panel>
+      <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3.5">
+        <h2 className="title-section">Telemetry ledger</h2>
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="num text-sm text-muted">
+            {events.length} events, append-only
+            {events.length > 8 ? ", showing newest 8" : ""}
+          </span>
           {chainHead ? (
-            <span className="font-mono text-[9.5px] text-dim" title={chainHead}>
+            <span className="num text-sm text-muted" title={chainHead}>
               head {shortHash(chainHead, 8, 6)}
             </span>
           ) : null}
-          <Badge tone={chainValid ? "emerald" : "rose"} dot>
+          <Badge tone={chainValid ? "positive" : "negative"} dot>
             {chainValid ? "Chain verified" : "Chain unverified"}
           </Badge>
-        </span>
+        </div>
       </div>
 
-      <div className="overflow-hidden rounded-md border border-hairline">
-        <div className="max-h-[190px] overflow-y-auto">
+      <div className="row-rule overflow-hidden">
+        <div className="max-h-[280px] overflow-y-auto">
           <table className="w-full border-collapse text-left">
             <caption className="sr-only">
               Hash-chained telemetry events for the disputed payer
             </caption>
-            <thead className="sticky top-0 bg-[#0b1117]">
-              <tr className="border-b border-hairline text-[9px] uppercase tracking-[0.12em] text-dim">
-                <th scope="col" className="px-2.5 py-1.5 font-medium">
+            <thead className="sticky top-0 z-sticky bg-surface">
+              <tr className="border-b border-rule">
+                <th scope="col" className="label px-4 py-2 font-medium">
                   Seq
                 </th>
-                <th scope="col" className="px-2 py-1.5 font-medium">
+                <th scope="col" className="label px-3 py-2 font-medium">
                   Event
                 </th>
-                <th scope="col" className="px-2 py-1.5 font-medium">
+                <th scope="col" className="label px-3 py-2 font-medium">
                   Chain hash
                 </th>
-                <th scope="col" className="px-2 py-1.5 text-right font-medium">
+                <th scope="col" className="label px-3 py-2 text-right font-medium">
                   Units
                 </th>
-                <th scope="col" className="px-2.5 py-1.5 text-right font-medium">
+                <th scope="col" className="label px-4 py-2 text-right font-medium">
                   UTC
                 </th>
               </tr>
@@ -330,42 +389,33 @@ function TelemetryLedger({
             <tbody>
               {loading && events.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-2.5 py-2">
+                  <td colSpan={5} className="px-4 py-2.5">
                     <Skeleton className="h-9 w-full" />
                   </td>
                 </tr>
               ) : events.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-2.5 py-2.5 text-[11px] text-muted">
+                  <td colSpan={5} className="px-4 py-3 text-sm text-muted">
                     No telemetry events on file yet. Run step 2 to append four signed events.
                   </td>
                 </tr>
               ) : (
                 events.slice(0, 8).map((event) => (
-                  <tr
-                    key={event.id}
-                    className="border-b border-hairline/60 last:border-b-0"
-                  >
-                    <td className="num px-2.5 py-1.5 text-[10px] text-dim">{event.sequence}</td>
-                    <td className="px-2 py-1.5">
-                      <span className="flex items-center gap-1.5 text-[10.5px] text-ink">
-                        <span
-                          aria-hidden
-                          className="h-1 w-1 rounded-full bg-emerald/70"
-                        />
+                  <tr key={event.id} className="border-b border-rule last:border-b-0">
+                    <td className="num px-4 py-2.5 text-sm text-muted">{event.sequence}</td>
+                    <td className="px-3 py-2.5">
+                      <span className="flex items-center gap-2 text-sm text-ink">
+                        <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-positive" />
                         {EVENT_META[event.event_type].label}
                       </span>
                     </td>
-                    <td
-                      className="num px-2 py-1.5 text-[10px] text-muted"
-                      title={event.chain_hash}
-                    >
+                    <td className="num px-3 py-2.5 text-sm text-muted" title={event.chain_hash}>
                       {shortHash(event.chain_hash, 8, 5)}
                     </td>
-                    <td className="num px-2 py-1.5 text-right text-[10px] text-muted">
-                      {event.units_consumed > 0 ? formatInteger(event.units_consumed) : "—"}
+                    <td className="num px-3 py-2.5 text-right text-sm text-muted">
+                      {event.units_consumed > 0 ? formatInteger(event.units_consumed) : "-"}
                     </td>
-                    <td className="num px-2.5 py-1.5 text-right text-[10px] text-muted">
+                    <td className="num px-4 py-2.5 text-right text-sm text-muted">
                       {formatClock(Date.parse(event.created_at))}
                     </td>
                   </tr>
@@ -376,20 +426,20 @@ function TelemetryLedger({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-2 font-mono text-[9.5px] text-dim">
-        <span className="flex items-center gap-1">
-          <Link2 size={9} aria-hidden /> SHA-256 per payer stream
+      <div className="row-rule flex flex-wrap items-center justify-between gap-2 px-4 py-2.5 text-sm text-muted">
+        <span className="flex items-center gap-1.5">
+          <Link2 size={12} aria-hidden /> SHA-256 per payer stream
         </span>
-        <span>
-          {chainHead ? `sealed · ${shortHash(chainHead, 8, 6)}` : "no chain head yet"}
+        <span className="num">
+          {chainHead ? "Sealed at " + shortHash(chainHead, 8, 6) : "No chain head yet"}
         </span>
       </div>
       {error ? (
-        <p className="font-mono text-[10px] text-rose" title={error.message}>
-          ledger refresh failed · {error.code}
+        <p className="row-rule px-4 py-2.5 text-sm text-negative" title={error.message}>
+          Ledger refresh failed. {error.code}
         </p>
       ) : null}
-    </section>
+    </Panel>
   );
 }
 
@@ -405,7 +455,7 @@ export type CommandCenterProps = {
 
 /**
  * The merchant side of the demo: verdict first, then EV, custody, containment
- * and case facts — with the single PayPal action the recommendation calls for.
+ * and case facts, with the single PayPal action the recommendation calls for.
  */
 export function CommandCenter({
   activeDisputeId,
@@ -454,7 +504,7 @@ export function CommandCenter({
         const result = await api.performAction(
           detail.dispute_id,
           action,
-          { idempotency_key: `${detail.dispute_id}:${action}:${Date.now()}` },
+          { idempotency_key: detail.dispute_id + ":" + action + ":" + Date.now() },
           controller.signal,
         );
         setActionResult(result);
@@ -477,7 +527,10 @@ export function CommandCenter({
     try {
       const result = await api.triageDispute(detail.dispute_id);
       setTriageNote(
-        `EV recomputed · ${result.recommended_action} · p(win) ${formatPercent(result.win_probability.score)}`,
+        "EV recomputed. " +
+          result.recommended_action +
+          ", p(win) " +
+          formatPercent(result.win_probability.score),
       );
       refreshCase();
       onCaseChanged();
@@ -503,9 +556,10 @@ export function CommandCenter({
     ? RECOMMENDATION_META[detail.recommended_action]
     : RECOMMENDATION_META.MONITOR;
   const primaryAction = detail ? recMeta.action : null;
-  const allowedAction = detail && primaryAction
-    ? detail.allowed_actions.find((candidate) => candidate.action === primaryAction)
-    : undefined;
+  const allowedAction =
+    detail && primaryAction
+      ? detail.allowed_actions.find((candidate) => candidate.action === primaryAction)
+      : undefined;
   const canAct = Boolean(detail && primaryAction && allowedAction?.allowed && !acting);
   const blockedReason = !primaryAction
     ? "No PayPal action is recommended at this stage. Monitor the case and re-run triage if new telemetry lands."
@@ -519,261 +573,197 @@ export function CommandCenter({
     ? bestEvPath(detail.breakdown)
     : null;
   const evValues = detail
-    ? [detail.breakdown.ev_fight_usd, detail.breakdown.ev_settle_usd, detail.breakdown.ev_offer_usd]
+    ? [
+        detail.breakdown.ev_fight_usd,
+        detail.breakdown.ev_settle_usd,
+        detail.breakdown.ev_offer_usd,
+      ]
     : [];
-  const maxAbs = evValues.length > 0 ? Math.max(...evValues.map((value) => Math.abs(value)), 1) : 1;
+  const maxAbs =
+    evValues.length > 0
+      ? Math.max(...evValues.map((value) => Math.abs(value)), 1)
+      : 1;
 
   return (
-    <Panel className="flex min-h-[660px] flex-col overflow-hidden">
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-hairline px-4 py-3">
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="kicker">Merchant command center</span>
+          <h2 className="title-section">Merchant command centre</h2>
           {activeDisputeId ? (
-            <Badge tone="neutral" mono title={activeDisputeId}>
+            <Badge tone="neutral" title={activeDisputeId}>
               {shortHash(activeDisputeId, 12, 4)}
             </Badge>
           ) : null}
           {restoredFromQueue ? (
             <Badge
-              tone="amber"
+              tone="warning"
               title="Loaded from the latest open dispute in GET /disputes. Run the three steps to create a new case."
             >
-              LATEST CASE
+              Latest case
             </Badge>
           ) : null}
         </div>
-        <span className="flex items-center gap-1.5 font-mono text-[9.5px] text-dim">
+        <span className="flex items-center gap-1.5 text-xs text-muted">
           <span
             aria-hidden
             className={cn(
               "h-1.5 w-1.5 rounded-full",
-              detail ? "bg-emerald live-dot" : "bg-white/25",
+              detail ? "live-dot bg-positive" : "bg-control",
             )}
           />
-          {detail ? "live · 2s poll" : "waiting"}
+          {detail ? "Live, refreshed every 2s" : "Waiting for a case"}
         </span>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-4">
-        {!activeDisputeId ? (
+      {!activeDisputeId ? (
+        <Panel>
           <EmptyState
-            className="h-full min-h-[420px] border-white/10 bg-sunken"
             icon={<ShieldCheck size={18} aria-hidden />}
             title="No dispute on file"
-            description="Run steps 1–3 on the left to open an INQUIRY through the PayPal webhook path. This panel reads live case state — nothing here is mocked."
+            description="Run steps 1–3 on the left to open an INQUIRY through the PayPal webhook path. This panel reads live case state, nothing here is mocked."
             action={
-              <span className="font-mono text-[10px] text-dim">
-                GET /api/v1/disputes · polling every 2s while visible
+              <span className="num text-xs text-muted">
+                GET /api/v1/disputes, refreshed every 2 seconds
               </span>
             }
           />
-        ) : caseQuery.error && !detail ? (
-          <div className="space-y-3">
-            <ErrorBanner
-              error={caseQuery.error}
-              context={`Could not load case ${activeDisputeId}.`}
-              onRetry={refreshCase}
-            />
-            <SkeletonLines lines={6} />
+        </Panel>
+      ) : caseQuery.error && !detail ? (
+        <div className="space-y-3">
+          <ErrorBanner
+            error={caseQuery.error}
+            context={"Could not load case " + activeDisputeId + "."}
+            onRetry={refreshCase}
+          />
+          <SkeletonLines lines={6} />
+        </div>
+      ) : !detail ? (
+        <div className="space-y-4" aria-busy="true" aria-label="Loading case">
+          <Skeleton className="h-[212px] w-full rounded-card" />
+          <Skeleton className="h-10 w-2/3" />
+          <div className="grid gap-2 sm:grid-cols-3">
+            <Skeleton className="h-[104px] w-full" />
+            <Skeleton className="h-[104px] w-full" />
+            <Skeleton className="h-[104px] w-full" />
           </div>
-        ) : !detail ? (
-          <div className="space-y-4" aria-busy="true" aria-label="Loading case">
-            <Skeleton className="h-[212px] w-full rounded-[14px]" />
-            <Skeleton className="h-10 w-2/3" />
-            <div className="grid gap-2 sm:grid-cols-3">
-              <Skeleton className="h-[104px] w-full" />
-              <Skeleton className="h-[104px] w-full" />
-              <Skeleton className="h-[104px] w-full" />
-            </div>
-            <SkeletonLines lines={5} />
-          </div>
-        ) : (
-          <SafeStagger step={0.08} className="space-y-5">
+          <SkeletonLines lines={5} />
+        </div>
+      ) : (
+        <div className="grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
+          <div className="space-y-4">
             {caseQuery.error ? (
-              <SafeStaggerItem>
-                <ErrorBanner
-                  error={caseQuery.error}
-                  context="Showing the last known case state while the API recovers."
-                  onRetry={refreshCase}
-                />
-              </SafeStaggerItem>
+              <ErrorBanner
+                error={caseQuery.error}
+                context="Showing the last known case state while the API recovers."
+                onRetry={refreshCase}
+              />
             ) : null}
 
-            <SafeStaggerItem>
-              <VerdictCard
-                detail={detail}
-                allowedAction={allowedAction}
-                primaryAction={primaryAction}
-                canAct={canAct}
-                acting={acting !== null}
-                blockedReason={blockedReason}
-                onExecute={() => {
-                  if (primaryAction) void runAction(primaryAction);
-                }}
-              />
-              {actionError ? (
-                <div className="mt-2">
-                  <ErrorBanner
-                    error={actionError}
-                    context="The PayPal action did not complete. The case was not changed optimistically."
-                  />
-                </div>
-              ) : null}
-              {actionResult ? (
-                <div
-                  role="status"
-                  className={cn(
-                    "mt-2 flex flex-wrap items-center gap-2 rounded-md border px-3 py-2 text-[11px]",
-                    actionResult.status === "EXECUTED"
-                      ? "border-emerald/25 bg-emerald/[0.06] text-emerald"
-                      : "border-amber/25 bg-amber/[0.06] text-amber",
-                  )}
-                >
-                  <CircleCheck size={13} aria-hidden />
-                  <span className="font-medium">{actionResult.status}</span>
-                  <span className="text-muted">{ACTION_META[actionResult.action].label}</span>
-                  <span className="num text-dim">· {actionResult.latency_ms}ms</span>
-                  <span className="num text-dim" title={actionResult.action_id}>
-                    · {shortHash(actionResult.action_id, 10, 4)}
-                  </span>
-                </div>
-              ) : null}
-            </SafeStaggerItem>
+            <VerdictCard
+              detail={detail}
+              allowedAction={allowedAction}
+              primaryAction={primaryAction}
+              canAct={canAct}
+              acting={acting !== null}
+              blockedReason={blockedReason}
+              actionResult={actionResult}
+              actionError={actionError}
+              onExecute={() => {
+                if (primaryAction) void runAction(primaryAction);
+              }}
+            />
 
-            <SafeStaggerItem>
-              <section aria-label="Expected value" className="space-y-2">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="kicker">Expected value</span>
-                  <span className="font-mono text-[9.5px] text-dim">
-                    USD · net of non-refundable fees · p(win) {formatPercent(detail.p_win)}
-                  </span>
-                </div>
-                <SafeStagger
-                  step={0.06}
-                  className="grid overflow-hidden rounded-lg border border-hairline bg-white/[0.008] sm:grid-cols-3 sm:divide-x sm:divide-white/[0.06]"
-                >
-                  <SafeStaggerItem>
-                    <EvPath
-                      label="Fight"
-                      value={detail.breakdown.ev_fight_usd}
-                      note={fightEvNote(detail.breakdown)}
-                      tone="rose"
-                      best={bestKey === "fight"}
-                      maxAbs={maxAbs}
-                    />
-                  </SafeStaggerItem>
-                  <SafeStaggerItem>
-                    <EvPath
-                      label="Settle"
-                      value={detail.breakdown.ev_settle_usd}
-                      note={settleEvNote(detail.breakdown, detail.stage)}
-                      tone="amber"
-                      best={bestKey === "settle"}
-                      maxAbs={maxAbs}
-                    />
-                  </SafeStaggerItem>
-                  <SafeStaggerItem>
-                    <EvPath
-                      label="Offer"
-                      value={detail.breakdown.ev_offer_usd}
-                      note={offerEvNote(detail.breakdown)}
-                      tone="sky"
-                      best={bestKey === "offer"}
-                      maxAbs={maxAbs}
-                    />
-                  </SafeStaggerItem>
-                </SafeStagger>
-              </section>
-            </SafeStaggerItem>
+            <Panel>
+              <div className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-3.5">
+                <h2 className="title-section">Expected value</h2>
+                <span className="num text-sm text-muted">
+                  USD, net of non-refundable fees, p(win) {formatPercent(detail.p_win)}
+                </span>
+              </div>
+              <div className="grid border-t border-rule sm:grid-cols-3">
+                <EvColumn
+                  label="Fight"
+                  value={detail.breakdown.ev_fight_usd}
+                  note={fightEvNote(detail.breakdown)}
+                  best={bestKey === "fight"}
+                  maxAbs={maxAbs}
+                />
+                <EvColumn
+                  label="Settle"
+                  value={detail.breakdown.ev_settle_usd}
+                  note={settleEvNote(detail.breakdown, detail.stage)}
+                  best={bestKey === "settle"}
+                  maxAbs={maxAbs}
+                />
+                <EvColumn
+                  label="Offer"
+                  value={detail.breakdown.ev_offer_usd}
+                  note={offerEvNote(detail.breakdown)}
+                  best={bestKey === "offer"}
+                  maxAbs={maxAbs}
+                />
+              </div>
+            </Panel>
+          </div>
 
-            <SafeStaggerItem>
-              <CustodyChain
-                chainHead={chainHead}
-                disputeId={detail.dispute_id}
-                actionLabel={primaryAction ? ACTION_META[primaryAction].label : "Monitor"}
-                events={events}
-              />
-            </SafeStaggerItem>
+          <div className="space-y-4">
+            <CaseSummary detail={detail} now={now} />
 
-            <SafeStaggerItem>
-              {containmentHeadline ? (
-                <div
-                  className={cn(
-                    "flex items-start gap-2.5 rounded-md border px-3 py-2.5",
-                    CONTAINMENT_PANEL[containmentHeadline.tone],
-                  )}
-                >
-                  <Zap
-                    size={14}
-                    aria-hidden
-                    className={cn("mt-0.5 shrink-0", TONE_TEXT[containmentHeadline.tone])}
-                  />
+            {containmentHeadline ? (
+              <Panel className="min-h-[76px]">
+                <div className="flex items-start gap-3 px-4 py-3.5">
+                  <Zap size={14} aria-hidden className="mt-0.5 shrink-0 text-muted" />
                   <div className="min-w-0">
-                    <p className="text-[12px] font-medium text-ink">{containmentHeadline.text}</p>
-                    <p className="mt-0.5 font-mono text-[10px] text-muted">
-                      {containmentHeadline.detail ?? "circuit breaker · webhook ingest"}
+                    <p className="text-base text-ink">{containmentHeadline.text}</p>
+                    <p className="mt-0.5 text-sm text-muted">
+                      {containmentHeadline.detail ?? "Circuit breaker on webhook ingest"}
                     </p>
                   </div>
-                  <span className="ml-auto shrink-0 font-mono text-[8.5px] uppercase tracking-[0.14em] text-dim">
-                    containment
-                  </span>
+                  <Badge
+                    tone={normaliseTone(containmentHeadline.tone)}
+                    className="ml-auto shrink-0"
+                  >
+                    Containment
+                  </Badge>
                 </div>
-              ) : (
-                <div
-                  className={cn(
-                    "flex items-start gap-2.5 rounded-md border px-3 py-2.5",
-                    suspendedFallback ? CONTAINMENT_PANEL.emerald : CONTAINMENT_PANEL.neutral,
-                  )}
-                >
-                  <Zap
-                    size={14}
-                    aria-hidden
-                    className={cn(
-                      "mt-0.5 shrink-0",
-                      suspendedFallback ? "text-emerald" : "text-dim",
-                    )}
-                  />
+              </Panel>
+            ) : (
+              <Panel className="min-h-[76px]">
+                <div className="flex items-start gap-3 px-4 py-3.5">
+                  <Zap size={14} aria-hidden className="mt-0.5 shrink-0 text-muted" />
                   <div className="min-w-0">
-                    <p className="text-[12px] font-medium text-ink">
-                      {suspendedFallback
-                        ? "Subscription suspended"
-                        : "Subscription active"}
+                    <p className="text-base text-ink">
+                      {suspendedFallback ? "Subscription suspended" : "Subscription active"}
                     </p>
-                    <p className="mt-0.5 font-mono text-[10px] text-muted">
-                      containment state synced from the case record
+                    <p className="mt-0.5 text-sm text-muted">
+                      Containment state synced from the case record.
                     </p>
                   </div>
+                  <Badge
+                    tone={suspendedFallback ? "positive" : "neutral"}
+                    className="ml-auto shrink-0"
+                  >
+                    Containment
+                  </Badge>
                 </div>
-              )}
-            </SafeStaggerItem>
+              </Panel>
+            )}
 
-            <SafeStaggerItem>
-              <section aria-label="Live case facts" className="space-y-2">
-                <FieldLabel rule tone="neutral">
-                  Live case facts
-                </FieldLabel>
-                <CaseSummary detail={detail} now={now} />
-              </section>
-            </SafeStaggerItem>
+            <CustodyChain
+              chainHead={chainHead}
+              disputeId={detail.dispute_id}
+              actionLabel={primaryAction ? ACTION_META[primaryAction].label : "Monitor"}
+              events={events}
+            />
 
-            <SafeStaggerItem>
-              <TelemetryLedger
-                events={events}
-                chainValid={chainValid}
-                chainHead={chainHead}
-                loading={timeline.loading}
-                error={timeline.error}
-              />
-            </SafeStaggerItem>
-
-            <SafeStaggerItem>
-              <div className="flex flex-wrap items-center gap-2 border-t border-hairline pt-3">
+            <Panel className="min-h-[76px]">
+              <div className="flex flex-wrap items-center gap-2 px-4 py-3.5">
                 <Link
-                  href={`/disputes/${encodeURIComponent(detail.dispute_id)}`}
-                  className="inline-flex items-center gap-1.5 rounded-md border border-hairline px-2.5 py-1.5 text-[11px] text-muted transition-colors hover:border-white/15 hover:text-ink"
+                  href={"/disputes/" + encodeURIComponent(detail.dispute_id)}
+                  className="inline-flex h-control items-center gap-2 rounded-full border border-control bg-raised px-3.5 text-base text-ink transition-colors duration-120 hover:bg-[#29282c]"
                 >
                   Full case room
-                  <ArrowRight size={12} aria-hidden />
+                  <ArrowRight size={12} aria-hidden className="text-muted" />
                 </Link>
                 <Button
                   variant="ghost"
@@ -786,29 +776,31 @@ export function CommandCenter({
                 >
                   Re-run triage
                 </Button>
-                {triageNote ? (
-                  <span className="font-mono text-[9.5px] text-emerald">{triageNote}</span>
-                ) : null}
               </div>
+              {triageNote ? (
+                <p className="row-rule px-4 py-2.5 text-sm text-muted">{triageNote}</p>
+              ) : null}
               {triageError ? (
-                <div className="mt-2">
+                <div className="row-rule px-4 py-3">
                   <ErrorBanner error={triageError} context="Triage recompute failed." />
                 </div>
               ) : null}
 
               {detail.actions.length > 0 ? (
-                <div className="mt-3 space-y-1.5">
-                  <span className="kicker">Action audit</span>
-                  <ul className="space-y-1">
+                <div className="row-rule px-4 py-3.5">
+                  <h3 className="label">Action audit</h3>
+                  <ul className="mt-2 space-y-2">
                     {detail.actions.slice(-3).map((record) => (
                       <li
                         key={record.action_id}
-                        className="flex flex-wrap items-center gap-2 rounded border border-hairline bg-white/[0.015] px-2.5 py-1.5 font-mono text-[9.5px] text-muted"
+                        className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm"
                       >
-                        <span className="text-ink">{ACTION_META[record.action].label}</span>
-                        <span className="text-dim">{record.status}</span>
-                        <span>{record.latency_ms}ms</span>
-                        <span className="ml-auto text-dim" title={record.action_id}>
+                        <span className="text-sm text-ink">
+                          {ACTION_META[record.action].label}
+                        </span>
+                        <span className="text-muted">{humaniseAction(record.status)}</span>
+                        <span className="num text-muted">{record.latency_ms}ms</span>
+                        <span className="num ml-auto text-muted" title={record.action_id}>
                           {shortHash(record.action_id, 8, 4)}
                         </span>
                       </li>
@@ -818,15 +810,26 @@ export function CommandCenter({
               ) : null}
 
               {!detail.facts.chain_valid ? (
-                <p className="mt-3 flex items-center gap-1.5 text-[10.5px] text-rose">
-                  <AlertTriangle size={11} aria-hidden />
-                  Chain verification failed — evidence generation is unsupported until it is repaired.
+                <p className="row-rule flex items-start gap-2 px-4 py-3 text-sm text-negative">
+                  <AlertTriangle size={12} aria-hidden className="mt-0.5 shrink-0" />
+                  Chain verification failed. Evidence generation is unsupported until it is
+                  repaired.
                 </p>
               ) : null}
-            </SafeStaggerItem>
-          </SafeStagger>
-        )}
-      </div>
-    </Panel>
+            </Panel>
+          </div>
+
+          <div className="lg:col-span-2">
+            <TelemetryLedger
+              events={events}
+              chainValid={chainValid}
+              chainHead={chainHead}
+              loading={timeline.loading}
+              error={timeline.error}
+            />
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

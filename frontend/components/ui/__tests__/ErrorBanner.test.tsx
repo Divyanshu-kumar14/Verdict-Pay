@@ -14,23 +14,22 @@ describe("ErrorBanner", () => {
     status: 500,
   });
 
-  it("shows ApiError message and code", () => {
+  /* The banner renders one meta line: code, status and request id, in that order. */
+  it("shows the message and a meta line with code, status and request id", () => {
     render(<ErrorBanner error={baseError} />);
     expect(screen.getByText("Upstream PayPal error")).toBeInTheDocument();
-    expect(screen.getByText("http_500")).toBeInTheDocument();
-    expect(screen.getByText("HTTP 500")).toBeInTheDocument();
+    expect(screen.getByText(/http_500/)).toHaveTextContent(
+      "http_500 · HTTP 500 · req_abc123",
+    );
   });
 
-  it("shows request_id when present", () => {
-    render(<ErrorBanner error={baseError} />);
-    expect(screen.getByText(/request_id/)).toBeInTheDocument();
-    expect(screen.getByText("req_abc123")).toBeInTheDocument();
-  });
-
-  it("hides request_id row when missing", () => {
+  it("omits the status and the request id when the error carries neither", () => {
     const err = new ApiError({ code: "network_error", message: "Offline", status: null });
     render(<ErrorBanner error={err} />);
-    expect(screen.queryByText(/request_id/)).not.toBeInTheDocument();
+    const meta = screen.getByText(/network_error/);
+    expect(meta).toHaveTextContent("network_error");
+    expect(meta).not.toHaveTextContent("HTTP");
+    expect(meta).not.toHaveTextContent("req_");
   });
 
   it("renders context helper text", () => {

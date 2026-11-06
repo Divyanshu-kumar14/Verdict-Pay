@@ -1,75 +1,47 @@
 "use client";
 
-import { useEffect, useState, type ReactNode } from "react";
-
-import {
-  NumberTicker,
-  Stagger,
-  StaggerItem,
-  type NumberTickerProps,
-} from "@/components/premium";
+import type { ReactNode } from "react";
 
 /**
- * Motion with a static fallback. The premium entrance primitives need
- * IntersectionObserver, which jsdom does not provide, and the product law
- * disables every entrance under prefers-reduced-motion. When either applies,
- * these render the exact resting state — same classes, same copy, no motion.
+ * Motion shims for the sandbox cluster.
+ *
+ * The product renders app screens with no entrance motion, so these carry no
+ * animation at all: they render their children directly and report the resting
+ * state. They exist only so the modules that grew up around the old premium
+ * entrance primitives keep a stable, dependency-free surface.
  */
 
-function useMotionAllowed(): boolean {
-  const [allowed, setAllowed] = useState(false);
-  useEffect(() => {
-    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    setAllowed(typeof IntersectionObserver !== "undefined" && !reduced);
-  }, []);
-  return allowed;
-}
-
-export function SafeNumberTicker(props: NumberTickerProps) {
-  const allowed = useMotionAllowed();
-  if (!allowed) {
-    const { value, decimals = 0, prefix = "", suffix = "", className } = props;
-    return (
-      <span className={className}>
-        {prefix}
-        {value.toFixed(decimals)}
-        {suffix}
-      </span>
-    );
-  }
-  return <NumberTicker {...props} />;
-}
-
-export function SafeStagger({
-  children,
-  className,
-  step = 0.07,
-}: {
-  children: ReactNode;
+export type SafeNumberTickerProps = {
+  value: number;
+  decimals?: number;
+  prefix?: string;
+  suffix?: string;
   className?: string;
-  step?: number;
-}) {
-  const allowed = useMotionAllowed();
-  if (!allowed) {
-    return <div className={className}>{children}</div>;
-  }
+};
+
+/** A plain span holding the formatted figure. Nothing ticks. */
+export function SafeNumberTicker({
+  value,
+  decimals = 0,
+  prefix = "",
+  suffix = "",
+  className,
+}: SafeNumberTickerProps): ReactNode {
   return (
-    <Stagger className={className} step={step}>
-      {children}
-    </Stagger>
+    <span className={className}>
+      {prefix}
+      {value.toFixed(decimals)}
+      {suffix}
+    </span>
   );
 }
 
-export function SafeStaggerItem({
-  children,
-  className,
-}: {
-  children: ReactNode;
-  className?: string;
-}) {
-  const allowed = useMotionAllowed();
-  if (!allowed) {
-    return <div className={className}>{children}</div>;
-  }
-  return <StaggerItem className={className}>{children}</StaggerItem>;
+/** No wrapper element: the children are the layout. */
+export function SafeStagger({ children }: { children: ReactNode }): ReactNode {
+  return children;
+}
+
+/** No wrapper element: the children are the layout. */
+export function SafeStaggerItem({ children }: { children: ReactNode }): ReactNode {
+  return children;
 }

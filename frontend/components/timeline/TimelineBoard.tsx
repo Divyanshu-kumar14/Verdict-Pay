@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { CalendarClock, TriangleAlert } from "lucide-react";
+import { CalendarClock } from "lucide-react";
 
 import { PageHeader, PageMeta } from "@/components/PageHeader";
 import { Badge } from "@/components/ui/Badge";
@@ -27,7 +27,7 @@ import {
 import { useNow } from "@/lib/hooks/useNow";
 import { usePolledQuery } from "@/lib/hooks/usePolledQuery";
 import type { DisputeSummary } from "@/lib/types";
-import { REASON_META, type Tone, TONE_BAR, TONE_BADGE, TONE_DOT } from "@/lib/vocab";
+import { REASON_META, type Tone, TONE_BAR, TONE_DOT } from "@/lib/vocab";
 
 const DAY_MS = 86_400_000;
 const WINDOW_DAYS = 14;
@@ -43,25 +43,31 @@ type Urgency = {
 };
 
 function urgencyFor(daysLeft: number): Urgency {
-  if (daysLeft <= 0) return { label: "overdue", tone: "rose" };
-  if (daysLeft <= 3) return { label: "3 days or less", tone: "amber" };
-  if (daysLeft <= 7) return { label: "7 days or less", tone: "sky" };
-  return { label: "more than 7 days", tone: "emerald" };
+  if (daysLeft <= 0) return { label: "overdue", tone: "negative" };
+  if (daysLeft <= 3) return { label: "3 days or less", tone: "warning" };
+  if (daysLeft <= 7) return { label: "7 days or less", tone: "accent" };
+  return { label: "more than 7 days", tone: "positive" };
 }
 
 const LEGEND: Urgency[] = [
-  { label: "Overdue", tone: "rose" },
-  { label: "3 days or less", tone: "amber" },
-  { label: "7 days or less", tone: "sky" },
-  { label: "More than 7 days", tone: "emerald" },
+  { label: "Overdue", tone: "negative" },
+  { label: "3 days or less", tone: "warning" },
+  { label: "7 days or less", tone: "accent" },
+  { label: "More than 7 days", tone: "positive" },
 ];
+
+function isoDate(date: string | null): string {
+  const ms = isoToMs(date);
+  if (ms === null) return "-";
+  return new Date(ms).toISOString().slice(0, 10);
+}
 
 function DayHeader({ now }: { now: number | null }) {
   return (
-    <div className="grid grid-cols-[240px_minmax(0,1fr)] border-b border-hairline bg-chrome">
-      <div className="flex items-center gap-2 px-3 py-2">
-        <CalendarClock size={12} className="text-dim" aria-hidden />
-        <span className="kicker">Case · seller response deadline</span>
+    <div className="grid grid-cols-[240px_minmax(0,1fr)] border-b border-rule">
+      <div className="flex items-center gap-2 px-4 py-2.5">
+        <CalendarClock size={12} className="text-muted" aria-hidden />
+        <span className="text-sm text-muted">Case, seller response deadline</span>
       </div>
       <div
         className="relative grid"
@@ -71,20 +77,16 @@ function DayHeader({ now }: { now: number | null }) {
           const day = now === null ? null : new Date(now + index * DAY_MS);
           const isToday = index === 0;
           return (
-            <div
-              key={index}
-              className={cn(
-                "border-l border-hairline px-1.5 pb-1 pt-1.5",
-                isToday ? "border-l-ice/60 bg-ice/[0.05]" : "border-l-hairline",
-              )}
-            >
-              <div className={cn("font-mono text-[9px] uppercase tracking-[0.08em]", isToday ? "text-ice" : "text-dim")}>
-                {isToday ? "Today" : day ? formatWeekday(day) : "--"}
+            <div key={index} className="relative border-l border-rule px-2 pb-1.5 pt-2">
+              {isToday ? (
+                <span aria-hidden className="absolute inset-y-0 left-0 w-px bg-accent" />
+              ) : null}
+              <div className={cn("text-sm", isToday ? "text-ink" : "text-muted")}>
+                {isToday ? "Today" : day ? formatWeekday(day) : "-"}
               </div>
-              <div className={cn("num font-mono text-[9.5px]", isToday ? "text-ice" : "text-muted")}>
-                {day ? formatDayLabel(day) : "--"}
+              <div className="num mt-0.5 text-sm text-muted">
+                {day ? formatDayLabel(day) : "-"}
               </div>
-              <div aria-hidden className="instrument-ticks mt-1 h-[3px] w-full opacity-70" />
             </div>
           );
         })}
@@ -99,11 +101,11 @@ function LaneGrid() {
       {Array.from({ length: WINDOW_DAYS }, (_, index) => (
         <span
           key={index}
-          className="absolute inset-y-0 border-l border-hairline/70"
+          className="absolute inset-y-0 border-l border-rule"
           style={{ left: (index / WINDOW_DAYS) * 100 + "%" }}
         />
       ))}
-      <span className="absolute inset-y-0 left-0 w-[2px] bg-ice/70" />
+      <span className="absolute inset-y-0 left-0 w-px bg-accent" />
     </div>
   );
 }
@@ -123,41 +125,30 @@ function TimelineRow({ dispute, now }: { dispute: DisputeSummary; now: number })
   return (
     <Link
       href={"/disputes/" + encodeURIComponent(dispute.dispute_id)}
-      className="group grid grid-cols-[240px_minmax(0,1fr)] border-b border-hairline/70 transition-colors last:border-b-0 hover:bg-white/[0.02] focus-visible:bg-white/[0.03]"
+      className="group grid grid-cols-[240px_minmax(0,1fr)] border-b border-rule transition-colors duration-120 last:border-b-0 hover:bg-raised/60"
       aria-label={"Open case " + dispute.dispute_id + ", " + (urgency ? urgency.label : "no deadline")}
     >
-      <div className="min-w-0 border-r border-hairline/70 px-3 py-2">
+      <div className="min-w-0 border-r border-rule px-4 py-2.5">
         <div className="flex items-center justify-between gap-2">
-          <span className="num truncate text-[10.5px] text-ink" title={dispute.dispute_id}>
+          <span className="num text-base text-ink" title={dispute.dispute_id}>
             {shortHash(dispute.dispute_id, 10, 3)}
           </span>
-          <span className="num shrink-0 text-[10px] text-muted">
+          <span className="num shrink-0 text-sm text-muted">
             {formatUsd(dispute.amount_usd)}
           </span>
         </div>
-        <div className="mt-0.5 flex items-center gap-1.5">
+        <div className="mt-1 flex flex-wrap items-center gap-1.5">
           <Badge tone={reason.tone} title={reason.label}>
             {reason.short}
           </Badge>
-          {overdue ? (
-            <span className="inline-flex items-center gap-1 text-[9px] font-semibold tracking-[0.08em] text-rose">
-              <TriangleAlert size={9} aria-hidden />
-              OVERDUE
-            </span>
-          ) : null}
-          <span
-            className={cn(
-              "num truncate font-mono text-[9px]",
-              overdue ? "text-rose" : "text-dim",
-            )}
-            title={formatAbsolute(dispute.seller_response_due_date)}
-          >
-            {dueMs === null ? "no deadline" : formatDueIn(dispute.seller_response_due_date, now)}
+          {overdue ? <Badge tone="negative">Overdue</Badge> : null}
+          <span className="num text-sm text-muted">
+            {isoDate(dispute.seller_response_due_date)}
           </span>
         </div>
       </div>
 
-      <div className="relative h-[46px]">
+      <div className="relative h-row">
         <LaneGrid />
         {dueMs !== null && urgency ? (
           <span
@@ -166,31 +157,27 @@ function TimelineRow({ dispute, now }: { dispute: DisputeSummary; now: number })
             title={dispute.dispute_id + " · due " + formatAbsolute(dispute.seller_response_due_date)}
           >
             <span
-              className={cn(
-                "block h-[9px] rounded-full",
-                TONE_BAR[urgency.tone],
-                overdue ? "opacity-85" : "opacity-70",
-              )}
+              className={cn("block h-[9px] rounded-full", TONE_BAR[urgency.tone])}
             />
             <span
               aria-hidden
               className={cn(
-                "absolute top-1/2 h-[11px] w-[11px] -translate-y-1/2 rotate-45 rounded-[2px] border border-void",
+                "absolute top-1/2 h-2.5 w-2.5 -translate-y-1/2 rotate-45 bg-ground",
                 TONE_DOT[urgency.tone],
               )}
               style={{ right: -5 }}
             />
             {beyondWindow ? (
-              <span className="absolute -right-3 top-1/2 -translate-y-1/2 font-mono text-[9px] text-dim">
+              <span className="absolute -right-3 top-1/2 -translate-y-1/2 text-xs text-muted">
                 +
               </span>
             ) : null}
-            <span className="num pointer-events-none absolute left-0 top-[-20px] hidden whitespace-nowrap rounded border border-hairline bg-sunken px-1.5 py-0.5 font-mono text-[9px] text-muted opacity-0 shadow-lift transition-opacity group-hover:block group-hover:opacity-100 group-focus-visible:block group-focus-visible:opacity-100">
-              due {formatAbsolute(dispute.seller_response_due_date)} · p(win) {formatPercent(dispute.p_win)}
+            <span className="pointer-events-none absolute left-0 top-[-26px] hidden whitespace-nowrap rounded-card border border-control bg-raised px-2 py-1 text-sm text-ink shadow-float group-hover:block group-focus-visible:block">
+              Due {formatAbsolute(dispute.seller_response_due_date)} · p(win) {formatPercent(dispute.p_win)}
             </span>
           </span>
         ) : (
-          <span className="absolute left-2 top-1/2 -translate-y-1/2 font-mono text-[9px] text-dim">
+          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-sm text-muted">
             no deadline
           </span>
         )}
@@ -199,7 +186,7 @@ function TimelineRow({ dispute, now }: { dispute: DisputeSummary; now: number })
   );
 }
 
-/** /timeline — a 14-day SLA board over a Bryntum-shaped resource/event model. */
+/** /timeline: a 14-day SLA board over a Bryntum-shaped resource/event model. */
 export function TimelineBoard() {
   const now = useNow(30000);
   const query = usePolledQuery(
@@ -234,11 +221,10 @@ export function TimelineBoard() {
   const atRiskExposure = atRisk.reduce((total, row) => total + row.amount_usd, 0);
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       <PageHeader
-        kicker="SLA command board · Aurora Analytics"
         title="Seller response deadlines"
-        description="Bryntum-shaped data model — drop-in scheduler swap documented in docs/. Bars run from now to each case&#39;s seller_response_due_date across a 14-day forward window."
+        description="Every open case runs from now to its seller response deadline across a 14-day window. Deadlines outside the window are flagged rather than clamped."
         meta={
           <>
             <PageMeta label="Open cases" value={open.length} />
@@ -256,42 +242,50 @@ export function TimelineBoard() {
         }
       />
 
-      <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
-        {query.loading ? (
-          Array.from({ length: 4 }, (_, index) => (
-            <Skeleton key={index} className="h-[82px] w-full" />
-          ))
-        ) : (
-          <>
-            <StatTile
-              label="Open cases"
-              value={open.length}
-              sub={
-                query.data
-                  ? query.data.meta.total + " total cases on file"
-                  : "Queue unavailable"
-              }
-            />
-            <StatTile
-              label="Due in 72h or less"
-              value={atRisk.length}
-              sub="Includes overdue cases"
-              tone="amber"
-            />
-            <StatTile
-              label="Exposure in 72h or less"
-              value={formatUsd(atRiskExposure)}
-              sub="Claim value approaching deadline"
-              tone="rose"
-            />
-            <StatTile
-              label="No deadline"
-              value={undated.length}
-              sub="No seller_response_due_date recorded"
-            />
-          </>
-        )}
-      </div>
+      <Panel className="overflow-hidden">
+        <div className="grid gap-px bg-rule sm:grid-cols-2 xl:grid-cols-4">
+          {query.loading ? (
+            Array.from({ length: 4 }, (_, index) => (
+              <div key={index} className="bg-surface px-4 py-3.5">
+                <Skeleton className="h-[76px] w-full" />
+              </div>
+            ))
+          ) : (
+            <>
+              <StatTile
+                className="bg-surface"
+                label="Open cases"
+                value={open.length}
+                sub={
+                  query.data
+                    ? query.data.meta.total + " total cases on file"
+                    : "Queue unavailable"
+                }
+              />
+              <StatTile
+                className="bg-surface"
+                label="Due in 72h or less"
+                value={atRisk.length}
+                sub="Includes overdue cases"
+                tone="warning"
+              />
+              <StatTile
+                className="bg-surface"
+                label="Exposure in 72h or less"
+                value={formatUsd(atRiskExposure)}
+                sub="Claim value approaching deadline"
+                tone="negative"
+              />
+              <StatTile
+                className="bg-surface"
+                label="No deadline"
+                value={undated.length}
+                sub="No seller_response_due_date recorded"
+              />
+            </>
+          )}
+        </div>
+      </Panel>
 
       {query.error ? (
         <ErrorBanner
@@ -303,43 +297,35 @@ export function TimelineBoard() {
 
       <Panel className="overflow-hidden">
         <PanelHeader
-          kicker="Scheduler model"
-          title="Resources and events"
-          description="Each row is a resource (case) and one event from now to its deadline. Rendering is CSS grid, no scheduler runtime."
+          title="Seller response deadlines"
+          description="Each row is one case and one window from now to its deadline. The axis is rendered as a CSS grid, with no scheduler runtime."
           actions={
             <div className="flex flex-wrap items-center gap-2">
               {LEGEND.map((item) => (
-                <span
-                  key={item.label}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 text-[9px] font-medium",
-                    TONE_BADGE[item.tone],
-                  )}
-                >
-                  <span aria-hidden className={cn("h-1 w-1 rounded-full", TONE_DOT[item.tone])} />
+                <Badge key={item.label} tone={item.tone} dot>
                   {item.label}
-                </span>
+                </Badge>
               ))}
             </div>
           }
         />
 
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-hairline px-3 py-2 font-mono text-[9.5px] text-dim">
-          <span>
-            as of {now === null ? "--" : formatClock(now)} · {formatDayLabel(referenceNow)} →{" "}
+        <div className="row-rule flex flex-wrap items-center justify-between gap-2 px-4 py-2">
+          <span className="num text-xs text-muted">
+            as of {now === null ? "--" : formatClock(now)} · {formatDayLabel(referenceNow)} to{" "}
             {formatDayLabel(referenceNow + WINDOW_DAYS * DAY_MS)}
           </span>
-          <span className="flex items-center gap-1.5">
-            <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-emerald live-dot" />
-            polling every 2s while visible
+          <span className="flex items-center gap-1.5 text-xs text-muted">
+            <span aria-hidden className="live-dot h-1.5 w-1.5 rounded-full bg-positive" />
+            Polling every 2s while visible
           </span>
         </div>
 
         {query.loading ? (
-          <div className="space-y-2 p-3" aria-busy="true" aria-label="Loading timeline">
+          <div className="space-y-2 p-4" aria-busy="true" aria-label="Loading timeline">
             <Skeleton className="h-10 w-full" />
             {Array.from({ length: 6 }, (_, index) => (
-              <Skeleton key={index} className="h-[46px] w-full" />
+              <Skeleton key={index} className="h-row w-full" />
             ))}
           </div>
         ) : open.length === 0 ? (
@@ -350,7 +336,7 @@ export function TimelineBoard() {
               action={
                 <Link
                   href="/"
-                  className="inline-flex h-8 items-center rounded-md border border-emerald/30 bg-emerald/10 px-3 text-[12px] font-medium text-emerald transition-colors hover:bg-emerald/15"
+                  className="inline-flex h-8 items-center rounded-full border border-control bg-raised px-3 text-xs font-medium text-ink transition-colors duration-120 hover:bg-[#29282c]"
                 >
                   Run the sandbox flow
                 </Link>
@@ -361,7 +347,7 @@ export function TimelineBoard() {
           <div className="overflow-x-auto">
             <div className="min-w-[980px]">
               <DayHeader now={now} />
-              <div className="border-t border-ice/25" aria-hidden />
+              <div className="border-t border-accent" aria-hidden />
               {dated.map((dispute) => (
                 <TimelineRow
                   key={dispute.dispute_id}
@@ -377,23 +363,24 @@ export function TimelineBoard() {
       {undated.length > 0 ? (
         <Panel>
           <PanelHeader
-            kicker="Unscheduleable"
             title={undated.length + " open cases without a deadline"}
             description="PayPal has not returned seller_response_due_date for these cases. They are excluded from the 14-day window rather than guessed."
           />
-          <ul className="divide-y divide-white/[0.045]">
+          <ul>
             {undated.map((dispute) => (
-              <li key={dispute.dispute_id}>
+              <li key={dispute.dispute_id} className="row-rule">
                 <Link
                   href={"/disputes/" + encodeURIComponent(dispute.dispute_id)}
-                  className="flex flex-wrap items-center gap-2 px-3 py-2.5 text-[11px] transition-colors hover:bg-white/[0.02]"
+                  className="flex flex-wrap items-center gap-2 px-4 py-3 text-sm transition-colors duration-120 hover:bg-raised/60"
                 >
-                  <span className="num text-ink">{shortHash(dispute.dispute_id, 12, 4)}</span>
+                  <span className="num text-base text-ink">
+                    {shortHash(dispute.dispute_id, 12, 4)}
+                  </span>
                   <Badge tone={REASON_META[dispute.reason_code].tone}>
                     {REASON_META[dispute.reason_code].short}
                   </Badge>
                   <span className="num text-muted">{formatUsd(dispute.amount_usd)}</span>
-                  <span className="num ml-auto font-mono text-[9.5px] text-dim">
+                  <span className="num ml-auto text-sm text-muted">
                     p(win) {formatPercent(dispute.p_win)} · no seller_response_due_date
                   </span>
                 </Link>
@@ -403,12 +390,12 @@ export function TimelineBoard() {
         </Panel>
       ) : null}
 
-      <div className="num flex flex-wrap items-center justify-between gap-2 rounded-lg border border-hairline bg-white/[0.012] px-3 py-2.5 font-mono text-[9.5px] text-dim">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-card border border-line px-4 py-3 text-xs text-muted">
         <span className="min-w-0 truncate">
           resources: [{"{"} id, name, stage {"}"}] · events: [{"{"} id, resourceId, startDate,
           endDate, color {"}"}]
         </span>
-        <span className="shrink-0 text-muted">
+        <span className="min-w-0">
           CSS grid renderer · Bryntum runtime not licensed, not emulated
         </span>
       </div>
