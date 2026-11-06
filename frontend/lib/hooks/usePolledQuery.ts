@@ -6,6 +6,12 @@
  * Guarantees: one request in flight at a time, the loop pauses while the tab is
  * hidden, a manual refresh aborts the previous request, and unmount aborts
  * everything. Pages choose their own interval (2s for live queues and cases).
+ *
+ * Rendering discipline: a background poll that returns byte-identical data does
+ * NOT re-render the tree (the payload is deduped against the last one), and the
+ * `refreshing` flag is reserved for manual refreshes only — otherwise a 2s poll
+ * would flicker the refresh button spinner and force AG Grid to re-render its
+ * rows twice a second.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -36,12 +42,14 @@ export function usePolledQuery<T>(
 
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
-  const [inFlight, setInFlight] = useState(false);
   const [updatedAt, setUpdatedAt] = useState<number | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
+  const [manualRefreshing, setManualRefreshing] = useState(false);
 
   const fetcherRef = useRef(fetcher);
   const activeKeyRef = useRef<string | null>(null);
+  const lastJsonRef = useRef<string | null>(null);
+  const manualRef = useRef(false);
 
   useEffect(() => {
     fetcherRef.current = fetcher;
@@ -52,6 +60,7 @@ export function usePolledQuery<T>(
 
     if (activeKeyRef.current !== key) {
       activeKeyRef.current = key;
+      lastJsonRef.current = null;
       setData(null);
       setError(null);
       setUpdatedAt(null);
@@ -69,11 +78,14 @@ export function usePolledQuery<T>(
         return;
       }
       running = true;
-      setInFlight(true);
       try {
         const result = await fetcherRef.current(controller.signal);
         if (cancelled) return;
-        setData(result);
+        const json = JSON.stringify(result ?? null);
+        if (json !== lastJsonRef.current) {
+          lastJsonRef.current = json;
+          setData(result);
+        }
         setError(null);
         setUpdatedAt(Date.now());
       } catch (caught) {
@@ -83,7 +95,10 @@ export function usePolledQuery<T>(
       } finally {
         running = false;
         if (!cancelled) {
-          setInFlight(false);
+          if (manualRef.current) {
+            manualRef.current = false;
+            setManualRefreshing(false);
+          }
           schedule();
         }
       }
@@ -122,6 +137,8 @@ export function usePolledQuery<T>(
   }, [key, enabled, intervalMs, refreshToken]);
 
   const refresh = useCallback(() => {
+    manualRef.current = true;
+    setManualRefreshing(true);
     setRefreshToken((token) => token + 1);
   }, []);
 
@@ -129,7 +146,7 @@ export function usePolledQuery<T>(
     data,
     error,
     loading: enabled && data === null && error === null,
-    refreshing: inFlight && data !== null,
+    refreshing: manualRefreshing,
     updatedAt,
     refresh,
   };
