@@ -11,7 +11,7 @@ seeded database and the test gates. Placeholders a human must fill are marked `[
 | **Tagline** (104 chars) | Hash-chained product telemetry, deterministic EV triage, and an AI rebuttal that cannot invent a number. |
 | **Repo** | https://github.com/Divyanshu-kumar14/Verdict-Pay |
 | **Demo video** | [ADD YOUTUBE LINK] |
-| **Hosted demo** | None. VerdictPay is run locally — there is no hosted deployment. A Render blueprint exists at [render.yaml](../render.yaml) but nothing was deployed from this checkout. |
+| **Hosted demo** | https://verdictpay-web.onrender.com — API at https://verdictpay-api.onrender.com (`/api/v1/health`). Both free-plan Docker services are live and auto-deploy from `main`. The free tier sleeps after ~15 min idle: warm the health URL first, then open the app. See [deploy-render.md](deploy-render.md). |
 | **License** | MIT, [LICENSE](../LICENSE) — must be visible in the repo About section (see §6) |
 
 **Built with** (only technologies that appear in a manifest or an import):
@@ -24,8 +24,9 @@ OpenAI-compatible Chat Completions API · Ollama (optional local model) · Docke
 uv · pnpm · pytest · Vitest · Ruff · ESLint · Postman
 ```
 
-Not claimed anywhere: Bryntum Scheduler, AG Studio, Elastic Cloud, a hosted URL, or a live PayPal
-sandbox transaction. [docs/sponsors.md](sponsors.md) explains each gap in its own row.
+Not claimed anywhere: Bryntum Scheduler, AG Studio, Elastic Cloud, or a live PayPal sandbox
+*transaction* (the sandbox REST APIs are proven live in [live-mode.md](live-mode.md); no funded
+buyer account exists to push a real dispute through). [docs/sponsors.md](sponsors.md) explains each gap in its own row.
 
 ## 2. Text description
 
@@ -197,7 +198,7 @@ Latency and timestamps are the only moving values; EV and p(win) are determinist
 | Project meaningfully uses PayPal (developer platform, sandbox) | [live.py](../backend/app/integrations/paypal/live.py) — OAuth2, Disputes v1, Subscriptions v1, Reporting v1, Orders v2, webhook verification. [simulator.py](../backend/app/integrations/paypal/simulator.py) — same protocol, deterministic. [protocol.py](../backend/app/domain/protocols.py) — one boundary, two implementations. |
 | Project meaningfully uses AI | [openai_provider.py](../backend/app/integrations/llm/openai_provider.py) + [narrative.py](../backend/app/domain/evidence/narrative.py) validator; template fallback in [template_provider.py](../backend/app/integrations/llm/template_provider.py) |
 | Project + text description | §1 and §2 of this file |
-| Functional demo (run instructions or hosted URL) | §5; [README.md](../README.md) quickstart; [demo.md](demo.md) three-button script. No hosted URL claimed. |
+| Functional demo (run instructions or hosted URL) | Hosted at https://verdictpay-web.onrender.com, or run locally per §5; [README.md](../README.md) quickstart; [demo.md](demo.md) three-button script. |
 | "Tools" field | §3 |
 | Public open-source repo, license visible in About | [LICENSE](../LICENSE) (MIT) at repo root; repo URL in §1 |
 | Demo video under 3 minutes on YouTube, showing it working | §4 script; video itself is `[ADD YOUTUBE LINK]` |

@@ -4,6 +4,21 @@ Two Docker web services from one blueprint: an API (FastAPI, simulator gateway b
 default) and a web app (Next.js). No PayPal account, database, or object store is
 required — the API seeds its own deterministic demo data on boot.
 
+## Live deployment (this repository)
+
+Both services are deployed and verified on Render's free plan:
+
+| Service | URL | Health check |
+|---|---|---|
+| API | <https://verdictpay-api.onrender.com> | `/api/v1/health` |
+| Web | <https://verdictpay-web.onrender.com> | `/` |
+
+Auto-deploy is on for `main`, so a push redeploys both. The environment (API key,
+signing secret, webhook secret) lives in Render, not in the repo.
+
+**Cold start:** the free plan sleeps after ~15 minutes idle. Warm the API first
+(<https://verdictpay-api.onrender.com/api/v1/health>), then open the web app.
+
 ---
 
 ## Option A — Blueprint deploy (about 5 minutes, no CLI)
@@ -33,8 +48,16 @@ required — the API seeds its own deterministic demo data on boot.
 ```bash
 npm i -g @renderinc/cli        # or: brew install render-oss/render/render
 render login                   # opens a browser to authorise
-render blueprint launch        # from the repo root; reads render.yaml
+render workspace set <team-id>
+render services create --name verdictpay-api --type web_service \
+  --repo https://github.com/Divyanshu-kumar14/Verdict-Pay --branch main \
+  --runtime docker --plan free --region oregon \
+  --health-check-path /api/v1/health --confirm
 ```
+
+`render blueprint launch` does **not** exist in CLI v2.35.0 — the blueprint command
+group only ships `validate`. Creating the two services individually (CLI or API)
+and letting `render.yaml` document the intended shape is the supported path.
 
 ## Option C — API (if you want me to drive it)
 
@@ -50,8 +73,21 @@ Minimum viable calls (for reference — `ownerId` is your Render workspace id):
 curl -s https://api.render.com/v1/owners -H "Authorization: Bearer $RENDER_API_KEY"
 curl -s -X POST https://api.render.com/v1/services \
   -H "Authorization: Bearer $RENDER_API_KEY" -H "Content-Type: application/json" \
-  -d '{"type":"web","name":"verdictpay-api","ownerId":"<id>","repo":"https://github.com/Divyanshu-kumar14/Verdict-Pay","branch":"main","autoDeploy":"yes","serviceDetails":{"env":"docker","plan":"free","region":"oregon","healthCheckPath":"/api/v1/health","dockerfilePath":"./backend/Dockerfile","dockerContext":"."}}'
+  -d '{"type":"web_service","name":"verdictpay-api","ownerId":"<id>","repo":"https://github.com/Divyanshu-kumar14/Verdict-Pay","branch":"main","autoDeploy":"yes","serviceDetails":{"env":"docker","plan":"free","region":"oregon","healthCheckPath":"/api/v1/health","envSpecificDetails":{"dockerfilePath":"./backend/Dockerfile","dockerContext":"."}}}'
 ```
+
+Two shapes that are easy to get wrong:
+
+- The runtime goes in `serviceDetails.env` (**not** a top-level `runtime` or `env`).
+  A top-level key is ignored and the call fails with
+  `invalid runtime: . valid runtimes are: [docker, elixir, go, node, python, ruby, rust, image]`.
+- `PUT /v1/services/{id}/env-vars` takes a **raw JSON array** of `{"key","value"}`.
+  Wrapping it as `{"envVars":[...]}` returns `{"message":"invalid JSON"}`.
+
+Do not put shell wrappers in Render's Docker **command** override: Render passes the
+string through unparsed, so `sh -c "a; b"` runs as one not-found word and the
+container exits 127. The seed-and-serve command belongs in the image's own `CMD`
+(see `backend/Dockerfile`), which keeps `docker run`, Compose and Render identical.
 
 A token is a full-account credential: scoped access is better than a broad key.
 
@@ -102,8 +138,8 @@ curl -s -H "X-API-Key: <your key>" https://<api>.onrender.com/api/v1/disputes | 
 open https://<web>.onrender.com
 ```
 
-Then put the web URL into [docs/submission.md](submission.md) as the hosted demo,
-which closes one of the two remaining hackathon items.
+The web URL is recorded in [docs/submission.md](submission.md) as the hosted demo. That
+closes one of the two remaining hackathon items; the demo video is the other.
 
 ## What is NOT deployed
 

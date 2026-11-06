@@ -33,7 +33,13 @@ Runs locally: no PayPal account, no model key, no cloud.</p>
 
 ## Quickstart
 
-Requires Python 3.12+, Node 20+, `uv` and `pnpm`. SQLite, seed data and the PayPal simulator are local.
+**No install:** the judge demo is live at <https://verdictpay-web.onrender.com> (API:
+<https://verdictpay-api.onrender.com>). The free tier sleeps after ~15 minutes idle — open the
+API's [`/api/v1/health`](https://verdictpay-api.onrender.com/api/v1/health) first to wake it,
+then the web app.
+
+To run it locally, you need Python 3.12+, Node 20+, `uv` and `pnpm`. SQLite, seed data and the
+PayPal simulator are local.
 
 ```bash
 git clone https://github.com/Divyanshu-kumar14/Verdict-Pay
@@ -244,7 +250,7 @@ Backend: 291 pytest tests. SDK: 24 vitest tests. End to end: 26 assertions again
 | **AG Grid** | Community grid powers the triage queue and the analytics table. |
 | **APIMatic** | The PayPal client follows the official OpenAPI shapes; every request and response is Pydantic-validated. |
 | **Postman** | [postman/](postman) collection and environment covering telemetry, webhook, dispute and evidence calls. |
-| **Render** | [render.yaml](render.yaml) blueprint for API and web. Not deployed from this checkout. |
+| **Render** | Deployed: [verdictpay-web.onrender.com](https://verdictpay-web.onrender.com) + [verdictpay-api.onrender.com](https://verdictpay-api.onrender.com). Two free-plan Docker services that auto-deploy from `main`; [render.yaml](render.yaml) is the blueprint, [deploy-render.md](docs/deploy-render.md) the runbook. Free tier sleeps after ~15 min idle, so warm the API health URL first. |
 | **Elastic** | Optional search adapter behind an interface; not on the demo path, SQL stays authoritative. |
 | **Bryntum / AG Studio** | Not licensed, not bundled and not emulated. The SLA board is a Bryntum-shaped React/CSS timeline; analytics uses AG Grid Community. We say so instead of faking a license. |
 
