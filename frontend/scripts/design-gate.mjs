@@ -117,6 +117,19 @@ if (!SKIP_BUILD) {
 
 /* detached:true puts the server in its own process group, so stop() can take
    down next-server too - pnpm does not forward the signal on its own. */
+/* The port must be free BEFORE we build. A server left over from an earlier build keeps
+   answering, and once .next has been replaced it serves HTML whose client chunks no longer
+   exist - every route then dies with ChunkLoadError and the inspector grades an error page.
+   Waiting for the spawn to report EADDRINUSE is too late and racy, so check first. */
+try {
+  const probe = await fetch(BASE + '/', { signal: AbortSignal.timeout(1500) });
+  if (probe.status < 500) {
+    fail('port ' + PORT + ' is already serving a page, so this run cannot own it.\n' +
+      '  A server from an earlier build answers with HTML that points at assets this build\n' +
+      '  replaced, and every route dies with ChunkLoadError.\n' +
+      '  Stop it and rerun:   ss -ltnp | grep :' + PORT + '   then kill the pid (lsof is not installed everywhere)');
+  }
+} catch { /* nothing is listening: this is the normal case */ }
 const server = spawn('pnpm', ['exec', 'next', 'start', '-p', String(PORT)], {
   cwd: FRONTEND,
   env,
@@ -153,7 +166,7 @@ if (!ready) fail('next start never answered on ' + BASE + '.\n' + serverLog.slic
 if (serverLog.includes('EADDRINUSE')) {
   stop();
   fail('port ' + PORT + ' is already taken by another server, which answered instead of this run.\n' +
-    '  Stop it and rerun:   lsof -ti tcp:' + PORT + ' | xargs -r kill -9');
+    '  Stop it and rerun:   ss -ltnp | grep :' + PORT + '   then kill the pid (lsof is not installed everywhere)');
 }
 const homeHtml = await (await fetch(BASE + '/')).text();
 const cssHref = (homeHtml.match(/\/_next\/static\/css\/[^"']+\.css/) || [])[0];

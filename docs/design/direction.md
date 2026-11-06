@@ -274,12 +274,17 @@ API.
 
 The inspector must judge a production build: a dev server trips the `dev-server`
 warning and a rebuild under a running server serves HTML that points at assets
-which no longer exist. Three guards now make that failure loud instead of
-silent: the gate fails when the port is already taken by a stale server, when the
-served page links no stylesheet, and when the stylesheet it links answers
-anything other than 200. Without them a leftover `next start` answers 200 with
-HTML pointing at deleted asset hashes, every page renders unstyled, and the
-inspector reports Times New Roman on white as though it were a design finding.
+which no longer exist. Four guards now make that failure loud instead of
+silent: the gate refuses to start when anything already answers on its port (a
+stale `next start` serves HTML pointing at deleted asset hashes, so every route
+dies with `ChunkLoadError` and the inspector grades the “Application error” page),
+it still fails if the spawn reports `EADDRINUSE`, and it fails when the served
+page links no stylesheet or when the stylesheet it links answers anything other
+than 200. Without them the inspector reports Times New Roman on white, or a
+missing `h1`, as though they were design findings.
+To clear the port: `ss -ltnp | grep :3000`, then `kill -9 <pid>`. Do not reach
+for `lsof`, which is not installed on every machine, and do not use
+`pkill -f "next start"`, which matches the shell running the command.
 
 ### The result
 

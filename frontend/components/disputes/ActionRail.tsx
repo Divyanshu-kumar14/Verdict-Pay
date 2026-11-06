@@ -19,6 +19,17 @@ import { DISPUTE_ACTIONS } from "@/lib/types";
  * The HATEOAS action rail. Buttons are enabled only when the returned
  * links[] allow the action; every irreversible action passes a confirm dialog.
  */
+
+/* The rail shows the PayPal route, not the full URL: the host is the same on every row and
+   a 60-character query string tells a reader nothing. The complete link stays in the title. */
+function routeOf(link: string): string {
+  try {
+    const url = new URL(link);
+    return url.pathname + url.search;
+  } catch {
+    return link;
+  }
+}
 export function ActionRail({
   detail,
   onCompleted,
@@ -141,11 +152,11 @@ export function ActionRail({
                   </p>
                   {candidate.paypal_link ? (
                     <p
-                      className="mt-1 flex min-w-0 items-center gap-1 text-2xs text-muted"
+                      className="mt-1 flex min-w-0 items-center gap-1 text-sm text-muted"
                       title={candidate.paypal_link}
                     >
-                      <ExternalLink size={11} aria-hidden className="shrink-0" />
-                      <span className="truncate">{candidate.paypal_link}</span>
+                      <ExternalLink size={12} aria-hidden className="shrink-0" />
+                      <span className="truncate">{routeOf(candidate.paypal_link)}</span>
                     </p>
                   ) : null}
                 </div>
