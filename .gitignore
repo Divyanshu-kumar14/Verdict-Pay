@@ -49,3 +49,7 @@ artifacts/
 # the measured output is regenerable.
 .taste-skill/inspect/
 .taste-skill/before/
+
+# Playwright / QA screenshots
+.qa/
+frontend/.qa/

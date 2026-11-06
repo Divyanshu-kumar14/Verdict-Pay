@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  type CellFocusedEvent,
   type CellKeyDownEvent,
   type ColDef,
   type GridReadyEvent,
@@ -10,7 +11,7 @@ import {
   type RowClickedEvent,
 } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 
 import { Badge } from "@/components/ui/Badge";
 import { GRID_THEME } from "@/lib/ag-grid";
@@ -44,7 +45,7 @@ function CaseCell({ params }: { params: ICellRendererParams<DisputeSummary> }) {
   const data = params.data;
   if (!data) return null;
   return (
-    <span className="num block truncate text-sm text-ink" title={data.dispute_id}>
+    <span className="num block truncate font-mono text-sm text-ink" title={data.dispute_id}>
       {shortHash(data.dispute_id, 12, 4)}
     </span>
   );
@@ -55,8 +56,10 @@ function StageCell({ params }: { params: ICellRendererParams<DisputeSummary> }) 
   if (!data) return null;
   const meta = STAGE_META[data.stage];
   return (
-    <span className="block truncate text-sm text-muted" title={meta.label}>
-      {meta.short}
+    <span className="block truncate">
+      <Badge tone={meta.tone} title={meta.label}>
+        {meta.short}
+      </Badge>
     </span>
   );
 }
@@ -76,7 +79,7 @@ function AmountCell({ params }: { params: ICellRendererParams<DisputeSummary> })
   const data = params.data;
   if (!data) return null;
   return (
-    <span className="num block truncate text-right text-sm text-ink">
+    <span className="num block truncate text-right font-mono text-sm text-ink">
       {formatUsd(data.amount_usd)}
     </span>
   );
@@ -86,7 +89,7 @@ function ExpectedLossCell({ params }: { params: ICellRendererParams<DisputeSumma
   const data = params.data;
   if (!data) return null;
   return (
-    <span className="num block truncate text-right text-sm text-muted" title="Expected loss">
+    <span className="num block truncate text-right font-mono text-sm text-muted" title="Expected loss">
       {formatUsd(data.ev_settle_usd)}
     </span>
   );
@@ -121,7 +124,7 @@ function DueCell({ params }: { params: ICellRendererParams<DisputeSummary> }) {
   return (
     <span
       className={cn(
-        "num block truncate text-sm",
+        "num block truncate font-mono text-sm",
         overdue ? "text-negative" : soon ? "text-warning" : "text-muted",
       )}
       title={formatAbsolute(due) + " · " + formatDueIn(due, now)}
@@ -134,7 +137,9 @@ function DueCell({ params }: { params: ICellRendererParams<DisputeSummary> }) {
 /**
  * AG Grid Community triage queue. Default sort is seller response due date
  * ascending. Rows carry a left accent bar for their deadline risk: negative for
- * overdue, warning for due soon, none for the rest.
+ * overdue, warning for due soon, none for the rest. The header sticks to the
+ * top of the grid's own scroll viewport; rows open in the hover-detail drawer
+ * (never full-page nav) on click or on Enter from the keyboard cursor.
  */
 export function DisputesGrid({
   rows,
@@ -146,6 +151,11 @@ export function DisputesGrid({
   // refresh in place. Neither is part of the column definitions, so sorting and
   // scroll survive every tick.
   const now = useNow(60000) ?? Date.now();
+  // Keyboard focus lives beside selection: arrow keys move the grid's focused
+  // cell natively, onCellFocused mirrors the focused row here, and Enter opens
+  // that row in the hover-detail drawer. The focused row wears the same accent
+  // ring as a selected row so sighted keyboard users can track it.
+  const [focusedId, setFocusedId] = useState<string | null>(null);
 
   const columnDefs = useMemo<ColDef<DisputeSummary>[]>(() => {
     const caseColumn: ColDef<DisputeSummary> = {
@@ -230,7 +240,12 @@ export function DisputesGrid({
   }, [compact]);
 
   return (
-    <div role="region" aria-label="Dispute triage grid" className="w-full" style={{ height }}>
+    <div
+      role="region"
+      aria-label="Dispute triage grid. Arrow keys move between rows, Enter opens the focused case."
+      className="w-full"
+      style={{ height }}
+    >
       <AgGridReact<DisputeSummary>
         theme={GRID_THEME}
         rowData={rows}
@@ -255,8 +270,12 @@ export function DisputesGrid({
               accents.push("inset 3px 0 0 var(--color-warning)");
             }
           }
-          // Selection reads as a crisp accent ring that keeps the deadline accent beside it.
-          if (params.node.isSelected()) accents.push("inset 0 0 0 1px var(--color-accent)");
+          // Selection and keyboard focus read as a crisp accent ring that keeps
+          // the deadline accent beside it.
+          const focused = params.data?.dispute_id === focusedId;
+          if (focused || params.node.isSelected()) {
+            accents.push("inset 0 0 0 1px var(--color-accent)");
+          }
           return accents.length > 0 ? { boxShadow: accents.join(", ") } : undefined;
         }}
         // Columns carry fixed widths that total more than the card at narrow
@@ -271,6 +290,18 @@ export function DisputesGrid({
         }}
         onRowClicked={(event: RowClickedEvent<DisputeSummary>) => {
           if (event.data) onRowClick?.(event.data.dispute_id);
+        }}
+        // The focused cell is the keyboard cursor: arrows move it natively,
+        // this mirrors the row so the accent ring follows, and blur clears it.
+        // Stable row ids keep focus (and sort/scroll) across the 2s poll.
+        onCellFocused={(event: CellFocusedEvent<DisputeSummary>) => {
+          const index = event.rowIndex;
+          if (index === null || index === undefined) {
+            setFocusedId(null);
+            return;
+          }
+          const row = event.api.getDisplayedRowAtIndex(index);
+          setFocusedId(row?.data?.dispute_id ?? null);
         }}
         onCellKeyDown={(event: CellKeyDownEvent<DisputeSummary>) => {
           const keyboardEvent = event.event;

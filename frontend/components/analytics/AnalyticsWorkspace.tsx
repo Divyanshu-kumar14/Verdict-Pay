@@ -20,7 +20,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowRight, RefreshCw } from "lucide-react";
+import { Activity, ArrowRight, Inbox, RefreshCw } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
 
 import {
@@ -412,8 +412,9 @@ export function AnalyticsWorkspace(): React.JSX.Element {
   const ready = report !== null;
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       <PageHeader
+        className="lg:flex-wrap lg:gap-y-5"
         title="Analytics"
         description={
           <span className="title-section">
@@ -597,6 +598,21 @@ export function AnalyticsWorkspace(): React.JSX.Element {
                     <Skeleton key={index} className="h-5 w-full" />
                   ))}
                 </div>
+              ) : totalRows === 0 ? (
+                <EmptyState
+                  icon={<Inbox size={20} aria-hidden />}
+                  title="No cases to break down"
+                  description="Run the sandbox flow to open an inquiry, then this breakdown will distribute it by stage, reason or recommendation."
+                  action={
+                    <Link
+                      href="/"
+                      className="inline-flex h-8 items-center rounded-full border border-line bg-raised px-3 text-sm font-medium text-ink transition-colors duration-120 hover:bg-control"
+                    >
+                      Run the sandbox flow
+                    </Link>
+                  }
+                  className="px-0 py-8"
+                />
               ) : (
                 <div className="mt-5 grid items-center gap-6 sm:grid-cols-[auto_minmax(0,1fr)]">
                   <DonutGauge
@@ -660,14 +676,40 @@ export function AnalyticsWorkspace(): React.JSX.Element {
                 <Skeleton className="h-[120px] w-full" />
               ) : (
                 <>
-                  <LineSpark
-                    points={intake.points}
-                    labels={intake.labels}
-                    formatValue={formatInteger}
-                    summary={intakeSummary}
-                    tone="neutral"
-                    height={96}
-                  />
+                  {intakeTotal === 0 ? (
+                    <EmptyState
+                      icon={<Activity size={20} aria-hidden />}
+                      title="No arrivals in range"
+                      description={
+                        "No cases were opened in the last " +
+                        range +
+                        " days. Extend the range, or run the sandbox flow to open an inquiry."
+                      }
+                      action={
+                        <Link
+                          href="/"
+                          className="inline-flex h-8 items-center rounded-full border border-line bg-raised px-3 text-sm font-medium text-ink transition-colors duration-120 hover:bg-control"
+                        >
+                          Run the sandbox flow
+                        </Link>
+                      }
+                      className="px-0 py-8"
+                    />
+                  ) : (
+                    <>
+                      <LineSpark
+                        points={intake.points}
+                        labels={intake.labels}
+                        formatValue={formatInteger}
+                        summary={intakeSummary}
+                        tone="neutral"
+                        height={96}
+                      />
+                      <p className="mt-2 text-2xs text-muted">
+                        Y-axis: cases per day · X-axis: calendar days
+                      </p>
+                    </>
+                  )}
                   <div className="mt-3 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
                     <div className="flex items-center gap-4" role="group" aria-label="Chart range">
                       {RANGE_OPTIONS.map((days) => {
@@ -712,11 +754,17 @@ export function AnalyticsWorkspace(): React.JSX.Element {
             />
             <PanelBody>
               {report === null ? (
-                <div className="mt-1 space-y-2.5" aria-busy="true" aria-label="Loading exposure">
-                  {Array.from({ length: 3 }, (_, index) => (
-                    <Skeleton key={index} className="h-5 w-full" />
-                  ))}
-                </div>
+                summary.loading ? (
+                  <div className="mt-1 space-y-2.5" aria-busy="true" aria-label="Loading exposure">
+                    {Array.from({ length: 3 }, (_, index) => (
+                      <Skeleton key={index} className="h-5 w-full" />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-muted">
+                    Exposure figures are unavailable — refresh the reporting read to try again.
+                  </p>
+                )
               ) : (
                 <>
                   <BarChart
@@ -769,8 +817,9 @@ export function AnalyticsWorkspace(): React.JSX.Element {
       <Reveal delay={0.09}>
         <div className="space-y-3">
           <h2 className="title-section">Cases in the queue</h2>
-          <Panel className="overflow-hidden">
-            <table className="w-full border-collapse">
+          <Panel className="min-w-0 overflow-hidden">
+            <div className="min-w-0 overflow-x-auto">
+            <table className="w-full min-w-[560px] border-collapse sm:min-w-0 [&_th]:whitespace-nowrap">
               <caption className="sr-only">
                 Cases on the triage queue with reason, stage, amount, win probability, expected
                 value of fighting and deadlines.
@@ -891,6 +940,7 @@ export function AnalyticsWorkspace(): React.JSX.Element {
                 </>
               )}
             </table>
+            </div>
           </Panel>
           {queue.error ? (
             <ErrorBanner

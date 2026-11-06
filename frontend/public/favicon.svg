@@ -1,27 +1,9 @@
-<!--
-  VerdictPay - favicon (32 x 32).
-  Simplified mark: the check is widened from 2.9 to 3.3 units so the negative
-  space survives a 16 px render. The plate is the page ground and the mark is the
-  positive hue, straight from the dealt palette in docs/design/direction.md.
--->
+<!-- VerdictPay — favicon/icon (32×32). Indigo mark on the page surface. -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <rect width="32" height="32" rx="7" fill="#171719" />
-  <rect
-    x="0.5"
-    y="0.5"
-    width="31"
-    height="31"
-    rx="6.5"
-    fill="none"
-    stroke="#FFFFFF"
-    stroke-opacity="0.1"
-    stroke-width="1"
-  />
+  <rect width="32" height="32" rx="7" fill="#131316" />
+  <rect x="0.5" y="0.5" width="31" height="31" rx="6.5" fill="none" stroke="#FFFFFF" stroke-opacity="0.1" stroke-width="1" />
   <g transform="translate(2.1 2.1) scale(1.16)">
-    <path
-      fill="#5fc39c"
-      fill-rule="evenodd"
-      d="M5.4 2.4H18.6L20.4 4.2V13.2L12 21.6L3.6 13.2V4.2Z M6.03 12.87L10.3 17.13L17.97 9.47L15.63 7.13L10.3 12.47L8.37 10.53Z"
-    />
+    <path fill="#a78bfa" fill-rule="evenodd"
+      d="M5.4 2.4H18.6L20.4 4.2V13.2L12 21.6L3.6 13.2V4.2Z M6.03 12.87L10.3 17.13L17.97 9.47L15.63 7.13L10.3 12.47L8.37 10.53Z" />
   </g>
 </svg>

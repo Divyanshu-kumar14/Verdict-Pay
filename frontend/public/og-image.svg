@@ -1,95 +1,84 @@
-<!--
-  VerdictPay - social card (1200 x 630).
-  Dark control-room ground, 48 px grid, emerald scan glow, mark + live wordmark,
-  headline, three stat chips and a faint evidence-dossier stack.
-  All copy is real <text> for editability. No raster, no external references.
--->
+<!-- VerdictPay — social card (1200×630). Indigo accent on the neutral dark ladder. -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" width="1200" height="630" font-family="Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif">
   <defs>
     <pattern id="vp-grid" width="48" height="48" patternUnits="userSpaceOnUse">
       <path d="M48 0H0V48" fill="none" stroke="#FFFFFF" stroke-opacity="0.022" stroke-width="1" />
     </pattern>
     <radialGradient id="vp-glow" cx="0.1" cy="-0.05" r="0.62">
-      <stop offset="0" stop-color="#34D399" stop-opacity="0.16" />
-      <stop offset="0.45" stop-color="#34D399" stop-opacity="0.06" />
-      <stop offset="1" stop-color="#34D399" stop-opacity="0" />
+      <stop offset="0" stop-color="#a78bfa" stop-opacity="0.16" />
+      <stop offset="0.45" stop-color="#a78bfa" stop-opacity="0.06" />
+      <stop offset="1" stop-color="#a78bfa" stop-opacity="0" />
     </radialGradient>
     <linearGradient id="vp-floor" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0.55" stop-color="#080B0F" stop-opacity="0" />
-      <stop offset="1" stop-color="#080B0F" stop-opacity="0.65" />
+      <stop offset="0.55" stop-color="#0b0b0d" stop-opacity="0" />
+      <stop offset="1" stop-color="#0b0b0d" stop-opacity="0.65" />
     </linearGradient>
   </defs>
 
-  <!-- ground -->
-  <rect width="1200" height="630" fill="#080B0F" />
+  <rect width="1200" height="630" fill="#0b0b0d" />
   <rect width="1200" height="630" fill="url(#vp-grid)" />
   <rect width="1200" height="630" fill="url(#vp-glow)" />
   <rect width="1200" height="630" fill="url(#vp-floor)" />
 
   <!-- evidence dossier stack -->
   <g>
-    <rect x="862" y="194" width="240" height="300" rx="10" fill="#0E141B" stroke="#FFFFFF" stroke-opacity="0.05" transform="rotate(-6 982 344)" />
-    <rect x="854" y="202" width="240" height="300" rx="10" fill="#0E141B" stroke="#FFFFFF" stroke-opacity="0.07" transform="rotate(-3 974 352)" />
-    <rect x="846" y="210" width="240" height="300" rx="10" fill="#0E141B" stroke="#FFFFFF" stroke-opacity="0.1" />
-    <rect x="870" y="238" width="52" height="6" rx="3" fill="#34D399" fill-opacity="0.55" />
-    <rect x="932" y="238" width="96" height="6" rx="3" fill="#E6EDF3" fill-opacity="0.1" />
-    <rect x="870" y="256" width="150" height="4" rx="2" fill="#E6EDF3" fill-opacity="0.07" />
+    <rect x="862" y="194" width="240" height="300" rx="10" fill="#131316" stroke="#FFFFFF" stroke-opacity="0.05" transform="rotate(-6 982 344)" />
+    <rect x="854" y="202" width="240" height="300" rx="10" fill="#131316" stroke="#FFFFFF" stroke-opacity="0.07" transform="rotate(-3 974 352)" />
+    <rect x="846" y="210" width="240" height="300" rx="10" fill="#131316" stroke="#FFFFFF" stroke-opacity="0.1" />
+    <rect x="870" y="238" width="52" height="6" rx="3" fill="#a78bfa" fill-opacity="0.55" />
+    <rect x="932" y="238" width="96" height="6" rx="3" fill="#f5f5f6" fill-opacity="0.1" />
+    <rect x="870" y="256" width="150" height="4" rx="2" fill="#f5f5f6" fill-opacity="0.07" />
     <path d="M870 278H1062" stroke="#FFFFFF" stroke-opacity="0.1" stroke-width="1" />
-    <rect x="870" y="298" width="192" height="5" rx="2.5" fill="#E6EDF3" fill-opacity="0.09" />
-    <rect x="870" y="316" width="168" height="5" rx="2.5" fill="#E6EDF3" fill-opacity="0.09" />
-    <rect x="870" y="334" width="184" height="5" rx="2.5" fill="#E6EDF3" fill-opacity="0.09" />
-    <rect x="870" y="352" width="132" height="5" rx="2.5" fill="#E6EDF3" fill-opacity="0.09" />
+    <rect x="870" y="298" width="192" height="5" rx="2.5" fill="#f5f5f6" fill-opacity="0.09" />
+    <rect x="870" y="316" width="168" height="5" rx="2.5" fill="#f5f5f6" fill-opacity="0.09" />
+    <rect x="870" y="334" width="184" height="5" rx="2.5" fill="#f5f5f6" fill-opacity="0.09" />
+    <rect x="870" y="352" width="132" height="5" rx="2.5" fill="#f5f5f6" fill-opacity="0.09" />
     <path d="M870 380H1062" stroke="#FFFFFF" stroke-opacity="0.06" stroke-width="1" />
-    <rect x="870" y="398" width="176" height="4" rx="2" fill="#E6EDF3" fill-opacity="0.06" />
-    <rect x="870" y="414" width="150" height="4" rx="2" fill="#E6EDF3" fill-opacity="0.06" />
-    <g stroke="#34D399" stroke-opacity="0.3" fill="none" stroke-width="1.5">
+    <rect x="870" y="398" width="176" height="4" rx="2" fill="#f5f5f6" fill-opacity="0.06" />
+    <rect x="870" y="414" width="150" height="4" rx="2" fill="#f5f5f6" fill-opacity="0.06" />
+    <g stroke="#a78bfa" stroke-opacity="0.3" fill="none" stroke-width="1.5">
       <rect x="870" y="436" width="16" height="16" rx="3" />
       <rect x="902" y="436" width="16" height="16" rx="3" />
       <rect x="934" y="436" width="16" height="16" rx="3" />
       <path d="M886 444H902" />
       <path d="M918 444H934" />
     </g>
-    <circle cx="1024" cy="444" r="26" fill="#34D399" fill-opacity="0.05" stroke="#34D399" stroke-opacity="0.3" stroke-width="1.5" />
-    <path d="M1013 444 l8 8 l14 -15" fill="none" stroke="#34D399" stroke-opacity="0.55" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
+    <circle cx="1024" cy="444" r="26" fill="#a78bfa" fill-opacity="0.05" stroke="#a78bfa" stroke-opacity="0.3" stroke-width="1.5" />
+    <path d="M1013 444 l8 8 l14 -15" fill="none" stroke="#a78bfa" stroke-opacity="0.55" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" />
   </g>
 
-  <!-- hairline divider between copy and motif -->
   <path d="M816 150V520" stroke="#FFFFFF" stroke-opacity="0.05" stroke-width="1" />
 
   <!-- header: mark -->
   <g transform="translate(72 52) scale(1.5)">
-    <path
-      fill="#34D399"
-      fill-rule="evenodd"
-      d="M5.4 2.4H18.6L20.4 4.2V13.2L12 21.6L3.6 13.2V4.2Z M6.17 12.73L10.3 16.85L17.83 9.33L15.77 7.27L10.3 12.75L8.23 10.67Z"
-    />
+    <path fill="#a78bfa" fill-rule="evenodd"
+      d="M5.4 2.4H18.6L20.4 4.2V13.2L12 21.6L3.6 13.2V4.2Z M6.17 12.73L10.3 16.85L17.83 9.33L15.77 7.27L10.3 12.75L8.23 10.67Z" />
   </g>
-  <text x="124" y="77.5" fill="#E6EDF3" font-size="21" font-weight="600" letter-spacing="2.6">VERDICTPAY</text>
-  <text x="1128" y="76" fill="#8B98A5" font-size="12" font-weight="600" letter-spacing="2.2" text-anchor="end">PRE-DISPUTE TELEMETRY / DISPUTE DEFENSE</text>
+  <text x="124" y="77.5" fill="#f5f5f6" font-size="21" font-weight="600" letter-spacing="2.6">VERDICTPAY</text>
+  <text x="1128" y="76" fill="#a0a0a8" font-size="12" font-weight="600" letter-spacing="2.2" text-anchor="end">PRE-DISPUTE TELEMETRY / DISPUTE DEFENSE</text>
   <path d="M72 112H1128" stroke="#FFFFFF" stroke-opacity="0.07" stroke-width="1" />
 
   <!-- headline -->
-  <text x="72" y="250" fill="#E6EDF3" font-size="62" font-weight="600" letter-spacing="-1.1">Win the dispute before</text>
-  <text x="72" y="326" fill="#E6EDF3" font-size="62" font-weight="600" letter-spacing="-1.1">the fee attaches.</text>
-  <text x="72" y="386" fill="#8B98A5" font-size="18" letter-spacing="0.2">Telemetry-chained proof. Deterministic EV. The cheapest correct action.</text>
+  <text x="72" y="250" fill="#f5f5f6" font-size="62" font-weight="600" letter-spacing="-1.1">Win the dispute before</text>
+  <text x="72" y="326" fill="#f5f5f6" font-size="62" font-weight="600" letter-spacing="-1.1">the fee attaches.</text>
+  <text x="72" y="386" fill="#a0a0a8" font-size="18" letter-spacing="0.2">Telemetry-chained proof. Deterministic EV. The cheapest correct action.</text>
 
   <!-- stat chips -->
   <g>
-    <rect x="72" y="444" width="176" height="52" rx="9" fill="#0E141B" stroke="#FFFFFF" stroke-opacity="0.09" />
-    <circle cx="93" cy="470" r="3.5" fill="#34D399" />
-    <text x="106" y="476" fill="#E6EDF3" font-size="17" font-weight="500">0-fee deflection</text>
+    <rect x="72" y="444" width="176" height="52" rx="9" fill="#131316" stroke="#FFFFFF" stroke-opacity="0.09" />
+    <circle cx="93" cy="470" r="3.5" fill="#34d399" />
+    <text x="106" y="476" fill="#f5f5f6" font-size="17" font-weight="500">0-fee deflection</text>
 
-    <rect x="260" y="444" width="209" height="52" rx="9" fill="#0E141B" stroke="#FFFFFF" stroke-opacity="0.09" />
-    <circle cx="281" cy="470" r="3.5" fill="#FBBF24" />
-    <text x="294" y="476" fill="#E6EDF3" font-size="17" font-weight="500">$15/$30 fee-cliff EV</text>
+    <rect x="260" y="444" width="209" height="52" rx="9" fill="#131316" stroke="#FFFFFF" stroke-opacity="0.09" />
+    <circle cx="281" cy="470" r="3.5" fill="#fbbf24" />
+    <text x="294" y="476" fill="#f5f5f6" font-size="17" font-weight="500">$15/$30 fee-cliff EV</text>
 
-    <rect x="481" y="444" width="262" height="52" rx="9" fill="#0E141B" stroke="#FFFFFF" stroke-opacity="0.09" />
-    <circle cx="502" cy="470" r="3.5" fill="#7DD3FC" />
-    <text x="515" y="476" fill="#E6EDF3" font-size="17" font-weight="500">SHA-256 chain of custody</text>
+    <rect x="481" y="444" width="262" height="52" rx="9" fill="#131316" stroke="#FFFFFF" stroke-opacity="0.09" />
+    <circle cx="502" cy="470" r="3.5" fill="#a78bfa" />
+    <text x="515" y="476" fill="#f5f5f6" font-size="17" font-weight="500">SHA-256 chain of custody</text>
   </g>
 
-  <!-- footer -->
   <path d="M72 566H1128" stroke="#FFFFFF" stroke-opacity="0.07" stroke-width="1" />
-  <text x="72" y="592" fill="#8B98A5" font-size="13">Pre-dispute telemetry + autonomous PayPal dispute defense</text>
-  <text x="1128" y="592" fill="#74869B" font-size="12" font-weight="600" letter-spacing="2.2" text-anchor="end">SIMULATOR-FIRST / NO CREDENTIALS REQUIRED</text>
+  <text x="72" y="592" fill="#a0a0a8" font-size="13">Pre-dispute telemetry + autonomous PayPal dispute defense</text>
+  <text x="1128" y="592" fill="#a0a0a8" font-size="12" font-weight="600" letter-spacing="2.2" text-anchor="end">SIMULATOR-FIRST / NO CREDENTIALS REQUIRED</text>
 </svg>

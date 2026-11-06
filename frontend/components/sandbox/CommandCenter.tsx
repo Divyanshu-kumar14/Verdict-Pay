@@ -14,6 +14,8 @@ import {
 } from "lucide-react";
 
 import { CustodyChain } from "@/components/sandbox/CustodyChain";
+import { VerdictEvidence } from "@/components/sandbox/VerdictEvidence";
+import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -125,7 +127,7 @@ function EvComparison({
                 positive ? "text-ink" : "text-negative",
               )}
             >
-              {formatUsd(col.value)}
+              <AnimatedNumber value={col.value} format={formatUsd} />
             </p>
             <div
               role="img"
@@ -306,6 +308,7 @@ function VerdictCard({
             className="mt-3"
           />
         </div>
+        <VerdictEvidence detail={detail} />
       </div>
     </Panel>
   );

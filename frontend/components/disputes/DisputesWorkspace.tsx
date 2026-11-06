@@ -21,7 +21,7 @@ import { Skeleton } from "@/components/ui/Skeleton";
 import { StatTile } from "@/components/ui/StatTile";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/cn";
-import { formatPercent, formatUsd, isoToMs } from "@/lib/format";
+import { formatInteger, formatPercent, formatUsd, isoToMs } from "@/lib/format";
 import { useNow } from "@/lib/hooks/useNow";
 import { usePolledQuery } from "@/lib/hooks/usePolledQuery";
 import { SPRING, stagger, staggerItem } from "@/lib/motion";
@@ -70,7 +70,7 @@ function KpiTile({
   const ready = status === "ready";
   return (
     <StatTile
-      className="h-full"
+      className="h-full [&_.value]:font-mono"
       label={label}
       tone={ready ? tone : "neutral"}
       sub={sub}
@@ -145,6 +145,18 @@ export function DisputesWorkspace() {
       ? Math.max(0, summaryData.open_cases - summaryData.in_inquiry - summaryData.in_claim)
       : 0;
 
+  // SLA risk is read off this page's real seller_response_due_date values with
+  // the same 72h arithmetic the quick filters use — never a fabricated series.
+  const overdueCount = rows.filter((row) => {
+    const dueMs = isoToMs(row.seller_response_due_date);
+    return dueMs !== null && dueMs < referenceNow;
+  }).length;
+  const dueSoonCount = rows.filter((row) => {
+    const dueMs = isoToMs(row.seller_response_due_date);
+    return dueMs !== null && dueMs >= referenceNow && dueMs - referenceNow <= 3 * DAY_MS;
+  }).length;
+  const slaTone: Tone = overdueCount > 0 ? "negative" : dueSoonCount > 0 ? "warning" : "neutral";
+
   const gridHeight = Math.min(
     GRID_MAX_HEIGHT,
     Math.max(GRID_MIN_HEIGHT, visible.length * GRID_ROW_HEIGHT + GRID_HEADER_HEIGHT + 2),
@@ -182,9 +194,9 @@ export function DisputesWorkspace() {
         animate="show"
         role="group"
         aria-label="Exposure readings"
-        className="grid grid-cols-1 gap-4 xl:grid-cols-3"
+        className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4"
       >
-        <motion.article variants={staggerItem} className="panel-raised p-5 xl:col-span-3">
+        <motion.article variants={staggerItem} className="panel-raised p-5 sm:col-span-2 xl:col-span-4">
           <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
@@ -193,7 +205,7 @@ export function DisputesWorkspace() {
                   <span className="live-dot h-1.5 w-1.5 rounded-full bg-positive" aria-hidden />
                 ) : null}
               </div>
-              <div className="value mt-1.5 text-2xl text-ink">
+              <div className="value mt-1.5 font-mono text-2xl text-ink">
                 {summaryStatus === "error" ? (
                   "—"
                 ) : (
@@ -252,18 +264,19 @@ export function DisputesWorkspace() {
           </div>
         </motion.article>
 
+        {/* No sparklines: the reporting summary exposes point-in-time totals
+            only, with no time series — a trend line here would be fabricated. */}
         <motion.article variants={staggerItem} className="panel">
           <KpiTile
-            label="Protected"
-            tone="positive"
+            label="Open disputes"
+            tone="neutral"
             status={summaryStatus}
-            valueNumber={summaryData ? summaryData.protected_usd : 0}
-            valueFormat={formatUsd}
+            valueNumber={summaryData ? summaryData.open_cases : 0}
+            valueFormat={formatInteger}
             sub={
               summaryData ? (
-                <span className="inline-flex items-center gap-1.5">
-                  <SealMark size={14} tone="positive" />
-                  {summaryData.chain_verified_customers} chain-verified customers
+                <span className="num">
+                  {summaryData.in_inquiry} in inquiry · {summaryData.in_claim} in claim
                 </span>
               ) : summaryStatus === "error" ? (
                 "Reporting unavailable"
@@ -276,35 +289,16 @@ export function DisputesWorkspace() {
 
         <motion.article variants={staggerItem} className="panel">
           <KpiTile
-            label="Fees avoided"
-            tone="positive"
-            status={summaryStatus}
-            valueNumber={summaryData ? summaryData.fees_avoided_usd : 0}
-            valueFormat={formatUsd}
-            sub={
-              summaryData ? (
-                summaryData.subscription_suspensions + " subscriptions suspended"
-              ) : summaryStatus === "error" ? (
-                "Reporting unavailable"
-              ) : (
-                <KpiSubBar />
-              )
-            }
-          />
-        </motion.article>
-
-        <motion.article variants={staggerItem} className="panel">
-          <KpiTile
-            label="Average p(win)"
+            label="Win rate"
             tone="accent"
             status={summaryStatus}
-            valueNumber={summaryData ? summaryData.avg_p_win : 0}
+            valueNumber={summaryData ? summaryData.win_rate_estimate : 0}
             valueFormat={formatPercent}
             sub={
               summaryData ? (
                 <span className="block">
-                  <span className="block">
-                    win-rate estimate {formatPercent(summaryData.win_rate_estimate)}
+                  <span className="num block">
+                    avg p(win) {formatPercent(summaryData.avg_p_win)}
                   </span>
                   <ProgressBar
                     value={summaryData.avg_p_win}
@@ -315,6 +309,51 @@ export function DisputesWorkspace() {
                 </span>
               ) : summaryStatus === "error" ? (
                 "Reporting unavailable"
+              ) : (
+                <KpiSubBar />
+              )
+            }
+          />
+        </motion.article>
+
+        <motion.article variants={staggerItem} className="panel">
+          <KpiTile
+            label="EV recovered"
+            tone="positive"
+            status={summaryStatus}
+            valueNumber={summaryData ? summaryData.protected_usd : 0}
+            valueFormat={formatUsd}
+            sub={
+              summaryData ? (
+                <span className="num inline-flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                  <SealMark size={14} tone="positive" />
+                  {formatUsd(summaryData.fees_avoided_usd)} fees avoided ·{" "}
+                  {summaryData.subscription_suspensions} suspensions ·{" "}
+                  {summaryData.chain_verified_customers} chain-verified
+                </span>
+              ) : summaryStatus === "error" ? (
+                "Reporting unavailable"
+              ) : (
+                <KpiSubBar />
+              )
+            }
+          />
+        </motion.article>
+
+        <motion.article variants={staggerItem} className="panel">
+          <KpiTile
+            label="SLA risk"
+            tone={slaTone}
+            status={query.data ? "ready" : query.error ? "error" : "loading"}
+            valueNumber={overdueCount + dueSoonCount}
+            valueFormat={formatInteger}
+            sub={
+              query.data ? (
+                <span className="num">
+                  {overdueCount} overdue · {dueSoonCount} due in 72h · this page
+                </span>
+              ) : query.error ? (
+                "Queue unavailable"
               ) : (
                 <KpiSubBar />
               )
@@ -485,6 +524,9 @@ export function DisputesWorkspace() {
         <PanelFooter className="flex flex-wrap items-center justify-between gap-2">
           <span className="num text-2xs text-muted">
             {meta ? meta.total + " cases · " + meta.per_page + " per page" : "0 cases"}
+          </span>
+          <span className="hidden text-2xs text-muted md:inline" aria-hidden>
+            ↑↓ to move · Enter opens the case
           </span>
           <div className="flex items-center gap-2">
             <span className="num text-2xs text-muted">

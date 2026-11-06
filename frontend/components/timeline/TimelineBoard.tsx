@@ -54,6 +54,14 @@ function urgencyFor(daysLeft: number): Urgency {
   return { label: "more than 7 days", tone: "positive" };
 }
 
+/** Countdown chip polarity: red once breached, amber inside 72h, quiet beyond. */
+function countdownTone(dueMs: number | null, now: number): Tone {
+  if (dueMs === null) return "neutral";
+  if (dueMs < now) return "negative";
+  if (dueMs - now <= 3 * DAY_MS) return "warning";
+  return "neutral";
+}
+
 const LEGEND: Urgency[] = [
   { label: "Overdue", tone: "negative" },
   { label: "3 days or less", tone: "warning" },
@@ -192,6 +200,8 @@ function TimelineRow({ dispute, now }: { dispute: DisputeSummary; now: number })
       : 0;
   const reason = REASON_META[dispute.reason_code];
   const overdue = daysLeft !== null && daysLeft <= 0;
+  const dueSoon = !overdue && daysLeft !== null && daysLeft <= 3;
+  const countdown = countdownTone(dueMs, now);
 
   return (
     <Link
@@ -205,12 +215,17 @@ function TimelineRow({ dispute, now }: { dispute: DisputeSummary; now: number })
             aria-hidden
             className="absolute inset-y-0 left-0 w-[3px] bg-negative"
           />
+        ) : dueSoon ? (
+          <span
+            aria-hidden
+            className="absolute inset-y-0 left-0 w-[3px] bg-warning"
+          />
         ) : null}
         <div className="flex items-center justify-between gap-2">
-          <span className="num min-w-0 truncate text-base text-ink" title={dispute.dispute_id}>
+          <span className="num min-w-0 truncate font-mono text-base text-ink" title={dispute.dispute_id}>
             {shortHash(dispute.dispute_id, 10, 3)}
           </span>
-          <span className="num shrink-0 text-sm text-muted">
+          <span className="num shrink-0 font-mono text-sm text-muted">
             {formatUsd(dispute.amount_usd)}
           </span>
         </div>
@@ -218,8 +233,14 @@ function TimelineRow({ dispute, now }: { dispute: DisputeSummary; now: number })
           <Badge tone={reason.tone} title={reason.label}>
             {reason.short}
           </Badge>
-          {overdue ? <Badge tone="negative">Overdue</Badge> : null}
-          <span className="num hidden text-sm text-muted md:inline">
+          <Badge
+            tone={countdown}
+            title={formatAbsolute(dispute.seller_response_due_date)}
+            className="num font-mono"
+          >
+            {formatDueIn(dispute.seller_response_due_date, now)}
+          </Badge>
+          <span className="num hidden font-mono text-sm text-muted md:inline">
             {isoDate(dispute.seller_response_due_date)}
           </span>
         </div>
@@ -255,23 +276,23 @@ function TimelineRow({ dispute, now }: { dispute: DisputeSummary; now: number })
             <span className="pointer-events-none absolute bottom-full right-0 z-sticky mb-2 hidden w-60 rounded-card border border-line bg-raised p-2.5 text-left shadow-float group-hover:block group-focus-visible:block">
               <span className="block text-2xs text-muted">Open case</span>
               <span
-                className="num mt-1 block text-sm font-medium text-ink"
+                className="num mt-1 block font-mono text-sm font-medium text-ink"
                 title={dispute.dispute_id}
               >
                 {shortHash(dispute.dispute_id, 16, 6)}
               </span>
-              <span className="num mt-0.5 block text-xs text-muted">
+              <span className="num mt-0.5 block font-mono text-xs text-muted">
                 payer {shortHash(dispute.payer_id, 8, 4)}
               </span>
               <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
                 <Badge tone={reason.tone}>{reason.short}</Badge>
                 <Badge tone={urgency.tone}>{urgency.label}</Badge>
               </span>
-              <span className="num mt-1.5 flex items-center justify-between gap-2 text-xs">
+              <span className="num mt-1.5 flex items-center justify-between gap-2 font-mono text-xs">
                 <span className="text-muted">amount</span>
                 <span className="text-ink">{formatUsd(dispute.amount_usd)}</span>
               </span>
-              <span className="num mt-0.5 flex items-center justify-between gap-2 text-xs">
+              <span className="num mt-0.5 flex items-center justify-between gap-2 font-mono text-xs">
                 <span className="text-muted">deadline</span>
                 <span className="text-ink">
                   {formatAbsolute(dispute.seller_response_due_date)}
@@ -426,7 +447,7 @@ export function TimelineBoard() {
         />
 
         <div className="row-rule flex flex-wrap items-center justify-between gap-2 px-4 py-2">
-          <span className="num text-xs text-muted">
+          <span className="num font-mono text-xs text-muted">
             as of {now === null ? "--" : formatClock(now)} · {formatDayLabel(referenceNow)} to{" "}
             {formatDayLabel(referenceNow + WINDOW_DAYS * DAY_MS)}
           </span>
@@ -463,6 +484,8 @@ export function TimelineBoard() {
             <div className="min-w-[980px]">
               <DayHeader now={now} />
               <div className="border-t border-accent" aria-hidden />
+              {/* Stable dispute_id keys plus the deduping poller: the 2s poll
+                  re-renders in place and never replays the entrance. */}
               <motion.div
                 variants={stagger}
                 initial={reduced ? false : "hidden"}
@@ -494,14 +517,14 @@ export function TimelineBoard() {
                   href={"/disputes/" + encodeURIComponent(dispute.dispute_id)}
                   className="flex flex-wrap items-center gap-2 px-4 py-3 text-sm transition-colors duration-120 hover:bg-raised/60"
                 >
-                  <span className="num text-base text-ink">
+                  <span className="num font-mono text-base text-ink">
                     {shortHash(dispute.dispute_id, 12, 4)}
                   </span>
                   <Badge tone={REASON_META[dispute.reason_code].tone}>
                     {REASON_META[dispute.reason_code].short}
                   </Badge>
-                  <span className="num text-muted">{formatUsd(dispute.amount_usd)}</span>
-                  <span className="num ml-auto text-sm text-muted">
+                  <span className="num font-mono text-muted">{formatUsd(dispute.amount_usd)}</span>
+                  <span className="num ml-auto font-mono text-sm text-muted">
                     p(win) {formatPercent(dispute.p_win)} · no seller_response_due_date
                   </span>
                 </Link>

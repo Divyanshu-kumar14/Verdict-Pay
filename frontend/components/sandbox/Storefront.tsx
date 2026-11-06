@@ -1,21 +1,21 @@
 "use client";
 
+import { Fragment } from "react";
 import { motion, useReducedMotion } from "motion/react";
-import { CircleCheck, CreditCard, Lock, RotateCcw, X } from "lucide-react";
+import { CircleCheck, CreditCard, Lock, RefreshCw, RotateCcw, X } from "lucide-react";
 
-import { EvidenceSignal, type SignalNodeState, type SignalStep } from "@/components/evidence/EvidenceSignal";
-import { Magnetic } from "@/components/motion/Magnetic";
-import { StepLog } from "@/components/sandbox/StepLog";
+import { CopyButton } from "@/components/sandbox/CopyButton";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
-import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/ui/Panel";
+import { Panel, PanelBody, PanelFooter } from "@/components/ui/Panel";
+import { Tooltip } from "@/components/ui/Tooltip";
 import { cn } from "@/lib/cn";
 import { DEMO_BUYER_EMAIL, DEMO_MERCHANT_NAME, DEMO_PLAN } from "@/lib/constants";
 import { formatPercent, formatUsd, shortHash } from "@/lib/format";
 import type { SandboxFlowState, StepStatus } from "@/lib/hooks/useSandboxFlow";
 import { SPRING } from "@/lib/motion";
-import { CHANNEL_META, REASON_META, RECOMMENDATION_META, STAGE_META, type Tone } from "@/lib/vocab";
+import { CHANNEL_META, REASON_META, STAGE_META, type Tone } from "@/lib/vocab";
 
 const STEP_BADGE: Record<StepStatus, { label: string; tone: Tone }> = {
   idle: { label: "Ready", tone: "neutral" },
@@ -24,7 +24,6 @@ const STEP_BADGE: Record<StepStatus, { label: string; tone: Tone }> = {
   error: { label: "Failed", tone: "negative" },
 };
 
-/** A step beyond its raw status: what the rail draws and whether it can run. */
 type RailState = "completed" | "active" | "failed" | "locked";
 
 function railState(status: StepStatus, canRun: boolean): RailState {
@@ -34,17 +33,7 @@ function railState(status: StepStatus, canRun: boolean): RailState {
   return canRun ? "active" : "locked";
 }
 
-function StepIndicator({
-  rail,
-  index,
-  running,
-  reduced,
-}: {
-  rail: RailState;
-  index: number;
-  running: boolean;
-  reduced: boolean;
-}) {
+function StepNode({ rail, index, reduced }: { rail: RailState; index: number; reduced: boolean }) {
   if (rail === "completed") {
     return (
       <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-positive text-ground">
@@ -59,186 +48,72 @@ function StepIndicator({
       </span>
     );
   }
-  if (running) {
+  if (rail === "locked") {
     return (
-      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-accent bg-pill-accent">
-        <span
-          aria-hidden
-          className="h-3 w-3 animate-spin rounded-full border-2 border-accent border-t-transparent"
-        />
+      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-control text-muted">
+        <Lock size={12} aria-hidden />
       </span>
     );
   }
-  const locked = rail === "locked";
-  const node = (
-    <span
-      className={cn(
-        "grid h-7 w-7 place-items-center rounded-full border text-xs font-medium num",
-        locked ? "border-control text-muted" : "border-accent bg-pill-accent text-accent",
-      )}
-    >
-      {index + 1}
-    </span>
-  );
-  if (locked) return node;
   return (
     <motion.span
       initial={reduced ? false : { scale: 0.7, opacity: 0.5 }}
       animate={{ scale: 1, opacity: 1 }}
       transition={reduced ? { duration: 0 } : SPRING}
-      className="inline-flex"
+      className="num grid h-7 w-7 shrink-0 place-items-center rounded-full border border-accent bg-pill-accent text-sm font-medium text-accent"
     >
-      {node}
+      {index + 1}
     </motion.span>
   );
 }
 
-function Connector({ filled, reduced }: { filled: boolean; reduced: boolean }) {
+function RailConnector({ filled, reduced }: { filled: boolean; reduced: boolean }) {
   return (
-    <div aria-hidden className="relative my-1 w-px flex-1 overflow-hidden">
+    <div aria-hidden className="mx-auto h-4 w-px shrink-0 overflow-hidden relative sm:mx-0 sm:h-px sm:w-full sm:min-w-6 sm:self-center">
       <span className="absolute inset-0 bg-rule" />
       <motion.span
-        className="absolute inset-0 origin-top bg-accent"
+        className="absolute inset-0 bg-accent"
         initial={false}
-        animate={{ scaleY: filled ? 1 : 0 }}
+        animate={{ scale: filled ? 1 : 0, opacity: filled ? 1 : 0 }}
+        style={{ transformOrigin: "left top" }}
         transition={reduced ? { duration: 0 } : SPRING}
       />
     </div>
   );
 }
 
-/** The buyer-step status mapped onto the EvidenceSignal node grammar. */
-function statusToSignal(status: StepStatus): SignalNodeState {
-  if (status === "success") return "verified";
-  if (status === "error") return "failed";
-  if (status === "running") return "active";
-  return "locked";
-}
-
-/**
- * Evidence verification is real only once a case exists: it reads the telemetry
- * chain the usage step sealed (the same chain the case record verifies) plus the
- * case telemetry completeness. Before the case files the stage stays locked.
- */
-function evidenceState(state: SandboxFlowState): SignalNodeState {
-  if (!state.dispute) return "locked";
-  if (state.usage && !state.usage.chain.valid) return "failed";
-  if (state.usage && state.usage.chain.valid) return "verified";
-  return "active";
-}
-
-/** The verdict is computed by the triage the dispute step triggers. */
-function verdictState(state: SandboxFlowState): SignalNodeState {
-  if (!state.dispute) return "locked";
-  if (state.dispute.triage_triggered) return "verified";
-  return "active";
-}
-
-function buildPipeline(state: SandboxFlowState): SignalStep[] {
-  const dispute = state.dispute ? state.dispute.dispute : null;
-  const rec = dispute ? RECOMMENDATION_META[dispute.recommended_action] : null;
-  const chainValid = state.usage ? state.usage.chain.valid : false;
-
-  return [
-    {
-      id: "checkout",
-      label: "Checkout",
-      state: statusToSignal(state.checkoutStatus),
-      meta: state.checkout ? "order " + shortHash(state.checkout.order_id, 10, 4) : undefined,
-    },
-    {
-      id: "usage",
-      label: "Usage telemetry",
-      state: statusToSignal(state.usageStatus),
-      meta: state.usage
-        ? state.usage.events.length + " events · head " + shortHash(state.usage.chain.head_hash, 8, 4)
-        : undefined,
-    },
-    {
-      id: "dispute",
-      label: "Dispute creation",
-      state: statusToSignal(state.disputeStatus),
-      meta: dispute ? shortHash(dispute.dispute_id, 10, 4) : undefined,
-    },
-    {
-      id: "evidence",
-      label: "Evidence verification",
-      state: evidenceState(state),
-      meta: dispute
-        ? chainValid
-          ? "chain verified · " + formatPercent(dispute.telemetry_completeness, 0) + " complete"
-          : "telemetry chain broken"
-        : undefined,
-    },
-    {
-      id: "verdict",
-      label: "Verdict",
-      state: verdictState(state),
-      meta: dispute
-        ? rec
-          ? "p(win) " + formatPercent(dispute.p_win) + " · " + rec.short
-          : "triage pending"
-        : undefined,
-    },
-  ];
-}
-
-/**
- * The five-stage transaction pipeline, full-width above the checkout: a real
- * EvidenceSignal whose node states derive from live flow state — never a
- * fabricated "done". Horizontal from sm up, vertical on narrow phones.
- */
-function TransactionPipeline({ state }: { state: SandboxFlowState }) {
-  const steps = buildPipeline(state);
-  return (
-    <section aria-label="Transaction pipeline" className="min-w-0">
-      <span className="mb-2 block text-xs font-medium text-muted">Transaction pipeline</span>
-      <div className="hidden sm:block">
-        <EvidenceSignal steps={steps} orientation="horizontal" />
-      </div>
-      <div className="sm:hidden">
-        <EvidenceSignal steps={steps} orientation="vertical" />
-      </div>
-    </section>
-  );
-}
-
 /** The storefront as a real merchant checkout: identity, plan, price, benefits, PayPal. */
-function MerchantCheckout() {
+export function MerchantCheckout({ state }: { state: SandboxFlowState }) {
+  const order = state.checkout;
   return (
     <section aria-label="Plan on sale" className="panel-raised min-w-0 overflow-hidden">
-      <div className="flex items-center gap-3 border-b border-rule px-4 py-3.5">
-        <span className="grid h-9 w-9 shrink-0 place-items-center rounded-card bg-pill-accent font-semibold text-accent">
+      <div className="flex items-center gap-3 border-b border-rule px-4 py-3.5 sm:px-5">
+        <span aria-hidden className="grid h-10 w-10 shrink-0 place-items-center rounded-card bg-pill-accent text-base font-semibold text-accent">
           A
         </span>
         <div className="min-w-0">
           <p className="truncate text-base font-medium text-ink">{DEMO_MERCHANT_NAME}</p>
-          <p className="text-xs text-muted">Merchant</p>
+          <p className="text-xs text-muted">Brand-neutral merchant · test mode</p>
         </div>
         <Badge tone="neutral" size="sm" className="ml-auto shrink-0">
           Secure checkout
         </Badge>
       </div>
-
-      <div className="px-4 py-4">
+      <div className="px-4 py-4 sm:px-5">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <h3 className="title-card">{DEMO_PLAN.name} plan</h3>
-            <p className="mt-0.5 text-sm text-muted">
-              {DEMO_PLAN.product} · {DEMO_PLAN.cadence}
-            </p>
+            <p className="mt-0.5 text-sm text-muted">{DEMO_PLAN.product} · {DEMO_PLAN.cadence}</p>
           </div>
           <div className="shrink-0 text-right">
-            <p className="num text-xl font-semibold text-ink">{formatUsd(DEMO_PLAN.priceUsd)}</p>
+            <p className="num font-mono text-xl font-semibold text-ink">{formatUsd(DEMO_PLAN.priceUsd)}</p>
             <p className="text-xs text-muted">{DEMO_PLAN.cadence}</p>
           </div>
         </div>
-
         <div className="mt-4 rounded-card border border-line bg-surface px-3 py-2.5">
           <p className="label">Included usage</p>
           <p className="mt-0.5 text-sm text-ink">{DEMO_PLAN.features[0]}</p>
         </div>
-
         <ul className="mt-4 space-y-2">
           {DEMO_PLAN.features.slice(1).map((feature) => (
             <li key={feature} className="flex items-start gap-2.5 text-sm text-ink">
@@ -247,7 +122,6 @@ function MerchantCheckout() {
             </li>
           ))}
         </ul>
-
         <div className="mt-4">
           <p className="label">Payment method</p>
           <div className="mt-1.5 flex items-center gap-3 rounded-card border border-line bg-surface px-3 py-2.5">
@@ -264,11 +138,22 @@ function MerchantCheckout() {
             </span>
           </div>
         </div>
-
+        {order ? (
+          <div className="mt-4 rounded-card border border-positive/30 bg-pill-positive/40 px-3 py-2.5">
+            <p className="flex items-center gap-1.5 text-xs font-medium text-positive">
+              <CircleCheck size={12} aria-hidden /> Order captured
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <CopyButton value={order.order_id} label={shortHash(order.order_id, 10, 4)} />
+              <CopyButton value={order.payer_id} label={shortHash(order.payer_id, 8, 4)} />
+              <span className="num ml-auto font-mono text-xs text-ink">{formatUsd(order.amount_usd)}</span>
+            </div>
+          </div>
+        ) : null}
         <dl className="mt-4 flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted">
           <div className="flex gap-1.5">
             <dt>Receipt</dt>
-            <dd className="num text-ink">{DEMO_BUYER_EMAIL}</dd>
+            <dd className="num font-mono text-ink">{DEMO_BUYER_EMAIL}</dd>
           </div>
           <div className="flex gap-1.5">
             <dt>Billed in</dt>
@@ -288,44 +173,41 @@ export type StorefrontProps = {
   onReset: () => void;
 };
 
-/**
- * The buyer side of the demo: a merchant checkout card beside a connected
- * three-step progress rail. The next runnable step carries the only primary
- * button; locked steps wait on their dependency.
- */
-export function Storefront({ state, onCheckout, onUsage, onDispute, onReset }: StorefrontProps) {
-  const reduced = useReducedMotion() ?? false;
+type DemoStep = {
+  key: string;
+  index: number;
+  title: string;
+  subtitle: string;
+  successDetail: string | null;
+  action: string;
+  status: StepStatus;
+  canRun: boolean;
+  run: () => Promise<void>;
+};
 
-  const busy =
-    state.checkoutStatus === "running" ||
-    state.usageStatus === "running" ||
-    state.disputeStatus === "running";
-
+function buildSteps(
+  state: SandboxFlowState,
+  onCheckout: () => Promise<void>,
+  onUsage: () => Promise<void>,
+  onDispute: () => Promise<void>,
+  busy: boolean,
+): DemoStep[] {
   const canCheckout = !busy && state.checkoutStatus !== "success";
   const canUsage = !busy && state.checkoutStatus === "success" && state.usageStatus !== "success";
   const canDispute = !busy && state.usageStatus === "success" && state.disputeStatus !== "success";
-
-  const retry =
-    state.disputeStatus === "error"
-      ? onDispute
-      : state.usageStatus === "error"
-        ? onUsage
-        : state.checkoutStatus === "error"
-          ? onCheckout
-          : null;
-
-  const steps = [
+  const reasonShort = REASON_META.MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED.short;
+  return [
     {
       key: "checkout",
       index: 1,
-      title: "Checkout $99 Pro plan",
-      subtitle: "PayPal Orders v2 · Subscriptions v1 · ToS captured",
+      title: "Checkout",
+      subtitle: "PayPal Orders v2 · ToS captured",
       successDetail: state.checkout
-        ? `order ${shortHash(state.checkout.order_id, 10, 4)} · payer ${shortHash(state.checkout.payer_id, 8, 4)} · ${formatUsd(state.checkout.amount_usd)}`
+        ? "order " + shortHash(state.checkout.order_id, 10, 4) + " · payer " + shortHash(state.checkout.payer_id, 8, 4) + " · " + formatUsd(state.checkout.amount_usd)
         : null,
       action: "Run checkout",
       status: state.checkoutStatus,
-      canRun: canCheckout,
+      canRun: canCheckout || state.checkoutStatus === "error",
       run: onCheckout,
     },
     {
@@ -334,184 +216,108 @@ export function Storefront({ state, onCheckout, onUsage, onDispute, onReset }: S
       title: "Simulate usage",
       subtitle: "15 logins · 42k AI tokens · signed ZIP export",
       successDetail: state.usage
-        ? `${state.usage.events.length} events chained · head ${shortHash(state.usage.chain.head_hash, 8, 4)} · chain ${state.usage.chain.valid ? "valid" : "broken"}`
+        ? state.usage.events.length + " events chained · head " + shortHash(state.usage.chain.head_hash, 8, 4) + " · chain " + (state.usage.chain.valid ? "valid" : "broken")
         : null,
       action: "Run usage",
       status: state.usageStatus,
-      canRun: canUsage,
+      canRun: canUsage || state.usageStatus === "error",
       run: onUsage,
     },
     {
       key: "dispute",
       index: 3,
-      title: "File friendly-fraud dispute",
-      subtitle:
-        REASON_META.MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED.short +
-        " · " +
-        STAGE_META.INQUIRY.short +
-        " · " +
-        CHANNEL_META.INTERNAL.short +
-        " · " +
-        formatUsd(DEMO_PLAN.priceUsd) +
-        " claim",
+      title: "File dispute",
+      subtitle: reasonShort + " · " + STAGE_META.INQUIRY.short + " · " + CHANNEL_META.INTERNAL.short + " · " + formatUsd(DEMO_PLAN.priceUsd) + " claim",
       successDetail: state.dispute
-        ? `${STAGE_META.INQUIRY.short} ${shortHash(state.dispute.dispute.dispute_id, 10, 4)} · p(win) ${formatPercent(state.dispute.dispute.p_win)}`
+        ? STAGE_META.INQUIRY.short + " " + shortHash(state.dispute.dispute.dispute_id, 10, 4) + " · p(win) " + formatPercent(state.dispute.dispute.p_win)
         : null,
       action: "File dispute",
       status: state.disputeStatus,
-      canRun: canDispute,
+      canRun: canDispute || state.disputeStatus === "error",
       run: onDispute,
     },
   ];
+}
 
+/**
+ * The three demo steps as a horizontal progress rail: completed / active /
+ * locked / failed states with animated connectors. Locked steps stay visible
+ * with a tooltip explaining the dependency; failed steps retry inline.
+ */
+export function DemoStepper({ state, onCheckout, onUsage, onDispute }: Pick<StorefrontProps, "state" | "onCheckout" | "onUsage" | "onDispute">) {
+  const reduced = useReducedMotion() ?? false;
+  const busy = state.checkoutStatus === "running" || state.usageStatus === "running" || state.disputeStatus === "running";
+  const steps = buildSteps(state, onCheckout, onUsage, onDispute, busy);
   const nextKey = steps.find((step) => step.status !== "success" && step.canRun)?.key ?? null;
+  return (
+    <ol aria-label="Demo steps" className="flex min-w-0 flex-col sm:flex-row sm:items-stretch">
+      {steps.map((step, i) => {
+        const rail = railState(step.status, step.canRun);
+        const badge = STEP_BADGE[step.status];
+        const isNext = step.key === nextKey;
+        const isRunning = step.status === "running";
+        const isFailed = step.status === "error";
+        const isLocked = rail === "locked";
+        const detail = rail === "completed" && step.successDetail ? step.successDetail : step.subtitle;
+        const label = step.action + " (step " + step.index + " of 3: " + step.title + ", " + (isLocked ? "locked" : badge.label) + ")";
+        const prevDone = i > 0 ? steps[i - 1]?.status === "success" : false;
+        const button = (
+          <Button size="sm" variant={isNext && !isFailed ? "primary" : "secondary"} loading={isRunning} disabled={!step.canRun} icon={isFailed ? <RefreshCw size={12} aria-hidden /> : undefined} aria-label={label} onClick={() => { void step.run(); }}>
+            {isFailed ? "Retry" : step.action}
+          </Button>
+        );
+        return (
+          <Fragment key={step.key}>
+            {i > 0 ? <RailConnector filled={prevDone} reduced={reduced} /> : null}
+            <li aria-current={isNext ? "step" : undefined} className={cn("panel min-w-0 flex-1 px-4 py-3.5", isNext && "sig-edge", isLocked && "opacity-70")}>
+              <div className="flex items-center gap-2.5">
+                <StepNode rail={rail} index={i} reduced={reduced} />
+                <p className={cn("min-w-0 flex-1 truncate text-base font-medium", isLocked ? "text-muted" : "text-ink")}>
+                  <span className="num mr-1.5 font-mono text-xs text-muted">{step.index}</span>
+                  {step.title}
+                </p>
+                <Badge tone={isLocked ? "neutral" : badge.tone} size="sm" title={isLocked ? "Complete the previous step first" : undefined}>
+                  {isLocked ? "Locked" : badge.label}
+                </Badge>
+              </div>
+              <p className={cn("mt-2 break-words font-mono text-xs", rail === "completed" ? "text-positive" : "text-muted")}>{detail}</p>
+              {isRunning ? (
+                <p className="mt-2 flex items-center gap-1.5 text-xs text-warning">
+                  <span aria-hidden className="live-dot h-1.5 w-1.5 rounded-full bg-warning" />
+                  Executing — state settles when the API returns
+                </p>
+              ) : null}
+              <div className="mt-3">{isLocked ? (<Tooltip label="Complete the previous step first"><span className="inline-flex">{button}</span></Tooltip>) : (button)}</div>
+            </li>
+          </Fragment>
+        );
+      })}
+    </ol>
+  );
+}
 
+/**
+ * The buyer side of the demo: checkout card plus step rail.
+ * Kept for compatibility — the workspace composes MerchantCheckout and
+ * DemoStepper directly to split them into left/right columns.
+ */
+export function Storefront({ state, onCheckout, onUsage, onDispute, onReset }: StorefrontProps) {
+  const retry = state.disputeStatus === "error" ? onDispute : state.usageStatus === "error" ? onUsage : state.checkoutStatus === "error" ? onCheckout : null;
   return (
     <Panel>
-      <PanelHeader
-        title="Buyer storefront"
-        description="A real merchant checkout on the left, the sequential demo flow on the right."
-        actions={
-          <Badge tone="neutral" size="sm">
-            Test buyer
-          </Badge>
-        }
-      />
-      <div className="row-rule px-4 py-3.5">
-        <TransactionPipeline state={state} />
-      </div>
-
       <PanelBody className="grid gap-5 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-        <MerchantCheckout />
-
+        <MerchantCheckout state={state} />
         <section aria-label="Demo flow" className="min-w-0">
-          <h3 className="title-card">Demo flow</h3>
-          <p className="mt-1 text-sm text-muted">
-            Sequential — each step unlocks the next, each button hits the real API.
-          </p>
-
-          <ol role="list" className="mt-3">
-            {steps.map((step, index) => {
-              const rail = railState(step.status, step.canRun);
-              const badge = STEP_BADGE[step.status];
-              const isNext = step.key === nextKey;
-              const isRunning = step.status === "running";
-              const isLast = index === steps.length - 1;
-              const detail =
-                rail === "completed" && step.successDetail ? step.successDetail : step.subtitle;
-
-              const stepButton = (
-                <Button
-                  size="sm"
-                  variant={isNext ? "primary" : "secondary"}
-                  loading={isRunning}
-                  disabled={!step.canRun}
-                  aria-label={
-                    step.action +
-                    " (step " +
-                    step.index +
-                    " of 3: " +
-                    step.title +
-                    ", " +
-                    (rail === "locked" ? "locked" : badge.label) +
-                    ")"
-                  }
-                  onClick={() => {
-                    void step.run();
-                  }}
-                >
-                  {step.action}
-                </Button>
-              );
-
-              return (
-                <li key={step.key} className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3">
-                  <div className="flex flex-col items-center">
-                    <StepIndicator rail={rail} index={index} running={isRunning} reduced={reduced} />
-                    {!isLast ? <Connector filled={step.status === "success"} reduced={reduced} /> : null}
-                  </div>
-                  <div className="min-w-0 pb-4">
-                    <div
-                      className={cn(
-                        "flex flex-wrap items-center justify-between gap-x-3 gap-y-1",
-                        isNext && "sig inline-flex",
-                      )}
-                    >
-                      <p
-                        className={cn(
-                          "text-base font-medium",
-                          rail === "locked" ? "text-muted" : "text-ink",
-                        )}
-                      >
-                        {step.title}
-                      </p>
-                      <Badge
-                        tone={rail === "locked" ? "neutral" : badge.tone}
-                        size="sm"
-                        title={rail === "locked" ? "Unlocks when the previous step completes" : undefined}
-                      >
-                        {rail === "locked" ? "Locked" : badge.label}
-                      </Badge>
-                    </div>
-
-                    <p className={cn("mt-0.5 break-words text-sm", rail === "completed" ? "text-positive" : "text-muted")}>
-                      {detail}
-                    </p>
-
-                    {isRunning ? (
-                      <p className="mt-1 flex items-center gap-1.5 text-xs text-warning">
-                        <span aria-hidden className="live-dot h-1.5 w-1.5 rounded-full bg-warning" />
-                        Executing — state settles when the API returns
-                      </p>
-                    ) : null}
-
-                                        <div className="mt-2.5">
-                      {isNext ? (
-                        <Magnetic strength={6} className="inline-flex">
-                          {stepButton}
-                        </Magnetic>
-                      ) : (
-                        stepButton
-                      )}
-                    </div>
-                  </div>
-                </li>
-              );
-            })}
-          </ol>
-
+          <DemoStepper state={state} onCheckout={onCheckout} onUsage={onUsage} onDispute={onDispute} />
           {state.error ? (
-            <ErrorBanner
-              className="mt-1"
-              error={state.error}
-              context="The step stopped before it changed server state. Fix the connection and retry."
-              onRetry={
-                retry
-                  ? () => {
-                      void retry();
-                    }
-                  : undefined
-              }
-            />
+            <ErrorBanner className="mt-3" error={state.error} context="The step stopped before it changed server state. Fix the connection and retry." onRetry={retry ? () => { void retry(); } : undefined} />
           ) : null}
         </section>
       </PanelBody>
       <PanelFooter className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-sm text-muted">
-          Reset clears the local flow and reloads merchant state from the API.
-        </p>
-        <Button
-          variant="ghost"
-          size="sm"
-          icon={<RotateCcw size={12} aria-hidden />}
-          onClick={onReset}
-        >
-          Reset
-        </Button>
+        <p className="text-sm text-muted">Reset clears the local flow and reloads merchant state from the API.</p>
+        <Button variant="ghost" size="sm" icon={<RotateCcw size={12} aria-hidden />} onClick={onReset}>Reset</Button>
       </PanelFooter>
-      <div className="row-rule">
-        <StepLog logs={state.logs} />
-      </div>
     </Panel>
   );
 }

@@ -313,19 +313,36 @@ function LatencyReadout({ ms }: { ms: number | null }) {
       </p>
     );
   }
-  const tone: Tone = ms < 200 ? "positive" : ms < 600 ? "accent" : ms < 1000 ? "warning" : "negative";
+  const band =
+    ms < 200
+      ? { label: "Excellent", tone: "positive" as Tone }
+      : ms < 600
+        ? { label: "Good", tone: "positive" as Tone }
+        : ms < 1000
+          ? { label: "Elevated", tone: "warning" as Tone }
+          : { label: "Slow", tone: "negative" as Tone };
   return (
     <div>
-      <div className="flex items-baseline justify-between gap-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1.5">
         <span className="text-xs text-muted">Round-trip latency</span>
-        <span className="num text-sm font-semibold text-ink">{formatLatency(ms)}</span>
+        <span className="flex items-center gap-2">
+          <Badge tone={band.tone} size="sm">
+            {band.label}
+          </Badge>
+          <span className="num font-mono text-sm font-semibold text-ink">{formatLatency(ms)}</span>
+        </span>
       </div>
       <ProgressBar
         value={clamp(ms / 1000, 0, 1)}
-        tone={tone}
-        label={"Check latency " + formatLatency(ms)}
+        tone={band.tone}
+        label={"Check latency " + formatLatency(ms) + ", rated " + band.label}
         className="mt-2"
       />
+      <div className="num mt-1.5 flex items-baseline justify-between text-2xs text-muted" aria-hidden>
+        <span>0ms</span>
+        <span>500ms</span>
+        <span>1000ms+</span>
+      </div>
       <p className="mt-1.5 text-xs text-muted">
         Single client-timed measurement. No history is collected, so nothing is averaged or
         extrapolated.
@@ -450,6 +467,7 @@ export function SettingsPanel() {
   return (
     <div className="mx-auto w-full max-w-[1080px]">
       <PageHeader
+        className="lg:flex-wrap lg:gap-y-5"
         title="Connection"
         description="How this deployment reaches PayPal, what the demo key can do, and what changes when the gateway is switched to live."
         meta={

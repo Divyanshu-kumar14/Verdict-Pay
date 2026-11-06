@@ -61,7 +61,7 @@ function Fact({
     <div className="min-w-0">
       <dt className="label">{label}</dt>
       <dd
-        className={cn("num mt-1 truncate text-sm text-ink", tone ? TONE_TEXT[tone] : undefined)}
+        className={cn("num mt-1 truncate font-mono text-sm text-ink", tone ? TONE_TEXT[tone] : undefined)}
         title={title}
       >
         {value}
@@ -97,7 +97,7 @@ function CaseOverview({ detail, now }: { detail: DisputeDetail; now: number }) {
 
       <div className="row-rule pt-4">
         <p className="label">Amount in dispute</p>
-        <p className="value mt-1 text-xl text-ink">{formatUsd(detail.amount_usd)}</p>
+        <p className="value mt-1 font-mono text-xl text-ink">{formatUsd(detail.amount_usd)}</p>
       </div>
 
       <dl className="grid grid-cols-2 gap-x-6 gap-y-4">
@@ -108,10 +108,10 @@ function CaseOverview({ detail, now }: { detail: DisputeDetail; now: number }) {
         <Fact label="EV to offer" value={formatUsd(detail.ev_offer_usd)} />
         <div className="min-w-0">
           <dt className="label">Deadline</dt>
-          <dd className={cn("num mt-1 truncate text-sm", TONE_TEXT[deadlineTone])}>
+          <dd className={cn("num mt-1 truncate font-mono text-sm", TONE_TEXT[deadlineTone])}>
             {formatDueIn(detail.seller_response_due_date, now)}
           </dd>
-          <dd className="mt-0.5 truncate text-xs text-muted">
+          <dd className="num mt-0.5 truncate font-mono text-xs text-muted">
             {formatAbsolute(detail.seller_response_due_date)}
           </dd>
         </div>
@@ -157,7 +157,7 @@ export function DisputeDrawer({
     <Drawer
       open={open}
       onClose={onClose}
-      title={shortHash(disputeId || "case", 12, 6)}
+      title={<span className="font-mono">{shortHash(disputeId || "case", 12, 6)}</span>}
       description="Live case read from the triage queue."
       footer={
         <div className="flex items-center justify-end gap-2">

@@ -12,11 +12,13 @@ import {
   PanelLeftOpen,
   Play,
   Scale,
+  Search,
   Settings,
   type LucideIcon,
 } from "lucide-react";
 
 import { LogoMark } from "@/components/LogoMark";
+import { CommandPalette } from "@/components/chrome/CommandPalette";
 import { Badge } from "@/components/ui/Badge";
 import { api, API_BASE_URL } from "@/lib/api";
 import { cn } from "@/lib/cn";
@@ -39,7 +41,7 @@ type NavItem = {
 
 /* Five destinations, so the rail needs no words when collapsed. */
 const NAV: NavItem[] = [
-  { href: "/", label: "Command centre", short: "Home", icon: Play, exact: true },
+  { href: "/demo", label: "Live demo", short: "Demo", icon: Play, exact: true },
   { href: "/disputes", label: "Disputes", short: "Disputes", icon: Scale },
   { href: "/timeline", label: "SLA board", short: "SLA", icon: CalendarClock },
   { href: "/analytics", label: "Analytics", short: "Analytics", icon: BarChart3 },
@@ -55,13 +57,12 @@ function isActive(pathname: string, item: NavItem): boolean {
 }
 
 function sectionName(pathname: string): string {
-  if (pathname === "/") return "Command centre";
   if (pathname.startsWith("/disputes/")) return "Case";
   if (pathname.startsWith("/disputes")) return "Disputes";
   if (pathname.startsWith("/timeline")) return "SLA board";
   if (pathname.startsWith("/analytics")) return "Analytics";
   if (pathname.startsWith("/settings")) return "Connection";
-  return "Command centre";
+  return "Dashboard";
 }
 
 function connectionMeta(health: PolledQuery<HealthResponse>): {
@@ -72,21 +73,30 @@ function connectionMeta(health: PolledQuery<HealthResponse>): {
 } {
   if (health.data?.status === "ok") {
     return {
-      label: "API live",
+      label: "Connected",
       tone: "positive",
       live: true,
       title: API_BASE_URL + " · v" + health.data.version + " · " + health.data.database,
     };
   }
   if (health.error) {
+    // Still holding the last good response? Then we're reconnecting, not offline.
+    if (health.data !== null) {
+      return {
+        label: "Reconnecting",
+        tone: "warning",
+        live: false,
+        title: health.error.code + ": " + health.error.message + " — showing last known data",
+      };
+    }
     return {
-      label: "API offline",
+      label: "Offline",
       tone: "negative",
       live: false,
       title: health.error.code + ": " + health.error.message,
     };
   }
-  return { label: "Connecting", tone: "warning", live: false, title: "Waiting for " + API_BASE_URL };
+  return { label: "Connecting", tone: "accent", live: false, title: "Waiting for " + API_BASE_URL };
 }
 
 function gatewayMeta(health: PolledQuery<HealthResponse>): {
@@ -108,12 +118,27 @@ function gatewayMeta(health: PolledQuery<HealthResponse>): {
 /** Seconds since the last successful refresh, rendered as a live "Updated …". */
 function useLastRefresh(updatedAt: number | null): string {
   const now = useNow(10000);
-  if (updatedAt === null) return "Awaiting first refresh";
+  if (updatedAt === null) return "No live data yet";
   if (now === null) return "Refreshed";
   const seconds = Math.max(0, Math.round((now - updatedAt) / 1000));
   if (seconds < 5) return "Refreshed just now";
   if (seconds < 60) return "Refreshed " + seconds + "s ago";
   return "Refreshed " + Math.round(seconds / 60) + "m ago";
+}
+
+/** True once a request has been in flight (with no data yet) for >3s — the
+ *  server is cold-starting, not hung. Drives the "waking the server" notice. */
+function useWaking(loading: boolean): boolean {
+  const [waking, setWaking] = useState(false);
+  useEffect(() => {
+    if (!loading) {
+      setWaking(false);
+      return;
+    }
+    const timer = setTimeout(() => setWaking(true), 3000);
+    return () => clearTimeout(timer);
+  }, [loading]);
+  return waking;
 }
 
 function Rail({
@@ -255,6 +280,7 @@ function TopBar({
   const connection = connectionMeta(health);
   const gateway = gatewayMeta(health);
   const lastRefresh = useLastRefresh(health.updatedAt);
+  const waking = useWaking(health.loading);
 
   return (
     <header className="sticky top-0 z-sticky border-b border-line bg-ground/80 backdrop-blur-sm">
@@ -274,12 +300,28 @@ function TopBar({
         </div>
 
         <div className="flex shrink-0 items-center gap-2">
-          <span
-            className="num hidden items-center gap-1.5 text-xs text-muted md:flex"
-            title="Time since the last successful API refresh"
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent("vp-open-palette"))}
+            className="hidden h-8 items-center gap-2 rounded-md border border-line bg-surface px-2.5 text-xs text-muted transition-colors duration-120 hover:text-ink lg:flex"
+            aria-label="Open command palette"
           >
-            {lastRefresh}
-          </span>
+            <Search size={13} aria-hidden />
+            <span>Search</span>
+            <kbd className="num rounded border border-line bg-raised px-1 text-2xs">⌘K</kbd>
+          </button>
+          {waking ? (
+            <span className="num hidden items-center gap-1.5 text-xs text-warning md:flex" role="status">
+              Waking the server — first load can take ~30s
+            </span>
+          ) : (
+            <span
+              className="num hidden items-center gap-1.5 text-xs text-muted md:flex"
+              title="Time since the last successful API refresh"
+            >
+              {lastRefresh}
+            </span>
+          )}
           <Badge tone={connection.tone} dot title={connection.title}>
             {connection.label}
           </Badge>
@@ -396,6 +438,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </main>
       </div>
       <PhoneBar pathname={pathname} cases={cases} />
+      <CommandPalette />
       <span className="sr-only" aria-live="polite">
         {health.error ? "API error " + health.error.code : ""}
       </span>
