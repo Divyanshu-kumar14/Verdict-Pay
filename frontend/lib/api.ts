@@ -11,6 +11,7 @@ import { z } from "zod";
 
 import {
   ActionResponseSchema,
+  AnalyzeResponseSchema,
   CheckoutResponseSchema,
   CustomerTimelineSchema,
   DisputeDetailSchema,
@@ -23,6 +24,8 @@ import {
   UsageResponseSchema,
   type ActionRequestInput,
   type ActionResponse,
+  type AnalyzeRequestInput,
+  type AnalyzeResponse,
   type CheckoutRequestInput,
   type CheckoutResponse,
   type CustomerTimeline,
@@ -317,6 +320,23 @@ export const api = {
   },
 
   /**
+   * POST /disputes/{id}/ai/analyze — on-demand AI explanation and draft narrative.
+   * Collapsed by default in the UI; never polled. claim_text is optional.
+   */
+  analyzeDispute(
+    disputeId: string,
+    body?: AnalyzeRequestInput,
+    signal?: AbortSignal,
+  ): Promise<AnalyzeResponse> {
+    return request(`/api/v1/disputes/${encodeURIComponent(disputeId)}/ai/analyze`, {
+      method: "POST",
+      body: body ?? {},
+      schema: AnalyzeResponseSchema,
+      signal,
+    });
+  },
+
+  /**
    * POST /disputes/{id}/actions/{action} — the HATEOAS action rail.
    * The URL segment is the uppercase DisputeAction enum value (confirmed contract).
    */
@@ -350,6 +370,18 @@ export const api = {
     });
   },
 } as const;
+
+/**
+ * POST /disputes/{disputeId}/ai/analyze — one-shot AI analysis call.
+ * Mirrors api.analyzeDispute for call sites that prefer a bare function.
+ */
+export async function analyzeDispute(
+  disputeId: string,
+  body?: AnalyzeRequestInput,
+  signal?: AbortSignal,
+): Promise<AnalyzeResponse> {
+  return api.analyzeDispute(disputeId, body, signal);
+}
 
 /** Endpoint map rendered on /settings so the connection surface is honest. */
 export const API_ENDPOINTS = [

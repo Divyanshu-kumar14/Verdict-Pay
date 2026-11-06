@@ -241,6 +241,7 @@ async def simulate_dispute(
         stage=payload.stage,
         channel=payload.channel,
         amount=amount,
+        buyer_claim_text=payload.claim_text,
     )
     return schemas.DisputeSimulationResponse(
         dispute=to_dispute_summary(case),

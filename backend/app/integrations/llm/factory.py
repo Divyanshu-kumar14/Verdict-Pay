@@ -13,6 +13,10 @@ def build_narrative_provider(settings: Settings) -> NarrativeProvider:
         from app.integrations.llm.openai_provider import OpenAINarrativeProvider
 
         return OpenAINarrativeProvider(settings)
+    if settings.llm_mode == "gemini":
+        from app.integrations.llm.gemini_provider import GeminiNarrativeProvider
+
+        return GeminiNarrativeProvider(settings)
     from app.integrations.llm.template_provider import TemplateNarrativeProvider
 
     return TemplateNarrativeProvider()

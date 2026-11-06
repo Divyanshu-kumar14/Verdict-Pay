@@ -16,7 +16,16 @@ from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoin
 from starlette.responses import Response
 
 from app import __version__
-from app.api.routers import disputes, evidence, health, reporting, sandbox, telemetry, webhooks
+from app.api.routers import (
+    ai,
+    disputes,
+    evidence,
+    health,
+    reporting,
+    sandbox,
+    telemetry,
+    webhooks,
+)
 from app.config import Settings, get_settings
 from app.db.session import Database
 from app.errors import VerdictPayError
@@ -250,7 +259,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     prefix = settings.api_v1_prefix
-    for module in (health, telemetry, sandbox, disputes, evidence, webhooks, reporting):
+    for module in (health, telemetry, sandbox, disputes, evidence, webhooks, reporting, ai):
         app.include_router(module.router, prefix=prefix)
 
     @app.exception_handler(VerdictPayError)

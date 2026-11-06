@@ -12,6 +12,7 @@ class TelemetryEventType(StrEnum):
     SESSION_AUTH = "SESSION_AUTH"
     ASSET_DELIVERED = "ASSET_DELIVERED"
     USAGE_METERED = "USAGE_METERED"
+    AI_GENERATION = "AI_GENERATION"
 
 
 class DisputeStage(StrEnum):

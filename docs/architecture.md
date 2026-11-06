@@ -17,7 +17,7 @@ the default database, and the narrative layer has a template implementation.
 | Judge sandbox + command center | [frontend/app](../frontend/app) | Three-button flow, live case room, triage queue, SLA board. Every response is zod-parsed in [frontend/lib/api.ts](../frontend/lib/api.ts). |
 | HTTP API | [backend/app/api](../backend/app/api) | Routers mounted under `/api/v1`: health, telemetry, sandbox, disputes, evidence, webhooks, reporting. |
 | Domain core | [backend/app/domain](../backend/app/domain) | Pure functions: canonical JSON + hash chain, win probability, EV, triage policy, HATEOAS state machine, fact pack, narrative, ReportLab PDF, RFC 2387 multipart. |
-| Integrations | [backend/app/integrations](../backend/app/integrations) | PayPal gateway (simulator / live), narrative provider (template / optional OpenAI), optional Elasticsearch mirror. |
+| Integrations | [backend/app/integrations](../backend/app/integrations) | PayPal gateway (simulator / live), narrative provider (template / optional OpenAI), dispute AI layer (Gemini classify + grounded draft, deterministic fallback), optional Elasticsearch mirror. |
 | Orchestration | [backend/app/services](../backend/app/services) | `DisputeService` (webhook → case → containment → triage → action) and `EvidenceService` (dossier build/cache/upload). |
 | Persistence | [backend/app/db/models.py](../backend/app/db/models.py) | Six portable SQL tables; append-only telemetry ledger with unique stream constraints. |
 | TypeScript SDK | [packages/verdictpay-sdk](../packages/verdictpay-sdk) | Batched, HMAC-signed pre-dispute telemetry keyed to PayPal `payer_id` / `order_id`. |
@@ -187,6 +187,12 @@ pipeline in [backend/app/services/evidence_service.py](../backend/app/services/e
 2. Compose the narrative (`TemplateNarrativeProvider` by default; an optional OpenAI
    provider receives only the locked facts and returns text) and validate that it does not
    introduce new facts ([backend/app/domain/evidence/narrative.py](../backend/app/domain/evidence/narrative.py)).
+   The dispute AI layer (`POST /api/v1/disputes/{id}/ai/analyze`, idempotent
+   `GET /api/v1/disputes/{id}/ai`) follows the same fence: Gemini (`GEMINI_MODEL`,
+   default `gemini-2.5-flash`) only classifies the claim and drafts from the locked fact
+   pack; a frozen category-to-reason map, a grounding validator and a deterministic keyword
+   + template fallback (`degraded=true`) keep every number on the rules side
+   ([backend/app/integrations/ai](../backend/app/integrations/ai)).
 3. Render a deterministic ReportLab PDF
    ([backend/app/domain/evidence/pdf.py](../backend/app/domain/evidence/pdf.py)) and cache
    it under `ARTIFACTS_DIR`.
@@ -197,7 +203,9 @@ pipeline in [backend/app/services/evidence_service.py](../backend/app/services/e
    idempotency key. A replay returns the original action instead of uploading twice.
 
 No LLM output can change an amount, a probability, a hash or a timestamp: the money path is
-pure and deterministic.
+pure and deterministic. The Gemini layer is bound by the same rule — it classifies and drafts;
+EV, p(win), the recommendation and the verdict are always recomputed by the deterministic engine —
+and every generation is recorded as an append-only `AI_GENERATION` chain event as provenance.
 
 ---
 
@@ -304,7 +312,9 @@ flowchart LR
   commented block because the repository has no static-site generator.
 * **Optional adapters:** Elastic is selected only when `ELASTIC_URL` is set, and the
   narrative provider only switches to OpenAI when `LLM_MODE=openai` and a key is present.
-  The default path is SQLite + template narrative.
+  The dispute AI layer only calls Gemini when `AI_ENABLED=true` and `GEMINI_API_KEY` is
+  set (model `GEMINI_MODEL`, timeout `AI_TIMEOUT_MS`, retries `AI_MAX_RETRIES`);
+  otherwise it serves the deterministic fallback. The default path is SQLite + template narrative.
 
 ---
 

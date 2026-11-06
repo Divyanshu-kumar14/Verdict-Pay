@@ -208,6 +208,7 @@ class CaseFacts(ApiModel):
     usage_units: int = 0
     usage_events: int = 0
     login_count: int = 0
+    buyer_claim_text: str | None = Field(default=None, max_length=4000)
     response_due_date: datetime | None = None
     ce3_matches: list[dict[str, Any]] = Field(default_factory=list)
     ce3_window_days: int = 0
@@ -324,6 +325,7 @@ class DisputeSimulationRequest(ApiModel):
     stage: DisputeStage = DisputeStage.INQUIRY
     channel: DisputeChannel = DisputeChannel.INTERNAL
     amount_usd: Decimal | None = None
+    claim_text: str | None = Field(default=None, max_length=4000)
 
 
 class DisputeSimulationResponse(ApiModel):

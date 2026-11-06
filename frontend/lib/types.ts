@@ -428,3 +428,67 @@ export const ReportingSummarySchema = z.object({
   generated_at: isoDateTimeSchema,
 });
 export type ReportingSummary = z.infer<typeof ReportingSummarySchema>;
+
+/* -------------------------------------------------------------- ai analysis */
+
+export const AI_CLASSIFICATION_CATEGORIES = [
+  "not_as_described",
+  "unauthorized",
+  "not_received",
+  "duplicate",
+  "other",
+] as const;
+export type AiClassificationCategory = (typeof AI_CLASSIFICATION_CATEGORIES)[number];
+export const AiClassificationCategorySchema = z.enum(AI_CLASSIFICATION_CATEGORIES);
+
+export const AnalyzeClassificationSchema = z.object({
+  category: AiClassificationCategorySchema,
+  confidence: z.number(),
+  rationale: z.string(),
+  reason_code: z.string(),
+  reason_multiplier: z.number(),
+});
+export type AnalyzeClassification = z.infer<typeof AnalyzeClassificationSchema>;
+
+export const AnalyzeNarrativeSchema = z.object({
+  title: z.string(),
+  narrative: z.string(),
+  grounded: z.boolean(),
+  model: z.string(),
+  warnings: z.array(z.string()).default([]),
+});
+export type AnalyzeNarrative = z.infer<typeof AnalyzeNarrativeSchema>;
+
+export const AnalyzeExplanationSchema = z.object({
+  summary: z.string(),
+  bullets: z.array(z.string()).default([]),
+});
+export type AnalyzeExplanation = z.infer<typeof AnalyzeExplanationSchema>;
+
+export const AnalyzeProvenanceSchema = z.object({
+  recorded: z.boolean(),
+  event_id: z.string().nullable(),
+  chain_head: z.string().nullable(),
+  sequence: z.number().int().nullable(),
+  note: z.string(),
+});
+export type AnalyzeProvenance = z.infer<typeof AnalyzeProvenanceSchema>;
+
+export const AnalyzeResponseSchema = z.object({
+  dispute_id: z.string(),
+  prompt_version: z.string(),
+  generated_at: isoDateTimeSchema,
+  classification: AnalyzeClassificationSchema,
+  win_probability: WinProbabilitySchema,
+  expected_value: EvBreakdownSchema,
+  narrative: AnalyzeNarrativeSchema,
+  explanation: AnalyzeExplanationSchema,
+  provenance: AnalyzeProvenanceSchema,
+  degraded: z.boolean(),
+  degraded_reason: z.string().nullable(),
+});
+export type AnalyzeResponse = z.infer<typeof AnalyzeResponseSchema>;
+
+export type AnalyzeRequestInput = {
+  claim_text?: string | null;
+};

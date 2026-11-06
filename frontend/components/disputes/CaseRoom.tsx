@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 
 import { ActionRail, ACTION_STATUS_META } from "@/components/disputes/ActionRail";
+import { AiAnalysisPanel } from "@/components/disputes/AiAnalysisPanel";
 import { CaseFactsPanel } from "@/components/disputes/CaseFactsPanel";
 import { DossierPanel } from "@/components/disputes/DossierPanel";
 import { EvWaterfall } from "@/components/disputes/EvWaterfall";
@@ -481,6 +482,7 @@ export function CaseRoom({ caseId }: { caseId: string }) {
         <div className="min-w-0 space-y-6">
           <VerdictPanel detail={detail} />
           <EvWaterfall detail={detail} />
+          <AiAnalysisPanel disputeId={detail.dispute_id} />
           <CaseFactsPanel facts={detail.facts} />
           <ActionAuditPanel detail={detail} />
         </div>

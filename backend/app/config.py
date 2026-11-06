@@ -17,7 +17,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 AppEnv = Literal["local", "test", "production"]
 PayPalMode = Literal["simulator", "live"]
-LlmMode = Literal["template", "openai"]
+LlmMode = Literal["template", "openai", "gemini"]
 
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
 _REPO_DIR = _BACKEND_DIR.parent
@@ -73,6 +73,16 @@ class Settings(BaseSettings):
     #   LLM_BASE_URL=http://localhost:11434/v1  LLM_MODEL=llama3.2
     llm_base_url: str = ""
     llm_model: str = ""
+
+    # --- Gemini AI layer ---------------------------------------------------
+    # "AI explains and drafts; rules decide."  The Gemini model classifies the
+    # buyer's claim text and drafts the evidence narrative; it NEVER sets a win
+    # probability, EV figure or recommended action — those stay deterministic.
+    gemini_api_key: str = ""
+    gemini_model: str = "gemini-2.5-flash"
+    ai_enabled: bool = True
+    ai_timeout_ms: int = 12000
+    ai_max_retries: int = 1
 
     # --- sponsor adapters (optional) --------------------------------------
     elastic_url: str = ""
@@ -150,6 +160,7 @@ class Settings(BaseSettings):
             "paypal_mode": self.paypal_mode,
             "database": self.database_url.split("://", 1)[0],
             "llm_mode": self.llm_mode,
+            "ai_enabled": self.ai_enabled,
             "demo_mode": self.demo_mode,
         }
 

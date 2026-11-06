@@ -470,6 +470,7 @@ class DisputeService:
         stage: DisputeStage,
         channel: DisputeChannel,
         amount: Decimal,
+        buyer_claim_text: str | None = None,
     ) -> DisputeCase:
         """Open a simulator dispute, then drive it through the real webhook path."""
         _record, case = await self.open_simulated_dispute_with_event(
@@ -479,6 +480,7 @@ class DisputeService:
             stage=stage,
             channel=channel,
             amount=amount,
+            buyer_claim_text=buyer_claim_text,
         )
         return case
 
@@ -491,6 +493,7 @@ class DisputeService:
         stage: DisputeStage,
         channel: DisputeChannel,
         amount: Decimal,
+        buyer_claim_text: str | None = None,
     ) -> tuple[WebhookEventRecord, DisputeCase]:
         """Same simulated flow as open_simulated_dispute, plus the webhook record."""
         dispute = await self.gateway.create_sandbox_dispute(
@@ -506,6 +509,13 @@ class DisputeService:
         record, case = await self.ingest_webhook(headers=headers, raw_body=raw_body)
         if case is None:
             raise ValidationFailedError("Sandbox dispute did not produce a case.")
+        claim = (buyer_claim_text or "").strip()[:4000]
+        if claim:
+            # Persisted alongside the deterministic snapshot (top level, like
+            # _containment); _apply_triage preserves it and _facts_from_snapshot
+            # restores it onto CaseFacts.buyer_claim_text.
+            case.facts_snapshot = {**(case.facts_snapshot or {}), "buyer_claim_text": claim}
+            await self.session.commit()
         return record, case
 
     # ------------------------------------------------------------------ reads
@@ -914,6 +924,9 @@ class DisputeService:
         channel = DisputeChannel(case.dispute_channel)
         links = dict(case.paypal_links or {})
         amount = quantize_money(as_decimal(case.amount_usd))
+        prior_claim = (case.facts_snapshot or {}).get("buyer_claim_text")
+        if prior_claim and not facts.buyer_claim_text:
+            facts = facts.model_copy(update={"buyer_claim_text": prior_claim})
         inputs = EvInputs(
             amount_usd=amount,
             p_win=win.score,

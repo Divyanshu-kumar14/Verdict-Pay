@@ -16,7 +16,7 @@ Runs locally: no PayPal account, no model key, no cloud.</p>
 
 <p>
   <img src="https://img.shields.io/badge/PayPal-Disputes%20v1%20%C2%B7%20Orders%20v2%20%C2%B7%20Subscriptions%20v1-222224?style=flat-square&labelColor=131217" alt="PayPal APIs: Disputes v1, Orders v2, Subscriptions v1" />
-  <img src="https://img.shields.io/badge/AI-OpenAI--compatible%20%2B%20local%20Ollama-222224?style=flat-square&labelColor=131217" alt="AI: OpenAI-compatible or local Ollama" />
+  <img src="https://img.shields.io/badge/AI-Gemini%20classify%20%2B%20draft%20%C2%B7%20deterministic%20EV-222224?style=flat-square&labelColor=131217" alt="AI: Gemini classifies and drafts; deterministic engine decides EV" />
   <img src="https://img.shields.io/badge/Python-3.12%2B-222224?style=flat-square&labelColor=131217" alt="Python 3.12 or newer" />
   <img src="https://img.shields.io/badge/Next.js-15-222224?style=flat-square&labelColor=131217" alt="Next.js 15" />
   <img src="https://img.shields.io/badge/tests-520%20passing-44A282?style=flat-square&labelColor=131217" alt="520 tests passing" />
@@ -184,20 +184,26 @@ sequenceDiagram
 
 ## The AI air-gap
 
-A locked fact pack is built from the ledger and Reporting v1 transactions, serialized and frozen. Only then does the narrative provider run: one OpenAI-compatible `/chat/completions` call at temperature 0, against a hosted model or a local Ollama endpoint through `LLM_BASE_URL` and `LLM_MODEL`. The validator scans the output token by token and rejects any number or date absent from the facts, banned phrases and non-ASCII text; any failure, including no key at all, falls back to the deterministic template.
+A locked fact pack is built from the ledger and Reporting v1 transactions, serialized and frozen. Only then does a model run — and the model only classifies the buyer's claim and drafts the evidence narrative. Win probability, expected value, the recommendation and the verdict stay in pure deterministic functions; no model output can change an amount, a probability, a hash, a date or a name.
+
+Two model paths sit behind that fence. The dossier narrative provider is one OpenAI-compatible `/chat/completions` call at temperature 0, against a hosted model or a local Ollama endpoint through `LLM_BASE_URL` and `LLM_MODEL`. The dispute AI layer calls Gemini (`GEMINI_MODEL`, default `gemini-2.5-flash`) to classify the claim into one of five categories and draft a grounded evidence narrative from the locked fact pack. Both outputs are re-validated token by token: any number, name or date absent from the facts fails (including an empty draft), banned phrases and non-ASCII text fail, and a low-confidence classification is demoted to the conservative `other` bucket by a frozen category-to-reason-code map the model cannot override.
+
+Any failure — no `GEMINI_API_KEY`, `AI_ENABLED=false`, a timeout (`AI_TIMEOUT_MS`, default 12000 ms, `AI_MAX_RETRIES`, default 1 retry), or a failed validation — degrades deterministically: the endpoint still returns a correct analysis built from the keyword classifier and the template narrative, marked `degraded=true`. Every generation, degraded or not, is recorded as an append-only `AI_GENERATION` telemetry event in the SHA-256 chain as provenance.
 
 ```bash
 # free, offline AI - no paid key
 ollama pull llama3.2
 LLM_MODE=openai LLM_BASE_URL=http://localhost:11434/v1 LLM_MODEL=llama3.2 make stack
+# Gemini AI layer (claim classification + grounded drafting on /ai)
+GEMINI_API_KEY=... make stack
 ```
 
-ReportLab renders a three-page, byte-reproducible PDF, which goes to PayPal as `multipart/related`. The dossier footer stamps `Narrative source: ai:<model>` or `Narrative source: template`. The model never touches EV, p(win), chain hashes or PDF layout, and a test asserts the API key never appears in the rendered document. The fence is [narrative.py](backend/app/domain/evidence/narrative.py); the renderer is [pdf.py](backend/app/domain/evidence/pdf.py).
+ReportLab renders a three-page, byte-reproducible PDF, which goes to PayPal as `multipart/related`. The dossier footer stamps `Narrative source: ai:<model>` or `Narrative source: template`. The model never touches EV, p(win), chain hashes or PDF layout, and a test asserts the API key never appears in the rendered document. The fence is [narrative.py](backend/app/domain/evidence/narrative.py) plus the AI-layer grounding validator; the renderer is [pdf.py](backend/app/domain/evidence/pdf.py).
 
 ## API surface
 
 <details>
-<summary>15 endpoints and one error envelope</summary>
+<summary>17 endpoints and one error envelope</summary>
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -216,6 +222,8 @@ ReportLab renders a three-page, byte-reproducible PDF, which goes to PayPal as `
 | GET | `/api/v1/disputes/{id}/dossier.pdf` | Byte-reproducible evidence dossier |
 | GET | `/api/v1/reporting/summary` | Exposure, fees avoided and the rolling dispute ratio |
 | GET | `/api/v1/reporting/transactions` | Cached transaction history (CE 3.0 lookback) |
+| POST | `/api/v1/disputes/{id}/ai/analyze` | Gemini claim classification + grounded draft + explanation (degrades to deterministic fallback with `degraded=true`) |
+| GET | `/api/v1/disputes/{id}/ai` | Idempotent re-read of the last AI analysis for a case |
 
 Errors use one envelope:
 

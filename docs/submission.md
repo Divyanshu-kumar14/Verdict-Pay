@@ -110,6 +110,28 @@ unit and component tests, 12 frontend API tests that drive the real server over 
 No model is called on the demo path. No model touches an EV number, a win probability, a chain hash
 or the PDF layout.
 
+### Gemini AI layer: classify and draft, never decide
+
+A second model path sits on the dispute itself behind `POST /api/v1/disputes/{id}/ai/analyze`
+(re-read with idempotent `GET /api/v1/disputes/{id}/ai`). Given the locked fact pack, Gemini
+(`GEMINI_MODEL`, default `gemini-2.5-flash`) classifies the buyer's claim into one of five
+categories and drafts a grounded evidence narrative plus a plain-language explanation of the
+deterministic EV decision. Classification maps to a PayPal reason code through a frozen table the
+model cannot override, and low-confidence output is demoted to the conservative `other` bucket.
+
+What it is forbidden to do is the whole point: the model cannot set, scale or nudge win
+probability, expected value, the recommendation or the verdict, and it cannot introduce a number,
+name or date that is not already in the fact pack — the grounding validator rejects the draft and
+the deterministic keyword classifier plus template narrative take over. The dossier PDF, the fee
+math and the chain hashes are byte-identical whether Gemini answers or not.
+
+The air gap is what makes the fallback honest instead of silent. With `AI_ENABLED=false`, no
+`GEMINI_API_KEY`, a timeout (`AI_TIMEOUT_MS`, default 12000 ms, `AI_MAX_RETRIES` 1) or any
+model failure, the endpoint still returns a complete, correct analysis marked `degraded=true`
+with a reason — never an error, never a hallucinated number. Every generation is recorded as an
+append-only `AI_GENERATION` event in the per-payer SHA-256 chain, so provenance is itself
+verifiable. No new keys are needed for the demo; the default path stays keyless and deterministic.
+
 **How the codebase was built — disclosed, not implied:** VerdictPay was implemented by an AI coding
 agent (DeepSeek-based DSH) working under human direction, with the human owning scope, the frozen
 spec and every merge decision. The agent did not self-certify: each phase closed on executable
