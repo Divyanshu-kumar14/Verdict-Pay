@@ -182,10 +182,12 @@ describe("CommandCenter", () => {
         caseQuery={makePolled<DisputeDetail>(null)}
         timeline={makePolled<CustomerTimeline>(null)}
         onCaseChanged={vi.fn()}
+        onRunStep1={vi.fn()}
       />,
     );
     expect(screen.getByText("No dispute on file")).toBeInTheDocument();
-    expect(screen.getByText(/Run steps 1–3/)).toBeInTheDocument();
+    expect(screen.getByText(/Run the steps on the left/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /run step 1/i })).toBeInTheDocument();
   });
 
   it("smoke renders with mock PolledQuery data", () => {
@@ -199,6 +201,7 @@ describe("CommandCenter", () => {
         caseQuery={makePolled(detail)}
         timeline={makePolled(makeTimeline())}
         onCaseChanged={vi.fn()}
+        onRunStep1={vi.fn()}
       />,
     );
     // Case summary hash is rendered via shortHash - check claim amount is visible
@@ -222,6 +225,7 @@ describe("CommandCenter", () => {
         caseQuery={makePolled(detail)}
         timeline={makePolled(makeTimeline())}
         onCaseChanged={vi.fn()}
+        onRunStep1={vi.fn()}
       />,
     );
     expect(screen.getByText("Subscription active")).toBeInTheDocument();
@@ -241,6 +245,7 @@ describe("CommandCenter", () => {
         caseQuery={makePolled(detail)}
         timeline={makePolled(makeTimeline())}
         onCaseChanged={vi.fn()}
+        onRunStep1={vi.fn()}
       />,
     );
     // CommandCenter renders a Containment panel with "Subscription suspended" text when the case record says suspended
@@ -273,6 +278,7 @@ describe("CommandCenter", () => {
         caseQuery={makePolled(detail)}
         timeline={makePolled(makeTimeline())}
         onCaseChanged={vi.fn()}
+        onRunStep1={vi.fn()}
       />,
     );
     expect(screen.getByText(/Subscription suspended in 42ms/)).toBeInTheDocument();
@@ -291,6 +297,7 @@ describe("CommandCenter", () => {
         caseQuery={loadingQuery}
         timeline={makePolled<CustomerTimeline>(null, { loading: true })}
         onCaseChanged={vi.fn()}
+        onRunStep1={vi.fn()}
       />,
     );
     // Should show skeleton / busy region, not empty state

@@ -1,24 +1,24 @@
 "use client";
 
-import { RotateCcw } from "lucide-react";
-
 import { CommandCenter } from "@/components/sandbox/CommandCenter";
-import { DemoStepper, MerchantCheckout } from "@/components/sandbox/Storefront";
+import { DemoPipeline } from "@/components/sandbox/DemoPipeline";
+import { DemoStepper, MerchantCheckout, RealVsSim } from "@/components/sandbox/Storefront";
 import { StepLog } from "@/components/sandbox/StepLog";
 import { PageHeader } from "@/components/PageHeader";
-import { Button } from "@/components/ui/Button";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
+import type { SignalStep } from "@/components/evidence/EvidenceSignal";
 import { api, ApiError } from "@/lib/api";
 import { usePolledQuery } from "@/lib/hooks/usePolledQuery";
 import { useSandboxFlow } from "@/lib/hooks/useSandboxFlow";
 import type { CustomerTimeline, DisputeDetail } from "@/lib/types";
 
 /**
- * /demo: the judge-facing front door. The horizontal stepper runs the buyer
- * flow that opens the dispute; on desktop the polished checkout sits left
- * while the live pipeline and the command centre verdict sit right. The
- * command centre reads the real case the API persisted, polls it while
- * visible, and executes the recommended HATEOAS action.
+ * /demo: the judge-facing front door. The full-width pipeline shows the five
+ * evidence-signal stages; below it the left rail runs the buyer flow that
+ * opens the dispute while the live pipeline log and the command centre
+ * verdict respond on the right. The command centre reads the real case the
+ * API persisted, polls it while visible, and executes the recommended
+ * HATEOAS action.
  */
 export function SandboxWorkspace() {
   const flow = useSandboxFlow();
@@ -73,6 +73,71 @@ export function SandboxWorkspace() {
     latest.refresh();
   };
 
+  const checkoutDone = flow.state.checkoutStatus === "success" || flow.state.checkout !== null;
+  const usageDone = flow.state.usageStatus === "success" || flow.state.usage !== null;
+  const disputeDone = flow.state.disputeStatus === "success" || flow.state.dispute !== null;
+  const facts = caseQuery.data?.facts ?? null;
+  const caseReady = caseQuery.data != null;
+
+  const pipelineSteps: SignalStep[] = [
+    {
+      id: "checkout",
+      label: "Checkout",
+      state:
+        flow.state.checkoutStatus === "error"
+          ? "failed"
+          : checkoutDone
+            ? "verified"
+            : flow.state.checkoutStatus === "running"
+              ? "active"
+              : "pending",
+    },
+    {
+      id: "usage",
+      label: "Usage telemetry",
+      state:
+        flow.state.usageStatus === "error"
+          ? "failed"
+          : usageDone
+            ? "verified"
+            : flow.state.usageStatus === "running"
+              ? "active"
+              : !checkoutDone
+                ? "locked"
+                : "pending",
+    },
+    {
+      id: "dispute",
+      label: "Dispute",
+      state:
+        flow.state.disputeStatus === "error"
+          ? "failed"
+          : disputeDone
+            ? "verified"
+            : flow.state.disputeStatus === "running"
+              ? "active"
+              : !usageDone
+                ? "locked"
+                : "pending",
+    },
+    {
+      id: "evidence",
+      label: "Evidence verification",
+      state: !disputeDone
+        ? "locked"
+        : facts && facts.chain_valid
+          ? "verified"
+          : facts && !facts.chain_valid
+            ? "failed"
+            : "pending",
+    },
+    {
+      id: "verdict",
+      label: "Verdict",
+      state: !disputeDone ? "locked" : caseReady ? "verified" : "pending",
+    },
+  ];
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -80,15 +145,18 @@ export function SandboxWorkspace() {
         description="Aurora Analytics sells a $99.00 Pro plan through PayPal. Run the three steps to open a friendly-fraud dispute; the live pipeline and verdict respond on the right."
       />
 
-      <DemoStepper
-        state={flow.state}
-        onCheckout={flow.runCheckout}
-        onUsage={flow.runUsage}
-        onDispute={flow.runDispute}
-      />
+      <DemoPipeline steps={pipelineSteps} />
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
-        <div className="min-w-0 space-y-4">
+        <div className="min-w-0 space-y-4 lg:sticky lg:top-[72px] lg:self-start">
+          <DemoStepper
+            state={flow.state}
+            onCheckout={flow.runCheckout}
+            onUsage={flow.runUsage}
+            onDispute={flow.runDispute}
+            onReset={handleReset}
+          />
+          <RealVsSim />
           <MerchantCheckout state={flow.state} />
           {flow.state.error ? (
             <ErrorBanner
@@ -97,12 +165,6 @@ export function SandboxWorkspace() {
               onRetry={retry ? () => { void retry(); } : undefined}
             />
           ) : null}
-          <div className="panel flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-            <p className="text-sm text-muted">Reset clears the local flow and reloads merchant state from the API.</p>
-            <Button variant="ghost" size="sm" icon={<RotateCcw size={12} aria-hidden />} onClick={handleReset}>
-              Reset
-            </Button>
-          </div>
         </div>
 
         <div className="min-w-0 space-y-6">
@@ -117,6 +179,7 @@ export function SandboxWorkspace() {
             onCaseChanged={() => {
               latest.refresh();
             }}
+            onRunStep1={() => { void flow.runCheckout(); }}
           />
         </div>
       </div>

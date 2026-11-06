@@ -1,6 +1,5 @@
 "use client";
 
-import { Fragment } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { CircleCheck, CreditCard, Lock, RefreshCw, RotateCcw, X } from "lucide-react";
 
@@ -21,7 +20,7 @@ const STEP_BADGE: Record<StepStatus, { label: string; tone: Tone }> = {
   idle: { label: "Ready", tone: "neutral" },
   running: { label: "Running", tone: "warning" },
   success: { label: "Done", tone: "positive" },
-  error: { label: "Failed", tone: "negative" },
+  error: { label: "Error", tone: "negative" },
 };
 
 type RailState = "completed" | "active" | "failed" | "locked";
@@ -69,13 +68,13 @@ function StepNode({ rail, index, reduced }: { rail: RailState; index: number; re
 
 function RailConnector({ filled, reduced }: { filled: boolean; reduced: boolean }) {
   return (
-    <div aria-hidden className="mx-auto h-4 w-px shrink-0 overflow-hidden relative sm:mx-0 sm:h-px sm:w-8 sm:self-center">
+    <div aria-hidden className="my-1 w-px min-h-6 flex-1 self-center overflow-hidden relative">
       <span className="absolute inset-0 bg-rule" />
       <motion.span
         className="absolute inset-0 bg-accent"
         initial={false}
-        animate={{ scale: filled ? 1 : 0, opacity: filled ? 1 : 0 }}
-        style={{ transformOrigin: "left top" }}
+        animate={{ scaleY: filled ? 1 : 0, opacity: filled ? 1 : 0 }}
+        style={{ transformOrigin: "top" }}
         transition={reduced ? { duration: 0 } : SPRING}
       />
     </div>
@@ -244,63 +243,95 @@ function buildSteps(
  * locked / failed states with animated connectors. Locked steps stay visible
  * with a tooltip explaining the dependency; failed steps retry inline.
  */
-export function DemoStepper({ state, onCheckout, onUsage, onDispute }: Pick<StorefrontProps, "state" | "onCheckout" | "onUsage" | "onDispute">) {
+export function DemoStepper({ state, onCheckout, onUsage, onDispute, onReset }: StorefrontProps) {
   const reduced = useReducedMotion() ?? false;
   const busy = state.checkoutStatus === "running" || state.usageStatus === "running" || state.disputeStatus === "running";
   const steps = buildSteps(state, onCheckout, onUsage, onDispute, busy);
   const nextKey = steps.find((step) => step.status !== "success" && step.canRun)?.key ?? null;
+  const doneCount = steps.filter((step) => step.status === "success").length;
   return (
-    <ol aria-label="Demo steps" className="flex min-w-0 flex-col sm:flex-row sm:items-stretch">
-      {steps.map((step, i) => {
-        const rail = railState(step.status, step.canRun);
-        const badge = STEP_BADGE[step.status];
-        const isNext = step.key === nextKey;
-        const isRunning = step.status === "running";
-        const isFailed = step.status === "error";
-        const isLocked = rail === "locked";
-        const detail = rail === "completed" && step.successDetail ? step.successDetail : step.subtitle;
-        const label = step.action + " (step " + step.index + " of 3: " + step.title + ", " + (isLocked ? "locked" : badge.label) + ")";
-        const prevDone = i > 0 ? steps[i - 1]?.status === "success" : false;
-        const button = (
-          <Button size="sm" variant={isNext && !isFailed ? "primary" : "secondary"} loading={isRunning} disabled={!step.canRun} icon={isFailed ? <RefreshCw size={12} aria-hidden /> : undefined} aria-label={label} onClick={() => { void step.run(); }}>
-            {isFailed ? "Retry" : step.action}
-          </Button>
-        );
-        return (
-          <Fragment key={step.key}>
-            {i > 0 ? <RailConnector filled={prevDone} reduced={reduced} /> : null}
-            <li aria-current={isNext ? "step" : undefined} className={cn("panel min-w-0 flex-1 px-4 py-3.5", isNext && "sig-edge", isLocked && "opacity-70")}>
-              <div className="flex items-center gap-2.5">
+    <section aria-label="Demo steps" className="panel overflow-hidden">
+      <div className="flex items-center justify-between gap-3 border-b border-rule px-4 py-2.5 sm:px-5">
+        <h2 className="title-card">Steps</h2>
+        <span className="num text-xs text-muted">{doneCount} of 3 done</span>
+      </div>
+      <ol className="flex min-w-0 flex-col px-4 py-4 sm:px-5">
+        {steps.map((step, i) => {
+          const rail = railState(step.status, step.canRun);
+          const badge = STEP_BADGE[step.status];
+          const isNext = step.key === nextKey;
+          const isRunning = step.status === "running";
+          const isFailed = step.status === "error";
+          const isLocked = rail === "locked";
+          const detail = rail === "completed" && step.successDetail ? step.successDetail : step.subtitle;
+          const label = step.action + " (step " + step.index + " of 3: " + step.title + ", " + (isLocked ? "locked" : badge.label) + ")";
+          const isLast = i === steps.length - 1;
+          const button = (
+            <Button size="sm" variant={isNext && !isFailed ? "primary" : "secondary"} loading={isRunning} disabled={!step.canRun} icon={isFailed ? <RefreshCw size={12} aria-hidden /> : undefined} aria-label={label} onClick={() => { void step.run(); }}>
+              {isFailed ? "Retry" : step.action}
+            </Button>
+          );
+          return (
+            <li key={step.key} aria-current={isNext ? "step" : undefined} className="flex items-start gap-3">
+              <div className="flex flex-col items-center self-stretch">
                 <StepNode rail={rail} index={i} reduced={reduced} />
-                <p className={cn("min-w-0 flex-1 truncate text-base font-medium", isLocked ? "text-muted" : "text-ink")}>
-                  <span className="num mr-1.5 font-mono text-xs text-muted">{step.index}</span>
-                  {step.title}
-                </p>
-                <Badge tone={isLocked ? "neutral" : badge.tone} size="sm" title={isLocked ? "Complete the previous step first" : undefined}>
-                  {isLocked ? "Locked" : badge.label}
-                </Badge>
+                {!isLast ? <RailConnector filled={step.status === "success"} reduced={reduced} /> : null}
               </div>
-              <p className={cn("mt-2 break-words font-mono text-xs", rail === "completed" ? "text-positive" : "text-muted")}>{detail}</p>
-              {isRunning ? (
-                <p className="mt-2 flex items-center gap-1.5 text-xs text-warning">
-                  <span aria-hidden className="live-dot h-1.5 w-1.5 rounded-full bg-warning" />
-                  Executing — state settles when the API returns
-                </p>
-              ) : null}
-              <div className="mt-3">{isLocked ? (<Tooltip label="Complete the previous step first"><span className="inline-flex">{button}</span></Tooltip>) : (button)}</div>
+              <div className={cn("min-w-0 flex-1 pb-5", isLocked && "opacity-70")}>
+                <div className="flex items-center gap-2.5">
+                  <p className={cn("min-w-0 flex-1 truncate text-base font-medium", isLocked ? "text-muted" : "text-ink")}>{step.title}</p>
+                  <Badge tone={isLocked ? "neutral" : badge.tone} size="sm" title={isLocked ? "Complete the previous step first" : undefined}>
+                    {isLocked ? "Locked" : badge.label}
+                  </Badge>
+                </div>
+                <p className={cn("mt-1.5 break-words font-mono text-xs", rail === "completed" ? "text-positive" : "text-muted")}>{detail}</p>
+                {isRunning ? (
+                  <p className="mt-2 flex items-center gap-1.5 text-xs text-warning">
+                    <span aria-hidden className="live-dot h-1.5 w-1.5 rounded-full bg-warning" />
+                    Executing — state settles when the API returns
+                  </p>
+                ) : null}
+                <div className="mt-3">{isLocked ? (<Tooltip label="Complete the previous step first"><span className="inline-flex">{button}</span></Tooltip>) : (button)}</div>
+              </div>
             </li>
-          </Fragment>
-        );
-      })}
-    </ol>
+          );
+        })}
+      </ol>
+      <footer className="row-rule flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-5">
+        <p className="text-xs text-muted">Reset clears the local flow and reloads merchant state from the API.</p>
+        <Button variant="ghost" size="sm" icon={<RotateCcw size={12} aria-hidden />} onClick={onReset}>
+          Reset
+        </Button>
+      </footer>
+    </section>
   );
 }
 
-/**
- * The buyer side of the demo: checkout card plus step rail.
- * Kept for compatibility — the workspace composes MerchantCheckout and
- * DemoStepper directly to split them into left/right columns.
- */
+const LEGEND_ROWS = [
+  { dot: "bg-accent", label: "Gemini", detail: "claim classification and evidence drafting call the live Google API." },
+  { dot: "bg-control", label: "PayPal simulator", detail: "checkout, usage and the dispute webhook. No funds move." },
+  { dot: "bg-muted/50", label: "Deterministic engine", detail: "EV, win probability and the verdict are local rules, never a model." },
+];
+
+/** A small "Real vs simulated" legend listing which calls leave the sandbox. */
+export function RealVsSim() {
+  return (
+    <div className="panel px-4 py-3 sm:px-5">
+      <p className="label">Real vs simulated</p>
+      <ul className="mt-2 space-y-2">
+        {LEGEND_ROWS.map((row) => (
+          <li key={row.label} className="flex items-start gap-2 text-xs">
+            <span aria-hidden className={cn("mt-1 h-1.5 w-1.5 shrink-0 rounded-full", row.dot)} />
+            <span className="min-w-0 text-muted">
+              <span className="font-medium text-ink">{row.label}</span> — {row.detail}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function Storefront({ state, onCheckout, onUsage, onDispute, onReset }: StorefrontProps) {
   const retry = state.disputeStatus === "error" ? onDispute : state.usageStatus === "error" ? onUsage : state.checkoutStatus === "error" ? onCheckout : null;
   return (
@@ -308,7 +339,7 @@ export function Storefront({ state, onCheckout, onUsage, onDispute, onReset }: S
       <PanelBody className="grid gap-5 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
         <MerchantCheckout state={state} />
         <section aria-label="Demo flow" className="min-w-0">
-          <DemoStepper state={state} onCheckout={onCheckout} onUsage={onUsage} onDispute={onDispute} />
+          <DemoStepper state={state} onCheckout={onCheckout} onUsage={onUsage} onDispute={onDispute} onReset={onReset} />
           {state.error ? (
             <ErrorBanner className="mt-3" error={state.error} context="The step stopped before it changed server state. Fix the connection and retry." onRetry={retry ? () => { void retry(); } : undefined} />
           ) : null}

@@ -98,7 +98,7 @@ export function StepLog({ logs }: { logs: LogEntry[] }) {
         role="log"
         aria-live="polite"
         aria-label="Sandbox step log"
-        className="h-[248px] space-y-1 overflow-y-auto bg-ground px-4 py-3"
+        className="max-h-[360px] space-y-1 overflow-y-auto bg-ground px-4 py-3"
       >
         {logs.length === 0 ? (
           <li className="font-mono text-xs leading-relaxed text-muted">

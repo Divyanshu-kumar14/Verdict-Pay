@@ -511,6 +511,7 @@ export type CommandCenterProps = {
   caseQuery: PolledQuery<DisputeDetail>;
   timeline: PolledQuery<CustomerTimeline>;
   onCaseChanged: () => void;
+  onRunStep1: () => void;
 };
 
 /**
@@ -525,6 +526,7 @@ export function CommandCenter({
   caseQuery,
   timeline,
   onCaseChanged,
+  onRunStep1,
 }: CommandCenterProps) {
   const now = useNow();
   const reduced = useReducedMotion() ?? false;
@@ -681,14 +683,15 @@ export function CommandCenter({
       {!activeDisputeId ? (
         <Panel>
           <EmptyState
-            icon={<ShieldCheck size={18} aria-hidden />}
+            icon={<ShieldCheck size={14} aria-hidden />}
             title="No dispute on file"
-            description="Run steps 1–3 on the left to open an inquiry through the PayPal webhook path. This panel reads live case state, nothing here is mocked."
+            description="Run the steps on the left to open an inquiry through the PayPal webhook path. Simulator mode: no funds move."
             action={
-              <span className="num text-xs text-muted">
-                GET /api/v1/disputes, refreshed every 2 seconds
-              </span>
+              <Button size="sm" variant="primary" onClick={onRunStep1}>
+                Run step 1
+              </Button>
             }
+            className="py-4"
           />
         </Panel>
       ) : caseQuery.error && !detail ? (
