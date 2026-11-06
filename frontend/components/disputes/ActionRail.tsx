@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { CircleCheck, ExternalLink } from "lucide-react";
+import { CircleAlert, CircleCheck, ExternalLink } from "lucide-react";
 
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
@@ -9,27 +9,61 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { api, toApiError, type ApiError } from "@/lib/api";
-import { cn } from "@/lib/cn";
-import { formatLatency, formatPercent, formatUsd } from "@/lib/format";
-import type { ActionResponse, AllowedAction, DisputeAction, DisputeDetail } from "@/lib/types";
-import { ACTION_META, CHANNEL_META, RECOMMENDATION_META, STAGE_META } from "@/lib/vocab";
-import { DISPUTE_ACTIONS } from "@/lib/types";
+import { formatLatency, formatUsd, shortHash } from "@/lib/format";
+import {
+  DISPUTE_ACTIONS,
+  type ActionRecord,
+  type ActionResponse,
+  type ActionStatus,
+  type AllowedAction,
+  type DisputeAction,
+  type DisputeDetail,
+} from "@/lib/types";
+import {
+  ACTION_META,
+  CHANNEL_META,
+  RECOMMENDATION_META,
+  STAGE_META,
+  type Tone,
+} from "@/lib/vocab";
 
-/**
- * The HATEOAS action rail. Buttons are enabled only when the returned
- * links[] allow the action; every irreversible action passes a confirm dialog.
- */
+export const ACTION_STATUS_META: Record<ActionStatus, { word: string; tone: Tone }> = {
+  EXECUTED: { word: "Executed", tone: "positive" },
+  FAILED: { word: "Failed", tone: "negative" },
+  SKIPPED: { word: "Skipped", tone: "warning" },
+};
 
-/* The rail shows the PayPal route, not the full URL: the host is the same on every row and
-   a 60-character query string tells a reader nothing. The complete link stays in the title. */
-function routeOf(link: string): string {
+function StatusChip({ status }: { status: ActionStatus | null }) {
+  if (status === null) {
+    return null;
+  }
+  const meta = ACTION_STATUS_META[status];
+  return <Badge tone={meta.tone}>{meta.word}</Badge>;
+}
+
+/** The most recent status for an action across the case's audit history. */
+function statusFor(records: ActionRecord[], action: DisputeAction): ActionStatus | null {
+  let latest: ActionRecord | null = null;
+  for (const record of records) {
+    if (record.action !== action) {
+      continue;
+    }
+    if (latest === null || Date.parse(record.created_at) > Date.parse(latest.created_at)) {
+      latest = record;
+    }
+  }
+  return latest === null ? null : latest.status;
+}
+
+function routeOf(paypalLink: string): string {
   try {
-    const url = new URL(link);
-    return url.pathname + url.search;
+    const url = new URL(paypalLink);
+    return url.hostname + " · " + url.pathname.slice(0, 28);
   } catch {
-    return link;
+    return "PayPal";
   }
 }
+
 export function ActionRail({
   detail,
   onCompleted,
@@ -46,209 +80,253 @@ export function ActionRail({
   const recommendedAction = RECOMMENDATION_META[detail.recommended_action].action;
 
   const consequenceFor = (action: DisputeAction, feeUsd: number): string => {
-    if (action === "ACCEPT_CLAIM") {
-      return "Accepting concedes " + formatUsd(detail.amount_usd) + " and incurs " + formatUsd(feeUsd) + " in PayPal fees. The case closes.";
+    switch (action) {
+      case "ACCEPT_CLAIM":
+        return "Lose the disputed " + formatUsd(detail.amount_usd) + " — settle at a loss.";
+      case "MAKE_OFFER":
+        return (
+          "Settle at a fraction of the claim, costing roughly " +
+          formatUsd(feeUsd) +
+          " in fees."
+        );
+      case "PROVIDE_EVIDENCE":
+        return (
+          "Contest with evidence — win " +
+          formatUsd(detail.amount_usd) +
+          " or lose " +
+          formatUsd(feeUsd) +
+          " more."
+        );
+      case "SEND_MESSAGE":
+      default:
+        return "Post a response in the dispute thread — no fee.";
     }
-    if (action === "PROVIDE_EVIDENCE") {
-      return "Filing costs " + formatUsd(feeUsd) + " and risks " + formatUsd(Math.abs(detail.breakdown.ev_settle_usd)) + " if the claim is lost.";
-    }
-    if (action === "MAKE_OFFER") {
-      return "Offer outlay " + formatUsd(Math.abs(detail.breakdown.ev_offer_usd)) + " (" + formatPercent(detail.breakdown.offer_ratio, 0) + " of the claim); no dispute fee at the inquiry stage.";
-    }
-    return "No PayPal fee at the " + STAGE_META[detail.stage].label.toLowerCase() + " stage; the case stays open for the buyer response.";
   };
 
   const orderedActions: AllowedAction[] = DISPUTE_ACTIONS.map((action) => {
-    const exposed = detail.allowed_actions.find((candidate) => candidate.action === action);
-    if (exposed) return exposed;
-    return {
-      action,
-      allowed: false,
-      reason: "PayPal did not expose this action for the case.",
-      fee_usd: 0,
-      paypal_link: null,
-    };
+    const candidate = detail.allowed_actions.find((entry) => entry.action === action);
+    return (
+      candidate ?? {
+        action,
+        allowed: false,
+        reason: "PayPal does not expose this action at this stage.",
+        fee_usd: 0,
+        paypal_link: null,
+      }
+    );
   });
 
   const openCount = detail.allowed_actions.filter((candidate) => candidate.allowed).length;
 
+  const openConfirm = (candidate: AllowedAction): void => {
+    setPending(candidate);
+    setError(null);
+    setNote("");
+  };
+
   const runConfirmed = async (): Promise<void> => {
-    if (!pending || running) return;
+    if (pending === null) {
+      return;
+    }
     const action = pending.action;
     setRunning(action);
     setError(null);
     setResult(null);
     try {
-      const response = await api.performAction(detail.dispute_id, action, {
-        ...(note.trim().length > 0 ? { note: note.trim() } : {}),
-        idempotency_key: detail.dispute_id + ":" + action + ":" + String(Date.now()),
-      });
+      const response = await api.performAction(
+        detail.dispute_id,
+        action,
+        {
+          note: note.trim() === "" ? undefined : note.trim(),
+          idempotency_key: detail.dispute_id + ":" + action + ":" + Date.now(),
+        },
+        new AbortController().signal,
+      );
       setResult(response);
       setPending(null);
-      setNote("");
       onCompleted();
-    } catch (caught) {
-      setError(toApiError(caught));
+    } catch (runError) {
+      setError(toApiError(runError));
     } finally {
       setRunning(null);
     }
   };
 
+  const primary =
+    recommendedAction === null
+      ? null
+      : orderedActions.find((candidate) => candidate.action === recommendedAction) ?? null;
+
+  const secondary = primary === null ? orderedActions : orderedActions.filter((c) => c !== primary);
+
+  const variantFor = (action: DisputeAction): "primary" | "danger" =>
+    action === "ACCEPT_CLAIM" ? "danger" : "primary";
+
   return (
-    <Panel className="overflow-hidden">
+    <Panel className="overflow-hidden" aria-label="PayPal response actions">
       <PanelHeader
         title="PayPal response"
-        description={"Enabled only when the case's allowed_actions expose the action at this stage."}
-        actions={
-          <Badge tone="neutral">
-            {openCount + " / " + String(DISPUTE_ACTIONS.length) + " open"}
-          </Badge>
-        }
+        description="Actions PayPal actually exposes for this stage, with the policy recommendation first."
+        actions={<Badge tone="accent">{openCount} available</Badge>}
       />
 
-      {result ? (
-        <div
-          role="status"
-          className="row-rule flex flex-wrap items-center gap-2 px-4 py-2.5 text-sm"
-        >
-          <CircleCheck
-            size={13}
-            aria-hidden
-            className={cn("shrink-0", result.status === "EXECUTED" ? "text-positive" : "text-warning")}
-          />
-          <span className={cn("font-medium", result.status === "EXECUTED" ? "text-positive" : "text-warning")}>
-            {result.status}
-          </span>
-          <span className="text-muted">{ACTION_META[result.action].label}</span>
-          <span className="num ml-auto text-2xs text-muted">{formatLatency(result.latency_ms)}</span>
+      {result !== null ? (
+        <div className="row-rule px-4 py-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            {result.status === "EXECUTED" ? (
+              <CircleCheck size={15} className="text-positive" />
+            ) : (
+              <CircleAlert size={15} className="text-warning" />
+            )}
+            <StatusChip status={result.status} />
+            <span className="num text-sm text-muted">{formatLatency(result.latency_ms)}</span>
+            <span className="num text-xs text-muted">{shortHash(result.action_id)}</span>
+          </div>
         </div>
       ) : null}
 
-      {error && !pending ? (
+      {primary !== null ? (
+        <div className="sig-edge row-rule px-4 py-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone="accent" dot>
+              Recommended
+            </Badge>
+            <StatusChip status={statusFor(detail.actions, primary.action)} />
+          </div>
+          <p className="mt-2 text-sm leading-snug text-muted">
+            {primary.allowed
+              ? ACTION_META[primary.action].description
+              : primary.reason ?? "Not available at this stage."}
+          </p>
+          <p className="mt-1.5 text-sm leading-snug">
+            <span className="text-muted">Consequence: </span>
+            <span className="text-ink">{consequenceFor(primary.action, primary.fee_usd)}</span>
+          </p>
+          <Button
+            variant={variantFor(primary.action)}
+            size="md"
+            block
+            disabled={!primary.allowed || running !== null}
+            loading={running === primary.action}
+            onClick={() => openConfirm(primary)}
+            className="mt-3"
+          >
+            {primary.allowed ? ACTION_META[primary.action].label : "Blocked"}
+          </Button>
+        </div>
+      ) : (
         <div className="row-rule px-4 py-3">
-          <ErrorBanner error={error} context="Action failed." />
+          <p className="text-sm text-muted">
+            Monitor only — policy recommends no PayPal write for this case.
+          </p>
         </div>
+      )}
+
+      {secondary.length > 0 ? (
+        <ol aria-label="Other PayPal actions">
+          {secondary.map((candidate) => {
+            const meta = ACTION_META[candidate.action];
+            const status = statusFor(detail.actions, candidate.action);
+            return (
+              <li key={candidate.action} className="row-rule px-4 py-3">
+                <div className="flex items-start gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-base text-ink">{meta.label}</span>
+                      <StatusChip status={status} />
+                    </div>
+                    <p className="mt-0.5 text-sm leading-snug text-muted">
+                      {candidate.allowed
+                        ? meta.description
+                        : candidate.reason ?? "Not available at this stage."}
+                    </p>
+                    {candidate.paypal_link !== null ? (
+                      <a
+                        href={candidate.paypal_link}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="mt-1 inline-flex items-center gap-1 text-sm text-accent hover:underline"
+                      >
+                        Resolve in PayPal <ExternalLink size={12} />
+                      </a>
+                    ) : null}
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end gap-1.5">
+                    <span className="num text-sm text-muted">{formatUsd(candidate.fee_usd)}</span>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={!candidate.allowed}
+                      onClick={() => openConfirm(candidate)}
+                    >
+                      {candidate.allowed ? "Run" : "Blocked"}
+                    </Button>
+                  </div>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
       ) : null}
 
-      <ol aria-label="Available PayPal actions">
-        {orderedActions.map((candidate) => {
-          const meta = ACTION_META[candidate.action];
-          const isRecommended = candidate.action === recommendedAction;
-          return (
-            <li
-              key={candidate.action}
-              className={cn("relative row-rule px-4 py-3", isRecommended && "sig-edge")}
-            >
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-baseline gap-2">
-                    <span className="text-base font-medium text-ink">{meta.label}</span>
-                    {isRecommended ? <span className="text-sm text-muted">Recommended</span> : null}
-                  </div>
-                  <p className="mt-0.5 text-sm leading-snug text-muted">
-                    {candidate.allowed
-                      ? meta.description
-                      : (candidate.reason ?? "Not available at this stage")}
-                  </p>
-                  {candidate.paypal_link ? (
-                    <p
-                      className="mt-1 flex min-w-0 items-center gap-1 text-sm text-muted"
-                      title={candidate.paypal_link}
-                    >
-                      <ExternalLink size={12} aria-hidden className="shrink-0" />
-                      <span className="truncate">{routeOf(candidate.paypal_link)}</span>
-                    </p>
-                  ) : null}
-                </div>
-                <span className="num shrink-0 text-sm text-muted">{formatUsd(candidate.fee_usd)}</span>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  disabled={!candidate.allowed}
-                  onClick={() => {
-                    setPending(candidate);
-                    setError(null);
-                    setNote("");
-                  }}
-                >
-                  {candidate.allowed ? "Run" : "Blocked"}
-                </Button>
-              </div>
-            </li>
-          );
-        })}
-      </ol>
-
-      {pending ? (
-        <ConfirmDialog
-          open
-          title={ACTION_META[pending.action].label + " this case?"}
-          description={"This writes to PayPal's dispute lifecycle. The case is never updated optimistically."}
-          confirmLabel={ACTION_META[pending.action].label}
-          tone={pending.action === "ACCEPT_CLAIM" ? "negative" : "positive"}
-          loading={running !== null}
-          onConfirm={() => {
-            void runConfirmed();
-          }}
-          onCancel={() => {
-            if (running) return;
-            setPending(null);
-            setError(null);
-          }}
-        >
+      <ConfirmDialog
+        open={pending !== null}
+        title={pending === null ? "Confirm action" : "Confirm " + ACTION_META[pending.action].label.toLowerCase()}
+        description={
+          pending !== null && pending.allowed
+            ? "This is a real PayPal write, recorded against the case telemetry."
+            : "Verify the parameters before writing to PayPal."
+        }
+        confirmLabel={pending === null ? "Confirm" : ACTION_META[pending.action].label}
+        tone={pending?.action === "ACCEPT_CLAIM" ? "negative" : undefined}
+        loading={running !== null}
+        onConfirm={() => void runConfirmed()}
+        onCancel={() => {
+          setPending(null);
+          setError(null);
+        }}
+      >
+        {pending !== null ? (
           <div className="space-y-3">
-            <dl className="grid grid-cols-2 gap-3">
-              <div>
-                <dt className="label">Stage</dt>
-                <dd className="mt-1">
-                  <Badge tone={STAGE_META[detail.stage].tone}>{STAGE_META[detail.stage].short}</Badge>
-                </dd>
-              </div>
-              <div>
-                <dt className="label">Channel</dt>
-                <dd className="mt-1">
-                  <Badge tone={CHANNEL_META[detail.channel].tone}>{CHANNEL_META[detail.channel].short}</Badge>
-                </dd>
-              </div>
-              <div>
-                <dt className="label">PayPal fee</dt>
-                <dd className="num mt-1 text-base text-ink">{formatUsd(pending.fee_usd)}</dd>
-              </div>
-              <div>
-                <dt className="label">Dispute</dt>
-                <dd className="num mt-1 break-all text-2xs text-muted">{detail.dispute_id}</dd>
-              </div>
-            </dl>
-
-            <p className="row-rule pt-3 text-sm leading-snug text-muted">
-              <span className="text-ink">Consequence: </span>
-              {consequenceFor(pending.action, pending.fee_usd)}
-            </p>
-
+            {error !== null ? (
+              <ErrorBanner error={error} onRetry={() => void runConfirmed()} context="PayPal write failed" />
+            ) : null}
             <label className="block">
-              <span className="label">Note to PayPal (optional)</span>
+              <span className="label">Note for the case log</span>
               <textarea
                 value={note}
                 onChange={(event) => setNote(event.target.value)}
                 maxLength={2000}
                 rows={3}
-                placeholder="Shown in the PayPal resolution centre."
-                className="mt-1.5 w-full resize-none rounded-card border border-control bg-raised px-3 py-2 text-sm text-ink placeholder:text-muted"
+                placeholder="Optional — stored verbatim in the audit log"
+                className="mt-1.5 w-full resize-y rounded-card border border-control bg-raised px-3 py-2 text-sm text-ink placeholder:text-muted focus:border-accent focus:outline-none"
               />
-              <span className="num mt-1 block text-right text-2xs text-muted">
-                {note.length}/2000
-              </span>
+              <span className="num text-2xs text-muted">{note.length}/2000</span>
             </label>
 
-            {error ? (
-              <ErrorBanner
-                error={error}
-                context="The action did not complete; no case state was changed locally."
-              />
-            ) : null}
+            <dl className="space-y-2 text-sm" aria-label="Action parameters">
+              <div className="flex justify-between gap-4">
+                <dt className="label">Dispute</dt>
+                <dd className="num text-xs text-muted">{shortHash(detail.dispute_id)}</dd>
+              </div>
+              <div className="flex justify-between gap-4">
+                <dt className="label">Stage</dt>
+                <dd className="text-xs text-muted">{STAGE_META[detail.stage].label}</dd>
+              </div>
+              <div className="flex justify-between gap-4">
+                <dt className="label">Channel</dt>
+                <dd className="text-xs text-muted">{CHANNEL_META[detail.channel].label}</dd>
+              </div>
+              {pending.paypal_link !== null ? (
+                <div className="flex justify-between gap-4">
+                  <dt className="label">PayPal route</dt>
+                  <dd className="truncate text-xs text-muted">{routeOf(pending.paypal_link)}</dd>
+                </div>
+              ) : null}
+            </dl>
           </div>
-        </ConfirmDialog>
-      ) : null}
+        ) : null}
+      </ConfirmDialog>
     </Panel>
   );
 }

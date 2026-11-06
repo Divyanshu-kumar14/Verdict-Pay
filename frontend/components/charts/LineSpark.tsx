@@ -4,10 +4,14 @@
  * A line over time with a scale and dates.
  *
  * One stroke, one end marker, a baseline and a labelled y-scale. There is no
- * area fill: a fill would be a gradient by another name.
+ * area fill: a fill would be a gradient by another name. The stroke draws in
+ * on first mount; refreshed data moves the line rather than redrawing it.
  */
 
+import { motion, useReducedMotion } from "motion/react";
+
 import { cn } from "@/lib/cn";
+import { EASE_OUT } from "@/lib/motion";
 import type { Tone } from "@/lib/vocab";
 import { ChartTable } from "./ChartTable";
 
@@ -37,6 +41,7 @@ export function LineSpark({
   height?: number;
   className?: string;
 }): React.JSX.Element {
+  const reduced = useReducedMotion() ?? false;
   const width = 560;
   const pad = { top: 12, right: 12, bottom: 26, left: 40 };
   const safeHeight = Math.max(height, pad.top + pad.bottom + 40);
@@ -84,9 +89,28 @@ export function LineSpark({
         <text x={pad.left - 10} y={pad.top + plotH + 4} textAnchor="end" fontSize={12} fill="var(--color-muted)">
           0
         </text>
-        <path d={line} fill="none" strokeWidth={1.75} strokeLinejoin="round" strokeLinecap="round" style={{ stroke: TONE_STROKE[tone] }} />
+        <motion.path
+          d={line}
+          pathLength={1}
+          fill="none"
+          strokeWidth={1.75}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          style={{ stroke: TONE_STROKE[tone] }}
+          initial={reduced ? false : { pathLength: 0, opacity: 0 }}
+          animate={{ pathLength: 1, opacity: 1 }}
+          transition={{ duration: reduced ? 0 : 1.05, ease: EASE_OUT }}
+        />
         {last !== null && lastValue !== null ? (
-          <circle cx={last.x} cy={last.y} r={3} style={{ fill: TONE_STROKE[tone] }} />
+          <motion.circle
+            cx={last.x}
+            cy={last.y}
+            r={3}
+            style={{ fill: TONE_STROKE[tone] }}
+            initial={reduced ? false : { opacity: 0, scale: 0 }}
+            animate={{ opacity: 1, scale: 1 }}
+            transition={{ duration: reduced ? 0 : 0.25, delay: reduced ? 0 : 0.85 }}
+          />
         ) : null}
         {firstLabel ? (
           <text x={pad.left} y={safeHeight - 8} fontSize={12} fill="var(--color-muted)">

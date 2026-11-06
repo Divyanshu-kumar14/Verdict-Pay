@@ -16,24 +16,26 @@ export function ChartTable({
 }): React.JSX.Element {
   const [headA, headB] = headers;
   return (
-    <table className="sr-only">
-      <caption>{caption}</caption>
-      <thead>
-        <tr>
-          <th scope="col">{headA}</th>
-          <th scope="col" className="text-right">
-            {headB}
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map(([label, value]) => (
-          <tr key={label}>
-            <th scope="row">{label}</th>
-            <td className="num text-right">{value}</td>
+    <div className="sr-only">
+      <table>
+        <caption>{caption}</caption>
+        <thead>
+          <tr>
+            <th scope="col">{headA}</th>
+            <th scope="col" className="text-right">
+              {headB}
+            </th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map(([label, value]) => (
+            <tr key={label}>
+              <th scope="row">{label}</th>
+              <td className="num text-right">{value}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

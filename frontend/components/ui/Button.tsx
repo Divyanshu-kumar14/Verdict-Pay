@@ -18,10 +18,10 @@ export type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
 
 /* Flat fills only. No gradient, no glow, no shadow: a control is a colour. */
 const VARIANTS: Record<Variant, string> = {
-  primary: "bg-accent text-ground hover:bg-[#5b98e0]",
-  secondary: "border border-control bg-raised text-ink hover:bg-[#29282c]",
+  primary: "bg-accent text-ground hover:bg-[#4dd0ef]",
+  secondary: "border border-control bg-raised text-ink hover:bg-[#25304a]",
   ghost: "text-muted hover:bg-raised hover:text-ink",
-  danger: "bg-pill-negative text-pill-negative-ink hover:bg-[#38202a]",
+  danger: "bg-pill-negative text-pill-negative-ink hover:bg-[#35212a]",
 };
 
 const SIZES: Record<Size, string> = {
@@ -51,7 +51,7 @@ export function Button({
       aria-busy={loading || undefined}
       className={cn(
         "inline-flex items-center justify-center gap-2 rounded-full font-medium",
-        "transition-colors duration-120",
+        "transition-all duration-120 active:scale-[0.97]",
         "disabled:cursor-not-allowed disabled:opacity-45",
         VARIANTS[variant],
         SIZES[size],

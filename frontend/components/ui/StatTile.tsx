@@ -1,10 +1,16 @@
 import type { ReactNode } from "react";
 
+import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { cn } from "@/lib/cn";
 
 /**
  * A KPI is a label and a figure: no tinted icon square above it, because a boxed
  * icon on every tile is the tell that the numbers were never the point.
+ *
+ * Pass countValue + countFormat to count the figure up on first load (the
+ * animation is a garnish only — reduced-motion renders the value directly), or
+ * pass value + sub for a fully custom readout. Exactly one of the two shapes
+ * is expected.
  */
 export function StatTile({
   label,
@@ -13,13 +19,17 @@ export function StatTile({
   tone = "neutral",
   emphasis = "default",
   className,
+  countValue,
+  countFormat,
 }: {
   label: string;
-  value: ReactNode;
+  value?: ReactNode;
   sub?: ReactNode;
   tone?: "positive" | "warning" | "negative" | "accent" | "neutral";
   emphasis?: "default" | "lead";
   className?: string;
+  countValue?: number;
+  countFormat?: (n: number) => string;
 }) {
   const INK = {
     positive: "text-positive",
@@ -41,7 +51,11 @@ export function StatTile({
           INK[tone],
         )}
       >
-        {value}
+        {countValue !== undefined && countFormat ? (
+          <AnimatedNumber value={countValue} format={countFormat} />
+        ) : (
+          value
+        )}
       </div>
       {sub ? <div className="mt-1 text-xs leading-snug text-muted">{sub}</div> : null}
     </div>

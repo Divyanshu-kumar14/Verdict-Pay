@@ -3,10 +3,14 @@
 /**
  * A single reading drawn as one flat arc against a hairline track.
  *
- * One hue, one number, no segments and no shadow inside the ring.
+ * One hue, one number, no segments and no shadow inside the ring. The arc
+ * sweeps to its reading on first mount and settles on refresh.
  */
 
+import { motion, useReducedMotion } from "motion/react";
+
 import { clamp } from "@/lib/format";
+import { EASE_OUT } from "@/lib/motion";
 import type { Tone } from "@/lib/vocab";
 import { ChartTable } from "./ChartTable";
 
@@ -37,6 +41,7 @@ export function DonutGauge({
   caption?: string;
   className?: string;
 }): React.JSX.Element {
+  const reduced = useReducedMotion() ?? false;
   const safe = Number.isFinite(value) ? clamp(value, 0, 1) : 0;
   const radius = 62;
   const circ = 2 * Math.PI * radius;
@@ -47,7 +52,7 @@ export function DonutGauge({
       <div role="img" aria-label={summary} className="relative mx-auto" style={{ width: size, height: size }}>
         <svg viewBox="0 0 160 160" width={size} height={size} className="block">
           <circle cx={80} cy={80} r={radius} fill="none" stroke="var(--color-raised)" strokeWidth={11} />
-          <circle
+          <motion.circle
             cx={80}
             cy={80}
             r={radius}
@@ -55,13 +60,15 @@ export function DonutGauge({
             strokeLinecap="round"
             strokeWidth={11}
             strokeDasharray={circ}
-            strokeDashoffset={circ * (1 - safe)}
             transform="rotate(-90 80 80)"
             style={{ stroke: TONE_STROKE[tone] }}
+            initial={reduced ? false : { strokeDashoffset: circ }}
+            animate={{ strokeDashoffset: circ * (1 - safe) }}
+            transition={{ duration: reduced ? 0 : 0.9, ease: EASE_OUT }}
           />
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <span className="value text-xl text-ink">{text}</span>
+          <span className="value text-lg text-ink">{text}</span>
           {caption ? (
             <span className="mt-1.5 max-w-[110px] text-center text-xs text-muted">{caption}</span>
           ) : null}

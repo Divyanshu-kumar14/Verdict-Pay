@@ -6,10 +6,14 @@
  * Bars carry the tone their subject already carries in the table, so hue is a
  * restatement and never the only encoding. Vertical bars get gridlines, a
  * labelled y-scale and dates; horizontal bars get their number at the end of
- * the row. Nothing animates an entrance: the geometry is final on first paint.
+ * the row. On first paint the bars grow into place; later data refreshes move
+ * them smoothly rather than replaying the entrance.
  */
 
+import { motion, useReducedMotion } from "motion/react";
+
 import { cn } from "@/lib/cn";
+import { EASE_OUT } from "@/lib/motion";
 import type { Tone } from "@/lib/vocab";
 import { ChartTable } from "./ChartTable";
 
@@ -45,8 +49,10 @@ export function BarChart({
   maxValue?: number;
   className?: string;
 }): React.JSX.Element {
+  const reduced = useReducedMotion() ?? false;
   const max = Math.max(1, maxValue ?? data.reduce((peak, item) => Math.max(peak, item.value), 0));
   const rows: Array<[string, string]> = data.map((item) => [item.label, formatValue(item.value)]);
+  const t = { duration: reduced ? 0 : 0.55, ease: EASE_OUT } as const;
 
   if (orientation === "horizontal") {
     return (
@@ -60,14 +66,18 @@ export function BarChart({
                   {item.label}
                 </span>
                 <span className="block h-2 overflow-hidden rounded-[2px] bg-raised">
-                  <span
+                  <motion.span
                     className="block h-full rounded-[2px]"
                     style={{
                       width: pct + "%",
                       minWidth: item.value > 0 ? 3 : 0,
                       backgroundColor: TONE_FILL[item.tone],
                       opacity: item.value === 0 ? 0.35 : 1,
+                      transformOrigin: "left",
                     }}
+                    initial={reduced ? false : { width: "0%" }}
+                    animate={{ width: pct + "%" }}
+                    transition={t}
                   />
                 </span>
                 <span className="num text-right text-sm text-ink">{formatValue(item.value)}</span>
@@ -108,14 +118,15 @@ export function BarChart({
           const x = pad.left + slot * index + (slot - barW) / 2;
           const h = Math.max(fullH, item.value > 0 ? 2 : 1);
           return (
-            <rect
+            <motion.rect
               key={item.key}
               x={x}
-              y={pad.top + plotH - h}
               width={barW}
-              height={h}
               rx={2}
               style={{ fill: TONE_FILL[item.tone], fillOpacity: item.value === 0 ? 0.35 : 0.9 }}
+              initial={reduced ? false : { height: 0, y: pad.top + plotH }}
+              animate={{ height: h, y: pad.top + plotH - h }}
+              transition={t}
             />
           );
         })}

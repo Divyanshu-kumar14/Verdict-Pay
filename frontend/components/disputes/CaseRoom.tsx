@@ -2,9 +2,18 @@
 
 import Link from "next/link";
 import { useCallback, useState } from "react";
-import { ChevronLeft, RefreshCw } from "lucide-react";
+import {
+  ChevronLeft,
+  Eye,
+  Flag,
+  MessageSquare,
+  RefreshCw,
+  ShieldCheck,
+  Tag,
+  type LucideIcon,
+} from "lucide-react";
 
-import { ActionRail } from "@/components/disputes/ActionRail";
+import { ActionRail, ACTION_STATUS_META } from "@/components/disputes/ActionRail";
 import { CaseFactsPanel } from "@/components/disputes/CaseFactsPanel";
 import { DossierPanel } from "@/components/disputes/DossierPanel";
 import { EvWaterfall } from "@/components/disputes/EvWaterfall";
@@ -14,19 +23,22 @@ import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/ui/Panel";
+import { PageTransition } from "@/components/ui/PageTransition";
 import { Skeleton, SkeletonLines } from "@/components/ui/Skeleton";
 import { api, toApiError, type ApiError } from "@/lib/api";
+import { cn } from "@/lib/cn";
 import {
   formatAbsolute,
   formatDueIn,
   formatLatency,
   formatPercent,
   formatUsd,
+  isoToMs,
   shortHash,
 } from "@/lib/format";
 import { useNow } from "@/lib/hooks/useNow";
 import { usePolledQuery } from "@/lib/hooks/usePolledQuery";
-import type { ActionStatus, DisputeDetail } from "@/lib/types";
+import type { DisputeDetail, RecommendedAction } from "@/lib/types";
 import {
   ACTION_META,
   CHANNEL_META,
@@ -34,13 +46,15 @@ import {
   RECOMMENDATION_META,
   STAGE_META,
   STATUS_META,
-  type Tone,
+  TONE_BADGE,
 } from "@/lib/vocab";
 
-const ACTION_STATUS_META: Record<ActionStatus, { word: string; tone: Tone }> = {
-  EXECUTED: { word: "Executed", tone: "positive" },
-  FAILED: { word: "Failed", tone: "negative" },
-  SKIPPED: { word: "Skipped", tone: "warning" },
+const RECOMMENDATION_ICON: Record<RecommendedAction, LucideIcon> = {
+  DEFLECT_INQUIRY: MessageSquare,
+  MAKE_OFFER: Tag,
+  ACCEPT_CLAIM: Flag,
+  PROVIDE_EVIDENCE: ShieldCheck,
+  MONITOR: Eye,
 };
 
 function BackLink() {
@@ -52,6 +66,53 @@ function BackLink() {
       <ChevronLeft size={14} aria-hidden />
       Triage queue
     </Link>
+  );
+}
+
+/** The recommendation and seller deadline sit at the very top of the room, always visible. */
+function DecisionBanner({ detail, now }: { detail: DisputeDetail; now: number | null }) {
+  const recommendation = RECOMMENDATION_META[detail.recommended_action];
+  const Icon = RECOMMENDATION_ICON[detail.recommended_action];
+  const dueMs = isoToMs(detail.seller_response_due_date);
+  const overdue = now !== null && dueMs !== null && dueMs < now;
+
+  return (
+    <Panel className="panel-raised">
+      <div className="flex flex-col gap-4 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-3.5">
+          <span
+            aria-hidden
+            className={cn(
+              "grid h-11 w-11 shrink-0 place-items-center rounded-full",
+              TONE_BADGE[recommendation.tone],
+            )}
+          >
+            <Icon size={18} strokeWidth={1.7} />
+          </span>
+          <div className="min-w-0">
+            <p className="label">Recommended response</p>
+            <p className="title-card mt-0.5">{recommendation.label}</p>
+            <p className="mt-0.5 truncate text-sm text-muted">
+              {REASON_META[detail.reason_code].short} · {STAGE_META[detail.stage].short} ·{" "}
+              {STATUS_META[detail.status].short}
+            </p>
+          </div>
+        </div>
+
+        <div className="min-w-[9rem] text-left sm:text-right">
+          <p className="label">Seller response due</p>
+          <p
+            className={cn(
+              "num mt-1 text-lg font-semibold",
+              overdue ? "text-negative" : "text-ink",
+            )}
+          >
+            {now === null ? "--" : formatDueIn(detail.seller_response_due_date, now)}
+          </p>
+          <p className="num text-2xs text-muted">{formatAbsolute(detail.seller_response_due_date)}</p>
+        </div>
+      </div>
+    </Panel>
   );
 }
 
@@ -354,7 +415,7 @@ export function CaseRoom({ caseId }: { caseId: string }) {
   const verdict = RECOMMENDATION_META[detail.recommended_action];
 
   return (
-    <div className="space-y-6">
+    <PageTransition className="space-y-6">
       <BackLink />
 
       <PageHeader
@@ -372,10 +433,6 @@ export function CaseRoom({ caseId }: { caseId: string }) {
           <>
             <PageMeta label="Claim" value={formatUsd(detail.amount_usd)} />
             <PageMeta label="p(win)" value={formatPercent(detail.p_win)} />
-            <PageMeta
-              label="Response due"
-              value={now === null ? "--" : formatDueIn(detail.seller_response_due_date, now)}
-            />
           </>
         }
         actions={
@@ -392,6 +449,8 @@ export function CaseRoom({ caseId }: { caseId: string }) {
           </Button>
         }
       />
+
+      <DecisionBanner detail={detail} now={now} />
 
       {query.error ? (
         <ErrorBanner
@@ -413,11 +472,11 @@ export function CaseRoom({ caseId }: { caseId: string }) {
           <ActionAuditPanel detail={detail} />
         </div>
         <div className="min-w-0 space-y-6">
-          <WinProbabilityPanel probability={detail.win_probability} />
           <ActionRail detail={detail} onCompleted={refresh} />
+          <WinProbabilityPanel probability={detail.win_probability} />
           <DossierPanel caseId={detail.dispute_id} available={detail.dossier_available} />
         </div>
       </div>
-    </div>
+    </PageTransition>
   );
 }

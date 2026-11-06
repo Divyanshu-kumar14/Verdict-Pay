@@ -8,7 +8,10 @@
  * the caption.
  */
 
+import { motion, useReducedMotion } from "motion/react";
+
 import { formatPercent } from "@/lib/format";
+import { EASE_OUT } from "@/lib/motion";
 import { ChartTable } from "./ChartTable";
 
 export function ThresholdMeter({
@@ -30,6 +33,7 @@ export function ThresholdMeter({
   summary: string;
   className?: string;
 }): React.JSX.Element {
+  const reduced = useReducedMotion() ?? false;
   const safeLimit = limit > 0 ? limit : 0.015;
   const max = scaleMax ?? Math.max(safeLimit * 1.4, ratio * 1.1, 0.02);
   const ratioPct = Math.min(100, Math.max(0, (ratio / max) * 100));
@@ -47,18 +51,25 @@ export function ThresholdMeter({
         aria-valuetext={formatValue(ratio) + " against a limit of " + formatValue(safeLimit)}
       >
         <div className="relative h-3.5 rounded-[2px] bg-raised">
-          <div
+          <motion.div
             className="absolute inset-y-0 left-0 rounded-[2px]"
             style={{
               width: ratioPct + "%",
               backgroundColor: over ? "var(--color-negative)" : "var(--color-positive)",
+              transformOrigin: "left",
             }}
+            initial={reduced ? false : { width: "0%" }}
+            animate={{ width: ratioPct + "%" }}
+            transition={{ duration: reduced ? 0 : 0.7, ease: EASE_OUT }}
           />
-          <div
+          <motion.div
             aria-hidden
             className="absolute -inset-y-1 w-0.5 bg-warning"
             style={{ left: limitPct + "%" }}
             title={"Limit " + formatValue(safeLimit)}
+            initial={reduced ? false : { opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: reduced ? 0 : 0.25, delay: reduced ? 0 : 0.5 }}
           />
         </div>
         <div className="mt-2 flex items-baseline justify-between text-xs text-muted">

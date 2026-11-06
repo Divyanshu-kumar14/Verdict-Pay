@@ -28,53 +28,55 @@
 }
 
 /* ===========================================================================
-   "Data terminal" — a research/monitoring surface read in long sessions.
-   Cards sit DARKER than the ground, digits are tabular and stack in columns,
-   polarity is carried by a sign in the text rather than by colour, and every
-   selection in the product is the same 1px accent line.
+   "Midnight operations" — a premium financial control surface read in long
+   sessions. The ground is a deep midnight navy; surfaces climb a cool
+   luminance ladder ABOVE it; digits are tabular and stack in columns; one
+   cyan accent carries every selection; polarity is a sign in the text first
+   and a hue second. Motion is spring-based and honours reduced-motion.
    =========================================================================== */
 @theme {
-  /* Ground and surfaces — a luminance ladder, never a shadow */
-  --color-ground: #171719;
-  --color-surface: #131217;
-  --color-raised: #212023;
-  --color-line: #222224;
-  --color-rule: #1b1a1f;
-  --color-control: #3a3a3e;
+  /* Ground and surfaces — a cool luminance ladder, navy at every step */
+  --color-ground: #0a0e1b;
+  --color-surface: #101527;
+  --color-raised: #1b2338;
+  --color-line: #232d45;
+  --color-rule: #1a2233;
+  --color-control: #2c3752;
 
   /* Ink */
-  --color-ink: #ffffff;
-  --color-muted: #8a8c92;
+  --color-ink: #edf2f9;
+  --color-muted: #8b99b0;
 
   /* One hue, one meaning. Nothing else carries colour. */
-  --color-accent: #4a8ad6;
-  --color-positive: #44a282;
-  --color-negative: #e5566f;
-  --color-warning: #d9a441;
+  --color-accent: #35c4e8;
+  --color-positive: #3ddc95;
+  --color-negative: #ec5d6d;
+  --color-warning: #e9ae4b;
 
   /* Chart series — three, in this order */
-  --color-chart-1: #f2f2f3;
-  --color-chart-2: #e5566f;
-  --color-chart-3: #4a8ad6;
+  --color-chart-1: #dfe7f3;
+  --color-chart-2: #ec5d6d;
+  --color-chart-3: #35c4e8;
 
   /* Status pills: a tinted ground and its readable ink */
-  --color-pill-positive: #1b2828;
-  --color-pill-positive-ink: #5fc39c;
-  --color-pill-negative: #2c1a20;
-  --color-pill-negative-ink: #e5566f;
-  --color-pill-warning: #2a2416;
-  --color-pill-warning-ink: #d9a441;
-  --color-pill-neutral: #212023;
-  --color-pill-neutral-ink: #bdbdc0;
-  --color-pill-accent: #1b2233;
-  --color-pill-accent-ink: #7fb0ef;
+  --color-pill-positive: #0e2a20;
+  --color-pill-positive-ink: #4be0a4;
+  --color-pill-negative: #2a1921;
+  --color-pill-negative-ink: #f27985;
+  --color-pill-warning: #2a2112;
+  --color-pill-warning-ink: #e9ae4b;
+  --color-pill-neutral: #1b2338;
+  --color-pill-neutral-ink: #a8b4c8;
+  --color-pill-accent: #0e2430;
+  --color-pill-accent-ink: #5fd2ea;
 
   /* Radii — one for rectangles, full round for controls and pills */
-  --radius-card: 6px;
+  --radius-card: 10px;
   --radius-control: 999px;
 
-  /* The only shadow in the system, and only things that really float get it */
-  --shadow-float: 0 12px 28px rgba(0, 0, 0, 0.2);
+  /* Shadows — reserved for what genuinely floats above the surface */
+  --shadow-float: 0 18px 44px rgba(4, 8, 20, 0.5);
+  --shadow-soft: 0 1px 0 rgba(237, 242, 249, 0.04) inset;
 
   /* Type — seven steps. Nothing renders below 11px. */
   --text-2xs: 11px;
@@ -102,7 +104,7 @@
   --spacing-pad: 32px;
   --spacing-gap: 24px;
 
-  /* Motion — state feedback only, snapped, never choreographed */
+  /* Motion — snapped 120ms for state, springs for physics */
   --ease-snap: cubic-bezier(0.2, 0, 0, 1);
   --default-transition-duration: 120ms;
   --default-transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
@@ -120,8 +122,16 @@
     -webkit-font-smoothing: antialiased;
   }
 
+  /* The ground is a faint midnight gradient over a low-contrast grid; the
+     ambient light is a whisper and never competes with a figure. */
   body {
     background-color: var(--color-ground);
+    background-image: linear-gradient(to right, rgba(148, 163, 184, 0.03) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(148, 163, 184, 0.03) 1px, transparent 1px),
+      radial-gradient(1200px 640px at 12% -12%, rgba(53, 196, 232, 0.07), transparent 60%),
+      radial-gradient(1000px 560px at 88% 0%, rgba(90, 125, 255, 0.05), transparent 55%);
+    background-size: 44px 44px, 44px 44px, auto, auto;
+    background-attachment: fixed;
     color: var(--color-ink);
     font-family: var(--font-sans);
     font-size: 14px;
@@ -148,7 +158,7 @@
   }
 
   ::selection {
-    background: rgba(74, 138, 214, 0.32);
+    background: rgba(53, 196, 232, 0.32);
     color: #ffffff;
   }
 
@@ -192,16 +202,26 @@
 
 @layer components {
   /* --- Surfaces ---------------------------------------------------------- */
-  /* A card is DARKER than the ground; its 1px line is a whisper, never a box. */
+  /* A card sits one step ABOVE the ground and is closed by a cool 1px line. */
   .panel {
     background-color: var(--color-surface);
     border: 1px solid var(--color-line);
     border-radius: var(--radius-card);
+    box-shadow: var(--shadow-soft);
   }
 
   .panel-flush {
     background-color: var(--color-surface);
     border-radius: var(--radius-card);
+    box-shadow: var(--shadow-soft);
+  }
+
+  /* An elevated surface for peaks that need to sit above the stack. */
+  .panel-raised {
+    background-color: var(--color-raised);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-soft);
   }
 
   /* A row that only earns a rule, not a box */
@@ -277,8 +297,13 @@
   /* A skeleton breathes; it does not sweep a gradient across the screen. */
   .skeleton {
     border-radius: 4px;
-    background-color: rgba(255, 255, 255, 0.05);
+    background-color: rgba(237, 242, 249, 0.05);
     animation: vp-breathe 1.8s ease-in-out infinite;
+  }
+
+  /* A live figure briefly flags itself when its value changes. */
+  .flash-update {
+    animation: vp-flash 900ms var(--ease-snap);
   }
 }
 
@@ -301,6 +326,15 @@
   }
   50% {
     opacity: 0.55;
+  }
+}
+
+@keyframes vp-flash {
+  0% {
+    background-color: rgba(53, 196, 232, 0.16);
+  }
+  100% {
+    background-color: transparent;
   }
 }
 

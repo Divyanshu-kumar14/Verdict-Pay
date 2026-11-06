@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { CalendarClock } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
+import type { Variants } from "motion/react";
 
 import { PageHeader, PageMeta } from "@/components/PageHeader";
 import { Badge } from "@/components/ui/Badge";
@@ -18,6 +20,7 @@ import {
   formatClock,
   formatDayLabel,
   formatDueIn,
+  formatInteger,
   formatPercent,
   formatUsd,
   formatWeekday,
@@ -26,11 +29,13 @@ import {
 } from "@/lib/format";
 import { useNow } from "@/lib/hooks/useNow";
 import { usePolledQuery } from "@/lib/hooks/usePolledQuery";
+import { EASE_OUT, stagger } from "@/lib/motion";
 import type { DisputeSummary } from "@/lib/types";
-import { REASON_META, type Tone, TONE_BAR, TONE_DOT } from "@/lib/vocab";
+import { REASON_META, TONE_BAR, TONE_DOT, type Tone } from "@/lib/vocab";
 
 const DAY_MS = 86_400_000;
 const WINDOW_DAYS = 14;
+const DAY_PCT = 100 / WINDOW_DAYS;
 const OPEN_STATUSES: DisputeSummary["status"][] = [
   "OPEN",
   "WAITING_FOR_SELLER_RESPONSE",
@@ -56,9 +61,29 @@ const LEGEND: Urgency[] = [
   { label: "More than 7 days", tone: "positive" },
 ];
 
-/* The day headers read in the viewer's own time zone, so a deadline cell printed as a
-   UTC ISO date could name the day before or after the column it sits in near midnight.
-   Format it with the same local-day helper the headers use. */
+/* The bar grows into place, the diamond end marker pops in after it. Both stay
+   behind the shared stagger parent so the entrance runs only on first mount. */
+const BAR_MOTION: Variants = {
+  hidden: { scaleX: 0 },
+  show: { scaleX: 1, transition: { duration: 0.5, ease: EASE_OUT } },
+};
+
+const DIAMOND_MOTION: Variants = {
+  hidden: { opacity: 0, scale: 0.4 },
+  show: { opacity: 1, scale: 1, transition: { duration: 0.2, ease: EASE_OUT } },
+};
+
+/* Hour-and-minute clock for the now-line label (the full formatClock carries
+   sub-second noise that a wall-clock tick does not need). */
+const nowClock = new Intl.DateTimeFormat("en-GB", {
+  hour: "2-digit",
+  minute: "2-digit",
+  hour12: false,
+});
+
+/* The day headers read in the viewer's own time zone, so a deadline cell printed
+   as a UTC ISO date could name the day before or after the column it sits in
+   near midnight. Format it with the same local-day helper the headers use. */
 function isoDate(date: string | null): string {
   const ms = isoToMs(date);
   if (ms === null) return "-";
@@ -68,7 +93,7 @@ function isoDate(date: string | null): string {
 function DayHeader({ now }: { now: number | null }) {
   return (
     <div className="grid grid-cols-[240px_minmax(0,1fr)] border-b border-rule">
-      <div className="flex items-center gap-2 px-4 py-2.5">
+      <div className="sticky left-0 z-sticky flex items-center gap-2 border-r border-rule bg-surface px-4 py-2.5">
         <CalendarClock size={12} className="text-muted" aria-hidden />
         <span className="text-sm text-muted">Case, seller response deadline</span>
       </div>
@@ -87,9 +112,16 @@ function DayHeader({ now }: { now: number | null }) {
               <div className={cn("text-sm", isToday ? "text-ink" : "text-muted")}>
                 {isToday ? "Today" : day ? formatWeekday(day) : "-"}
               </div>
-              <div className="num mt-0.5 text-sm text-muted">
-                {day ? formatDayLabel(day) : "-"}
-              </div>
+              {isToday && day ? (
+                <div className="num mt-0.5 flex items-center gap-1 text-2xs font-medium text-accent">
+                  <span aria-hidden className="live-dot h-1.5 w-1.5 rounded-full bg-accent" />
+                  now {nowClock.format(day)}
+                </div>
+              ) : (
+                <div className="num mt-0.5 text-sm text-muted">
+                  {day ? formatDayLabel(day) : "-"}
+                </div>
+              )}
             </div>
           );
         })}
@@ -98,17 +130,28 @@ function DayHeader({ now }: { now: number | null }) {
   );
 }
 
+/* The lane backdrop: three severity bands read left-to-right from the now line
+   (overdue → due-soon → future), then the 14 column rules and the accent now
+   line on top. Rendered per row so every lane stays aligned to the grid. */
 function LaneGrid() {
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0">
+      <span
+        className="absolute inset-y-0 left-0 bg-negative/10"
+        style={{ width: DAY_PCT + "%" }}
+      />
+      <span
+        className="absolute inset-y-0 bg-warning/5"
+        style={{ left: DAY_PCT + "%", width: DAY_PCT * 2 + "%" }}
+      />
       {Array.from({ length: WINDOW_DAYS }, (_, index) => (
         <span
           key={index}
           className="absolute inset-y-0 border-l border-rule"
-          style={{ left: (index / WINDOW_DAYS) * 100 + "%" }}
+          style={{ left: index * DAY_PCT + "%" }}
         />
       ))}
-      <span className="absolute inset-y-0 left-0 w-px bg-accent" />
+      <span className="absolute inset-y-0 left-0 w-[2px] bg-accent" />
     </div>
   );
 }
@@ -122,16 +165,26 @@ function TimelineRow({ dispute, now }: { dispute: DisputeSummary; now: number })
       ? 0
       : clamp(((dueMs - now) / (WINDOW_DAYS * DAY_MS)) * 100, 1.4, 100);
   const beyondWindow = dueMs !== null && dueMs > now + WINDOW_DAYS * DAY_MS;
+  const daysBeyond =
+    beyondWindow && dueMs !== null
+      ? Math.ceil((dueMs - (now + WINDOW_DAYS * DAY_MS)) / DAY_MS)
+      : 0;
   const reason = REASON_META[dispute.reason_code];
   const overdue = daysLeft !== null && daysLeft <= 0;
 
   return (
     <Link
       href={"/disputes/" + encodeURIComponent(dispute.dispute_id)}
-      className="group grid grid-cols-[240px_minmax(0,1fr)] border-b border-rule transition-colors duration-120 last:border-b-0 hover:bg-raised/60"
+      className="group grid grid-cols-[240px_minmax(0,1fr)] border-b border-rule transition-colors duration-120 last:border-b-0"
       aria-label={"Open case " + dispute.dispute_id + ", " + (urgency ? urgency.label : "no deadline")}
     >
-      <div className="min-w-0 border-r border-rule px-4 py-2.5">
+      <div className="relative min-w-0 border-r border-rule bg-surface px-4 py-2.5 transition-colors duration-120 group-hover:bg-raised/60">
+        {overdue ? (
+          <span
+            aria-hidden
+            className="absolute inset-y-0 left-0 w-[3px] bg-negative"
+          />
+        ) : null}
         <div className="flex items-center justify-between gap-2">
           <span className="num text-base text-ink" title={dispute.dispute_id}>
             {shortHash(dispute.dispute_id, 10, 3)}
@@ -151,32 +204,63 @@ function TimelineRow({ dispute, now }: { dispute: DisputeSummary; now: number })
         </div>
       </div>
 
-      <div className="relative h-row">
+      <div className="relative h-row transition-colors duration-120 group-hover:bg-raised/30">
         <LaneGrid />
         {dueMs !== null && urgency ? (
-          <span
-            className="absolute top-1/2 -translate-y-1/2"
-            style={{ left: 0, width: width + "%" }}
-            title={dispute.dispute_id + " · due " + formatAbsolute(dispute.seller_response_due_date)}
-          >
-            <span
-              className={cn("block h-[9px] rounded-full", TONE_BAR[urgency.tone])}
-            />
-            <span
-              aria-hidden
-              className={cn(
-                "absolute top-1/2 h-2.5 w-2.5 -translate-y-1/2 rotate-45 bg-ground",
-                TONE_DOT[urgency.tone],
-              )}
-              style={{ right: -5 }}
-            />
+          <span className="absolute inset-y-0" style={{ left: 0, width: width + "%" }}>
+            <span className="flex h-full items-center">
+              <motion.span
+                variants={BAR_MOTION}
+                className={cn("block h-[9px] w-full rounded-full", TONE_BAR[urgency.tone])}
+                style={{ transformOrigin: "left center" }}
+              />
+            </span>
+            <span className="absolute right-[-5px] top-[calc(50%_-_5px)] h-2.5 w-2.5">
+              <motion.span variants={DIAMOND_MOTION} className="block h-full w-full">
+                <span
+                  aria-hidden
+                  className={cn("block h-full w-full rotate-45 rounded-[2px]", TONE_DOT[urgency.tone])}
+                />
+              </motion.span>
+            </span>
             {beyondWindow ? (
-              <span className="absolute -right-3 top-1/2 -translate-y-1/2 text-xs text-muted">
-                +
+              <span
+                className="absolute right-[14px] top-1/2 -translate-y-1/2 rounded-control border border-line bg-raised px-1.5 text-2xs text-accent"
+                title={daysBeyond + " days beyond the 14-day window"}
+              >
+                +{daysBeyond}
               </span>
             ) : null}
-            <span className="pointer-events-none absolute left-0 top-[-26px] hidden whitespace-nowrap rounded-card border border-control bg-raised px-2 py-1 text-sm text-ink shadow-float group-hover:block group-focus-visible:block">
-              Due {formatAbsolute(dispute.seller_response_due_date)} · p(win) {formatPercent(dispute.p_win)}
+            <span className="pointer-events-none absolute bottom-full right-0 z-sticky mb-2 hidden w-60 rounded-card border border-line bg-raised p-2.5 text-left shadow-float group-hover:block group-focus-visible:block">
+              <span className="block text-2xs text-muted">Open case</span>
+              <span
+                className="num mt-1 block text-sm font-medium text-ink"
+                title={dispute.dispute_id}
+              >
+                {shortHash(dispute.dispute_id, 16, 6)}
+              </span>
+              <span className="num mt-0.5 block text-xs text-muted">
+                payer {shortHash(dispute.payer_id, 8, 4)}
+              </span>
+              <span className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                <Badge tone={reason.tone}>{reason.short}</Badge>
+                <Badge tone={urgency.tone}>{urgency.label}</Badge>
+              </span>
+              <span className="num mt-1.5 flex items-center justify-between gap-2 text-xs">
+                <span className="text-muted">amount</span>
+                <span className="text-ink">{formatUsd(dispute.amount_usd)}</span>
+              </span>
+              <span className="num mt-0.5 flex items-center justify-between gap-2 text-xs">
+                <span className="text-muted">deadline</span>
+                <span className="text-ink">
+                  {formatAbsolute(dispute.seller_response_due_date)}
+                </span>
+              </span>
+              {beyondWindow ? (
+                <span className="mt-1.5 block text-2xs text-accent">
+                  +{daysBeyond} days beyond the 14-day window
+                </span>
+              ) : null}
             </span>
           </span>
         ) : (
@@ -191,6 +275,7 @@ function TimelineRow({ dispute, now }: { dispute: DisputeSummary; now: number })
 
 /** /timeline: a 14-day SLA board over a Bryntum-shaped resource/event model. */
 export function TimelineBoard() {
+  const reduced = useReducedMotion() ?? false;
   const now = useNow(30000);
   const query = usePolledQuery(
     "timeline:queue",
@@ -259,6 +344,8 @@ export function TimelineBoard() {
                 className="bg-surface"
                 label="Open cases"
                 value={open.length}
+                countValue={open.length}
+                countFormat={formatInteger}
                 sub={
                   query.data
                     ? query.data.meta.total + " total cases on file"
@@ -269,6 +356,8 @@ export function TimelineBoard() {
                 className="bg-surface"
                 label="Due in 72h or less"
                 value={atRisk.length}
+                countValue={atRisk.length}
+                countFormat={formatInteger}
                 sub="Includes overdue cases"
                 tone="warning"
               />
@@ -283,6 +372,8 @@ export function TimelineBoard() {
                 className="bg-surface"
                 label="No deadline"
                 value={undated.length}
+                countValue={undated.length}
+                countFormat={formatInteger}
                 sub="No seller_response_due_date recorded"
               />
             </>
@@ -301,7 +392,7 @@ export function TimelineBoard() {
       <Panel className="overflow-hidden">
         <PanelHeader
           title="Seller response deadlines"
-          description="Each row is one case and one window from now to its deadline. The axis is rendered as a CSS grid, with no scheduler runtime."
+          description="Each row is one case and one window from now to its deadline. The axis renders over the now line, an overdue rail, a due-soon band and a neutral future, on a CSS grid with no scheduler runtime."
           actions={
             <div className="flex flex-wrap items-center gap-2">
               {LEGEND.map((item) => (
@@ -351,13 +442,19 @@ export function TimelineBoard() {
             <div className="min-w-[980px]">
               <DayHeader now={now} />
               <div className="border-t border-accent" aria-hidden />
-              {dated.map((dispute) => (
-                <TimelineRow
-                  key={dispute.dispute_id}
-                  dispute={dispute}
-                  now={referenceNow}
-                />
-              ))}
+              <motion.div
+                variants={stagger}
+                initial={reduced ? false : "hidden"}
+                animate="show"
+              >
+                {dated.map((dispute) => (
+                  <TimelineRow
+                    key={dispute.dispute_id}
+                    dispute={dispute}
+                    now={referenceNow}
+                  />
+                ))}
+              </motion.div>
             </div>
           </div>
         )}

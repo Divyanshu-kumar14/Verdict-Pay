@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { motion, useReducedMotion } from "motion/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
@@ -20,15 +21,11 @@ import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { Panel } from "@/components/ui/Panel";
 import { ProgressBar } from "@/components/ui/ProgressBar";
 import { Skeleton, SkeletonLines } from "@/components/ui/Skeleton";
+import { StatTile } from "@/components/ui/StatTile";
 import { api, toApiError, type ApiError } from "@/lib/api";
 import { cn } from "@/lib/cn";
 import { describeContainment, parseContainment } from "@/lib/containment";
-import {
-  bestEvPath,
-  fightEvNote,
-  offerEvNote,
-  settleEvNote,
-} from "@/lib/ev";
+import { bestEvPath, fightEvNote, offerEvNote, settleEvNote } from "@/lib/ev";
 import {
   formatClock,
   formatDelta,
@@ -42,6 +39,7 @@ import {
 } from "@/lib/format";
 import { useNow } from "@/lib/hooks/useNow";
 import type { PolledQuery } from "@/lib/hooks/usePolledQuery";
+import { stagger, staggerItem } from "@/lib/motion";
 import type {
   ActionResponse,
   CustomerTimeline,
@@ -125,7 +123,7 @@ function VerdictCard({
     : blockedReason;
 
   return (
-    <Panel className="relative overflow-hidden">
+    <Panel className="panel-raised relative overflow-hidden">
       <span aria-hidden className="sig-edge absolute inset-y-0 left-0" />
 
       <div className="px-4 py-4 sm:px-5">
@@ -201,12 +199,14 @@ function VerdictCard({
 
         <div className="row-rule mt-5 pt-4">
           <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
-            <div>
-              <p className="label">Win probability</p>
-              <p className="num value mt-1 text-lg text-ink">
-                {formatPercent(detail.p_win)}
-              </p>
-            </div>
+            <StatTile
+              label="Win probability"
+              tone="accent"
+              emphasis="lead"
+              countValue={detail.p_win}
+              countFormat={formatPercent}
+              className="px-0 py-0"
+            />
             <dl className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
               <div>
                 <dt className="label">Completeness</dt>
@@ -300,13 +300,19 @@ function CaseSummary({ detail, now }: { detail: DisputeDetail; now: number | nul
           </dl>
         </div>
         <div className="text-right">
-          <p className="label">Claim amount</p>
-          <p className="num value mt-1 text-lg text-ink">{formatUsd(detail.amount_usd)}</p>
-          <p className="mt-1 text-sm text-muted">
-            {now === null
-              ? "Deadline unknown"
-              : formatDueIn(detail.seller_response_due_date, now)}
-          </p>
+          <StatTile
+            label="Claim amount"
+            tone="neutral"
+            emphasis="lead"
+            countValue={detail.amount_usd}
+            countFormat={formatUsd}
+            className="px-0 py-0"
+            sub={
+              now === null
+                ? "Deadline unknown"
+                : formatDueIn(detail.seller_response_due_date, now)
+            }
+          />
         </div>
       </div>
     </Panel>
@@ -452,6 +458,7 @@ export function CommandCenter({
   onCaseChanged,
 }: CommandCenterProps) {
   const now = useNow();
+  const reduced = useReducedMotion() ?? false;
   const detail = caseQuery.data;
   const refreshCase = caseQuery.refresh;
 
@@ -569,6 +576,8 @@ export function CommandCenter({
       ? Math.max(...evValues.map((value) => Math.abs(value)), 1)
       : 1;
 
+  const revealInitial = reduced ? false : "hidden";
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -634,8 +643,14 @@ export function CommandCenter({
           <SkeletonLines lines={5} />
         </div>
       ) : (
-        <div className="grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-          <div className="space-y-4">
+        <motion.div
+          key={activeDisputeId ?? "none"}
+          variants={stagger}
+          initial={revealInitial}
+          animate="show"
+          className="grid gap-4 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]"
+        >
+          <motion.div variants={staggerItem} className="space-y-4">
             {caseQuery.error ? (
               <ErrorBanner
                 error={caseQuery.error}
@@ -689,9 +704,9 @@ export function CommandCenter({
                 />
               </div>
             </Panel>
-          </div>
+          </motion.div>
 
-          <div className="space-y-4">
+          <motion.div variants={staggerItem} className="space-y-4">
             <CaseSummary detail={detail} now={now} />
 
             {containmentHeadline ? (
@@ -802,9 +817,9 @@ export function CommandCenter({
                 </p>
               ) : null}
             </Panel>
-          </div>
+          </motion.div>
 
-          <div className="lg:col-span-2">
+          <motion.div variants={staggerItem} className="lg:col-span-2">
             <TelemetryLedger
               events={events}
               chainValid={chainValid}
@@ -812,8 +827,8 @@ export function CommandCenter({
               loading={timeline.loading}
               error={timeline.error}
             />
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
       )}
     </div>
   );

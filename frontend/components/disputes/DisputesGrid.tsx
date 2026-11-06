@@ -6,14 +6,17 @@ import {
   type GridReadyEvent,
   type GridSizeChangedEvent,
   type ICellRendererParams,
+  type RowClassParams,
   type RowClickedEvent,
 } from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
 import { useMemo } from "react";
 
+import { Badge } from "@/components/ui/Badge";
 import { GRID_THEME } from "@/lib/ag-grid";
 import { cn } from "@/lib/cn";
 import { formatAbsolute, formatDueIn, formatUsd, isoToMs, shortHash } from "@/lib/format";
+import { useNow } from "@/lib/hooks/useNow";
 import type { DisputeSummary } from "@/lib/types";
 import { REASON_META, RECOMMENDATION_META, STAGE_META } from "@/lib/vocab";
 
@@ -32,7 +35,6 @@ const ISO_DATE_PREFIX = /^[0-9]{4}-[0-9]{2}-[0-9]{2}/;
 
 export type DisputesGridProps = {
   rows: DisputeSummary[];
-  now: number;
   onRowClick?: (disputeId: string) => void;
   height?: number;
   compact?: boolean;
@@ -74,7 +76,7 @@ function AmountCell({ params }: { params: ICellRendererParams<DisputeSummary> })
   const data = params.data;
   if (!data) return null;
   return (
-    <span className="num block truncate text-right text-sm text-muted">
+    <span className="num block truncate text-right text-sm text-ink">
       {formatUsd(data.amount_usd)}
     </span>
   );
@@ -84,7 +86,7 @@ function ExpectedLossCell({ params }: { params: ICellRendererParams<DisputeSumma
   const data = params.data;
   if (!data) return null;
   return (
-    <span className="num block truncate text-right text-sm text-muted">
+    <span className="num block truncate text-right text-sm text-muted" title="Expected loss">
       {formatUsd(data.ev_settle_usd)}
     </span>
   );
@@ -95,13 +97,17 @@ function RecommendedCell({ params }: { params: ICellRendererParams<DisputeSummar
   if (!data) return null;
   const meta = RECOMMENDATION_META[data.recommended_action];
   return (
-    <span className="block truncate text-sm text-muted" title={meta.label}>
-      {meta.label}
-    </span>
+    <Badge tone={meta.tone} title={meta.label}>
+      {meta.short}
+    </Badge>
   );
 }
 
-function DueCell({ params, now }: { params: ICellRendererParams<DisputeSummary>; now: number }) {
+function DueCell({ params }: { params: ICellRendererParams<DisputeSummary> }) {
+  // Tick on its own clock so deadline polarity can flip in place without the
+  // parent re-rendering the grid's column definitions (which would reset sort
+  // and scroll).
+  const now = useNow(60000) ?? Date.now();
   const data = params.data;
   if (!data) return null;
   const due = data.seller_response_due_date;
@@ -125,14 +131,22 @@ function DueCell({ params, now }: { params: ICellRendererParams<DisputeSummary>;
   );
 }
 
-/** AG Grid Community triage queue. Default sort is seller response due date ascending. */
+/**
+ * AG Grid Community triage queue. Default sort is seller response due date
+ * ascending. Rows carry a left accent bar for their deadline risk: negative for
+ * overdue, warning for due soon, none for the rest.
+ */
 export function DisputesGrid({
   rows,
-  now,
   onRowClick,
   height = 560,
   compact = false,
 }: DisputesGridProps) {
+  // One render-scope clock for the row accent; DueCell keeps its own so it can
+  // refresh in place. Neither is part of the column definitions, so sorting and
+  // scroll survive every tick.
+  const now = useNow(60000) ?? Date.now();
+
   const columnDefs = useMemo<ColDef<DisputeSummary>[]>(() => {
     const caseColumn: ColDef<DisputeSummary> = {
       headerName: "Case",
@@ -188,9 +202,7 @@ export function DisputesGrid({
         const rightMs = isoToMs(right) ?? Number.POSITIVE_INFINITY;
         return leftMs - rightMs;
       },
-      cellRenderer: (params: ICellRendererParams<DisputeSummary>) => (
-        <DueCell params={params} now={now} />
-      ),
+      cellRenderer: (params: ICellRendererParams<DisputeSummary>) => <DueCell params={params} />,
     };
     const recommendedColumn: ColDef<DisputeSummary> = {
       headerName: "Recommended",
@@ -215,7 +227,7 @@ export function DisputesGrid({
       dueColumn,
       recommendedColumn,
     ];
-  }, [compact, now]);
+  }, [compact]);
 
   return (
     <div role="region" aria-label="Dispute triage grid" className="w-full" style={{ height }}>
@@ -225,12 +237,24 @@ export function DisputesGrid({
         columnDefs={columnDefs}
         defaultColDef={DEFAULT_COL_DEF}
         getRowId={(params) => params.data.dispute_id}
+        rowSelection={{ mode: "singleRow", checkboxes: false, enableClickSelection: true }}
         animateRows={false}
         suppressCellFocus={false}
         ensureDomOrder
         enableCellTextSelection
         suppressDragLeaveHidesColumns
         rowClass="cursor-pointer"
+        getRowStyle={(params: RowClassParams<DisputeSummary>) => {
+          const data = params.data;
+          if (!data) return undefined;
+          const dueMs = isoToMs(data.seller_response_due_date);
+          if (dueMs === null) return undefined;
+          if (dueMs < now) return { boxShadow: "inset 3px 0 0 var(--color-negative)" };
+          if (dueMs - now <= SOON_WINDOW_MS) {
+            return { boxShadow: "inset 3px 0 0 var(--color-warning)" };
+          }
+          return undefined;
+        }}
         // Columns carry fixed widths that total more than the card at narrow
         // widths, which pushed the header viewport past its container and made
         // the grid scroll under its own frame. Fit the columns to whatever

@@ -1,17 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { ChevronLeft, ChevronRight, Search } from "lucide-react";
+import { ChevronLeft, ChevronRight, Search, X } from "lucide-react";
+import { motion, useReducedMotion } from "motion/react";
 import { useMemo, useState, type ReactNode } from "react";
 
 import { PageHeader, PageMeta } from "@/components/PageHeader";
 import { DisputesGridLoader } from "@/components/disputes/DisputesGridLoader";
+import { DisputeDrawer } from "@/components/disputes/DisputeDrawer";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
-import { Panel, PanelBody, PanelHeader } from "@/components/ui/Panel";
+import { Panel, PanelFooter, PanelHeader } from "@/components/ui/Panel";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { StatTile } from "@/components/ui/StatTile";
 import { api } from "@/lib/api";
@@ -19,7 +20,9 @@ import { cn } from "@/lib/cn";
 import { formatPercent, formatUsd, isoToMs } from "@/lib/format";
 import { useNow } from "@/lib/hooks/useNow";
 import { usePolledQuery } from "@/lib/hooks/usePolledQuery";
+import { SPRING, stagger, staggerItem } from "@/lib/motion";
 import type { DisputeSummary } from "@/lib/types";
+import type { Tone } from "@/lib/vocab";
 
 const PER_PAGE = 25;
 const DAY_MS = 86_400_000;
@@ -40,20 +43,39 @@ const QUICK_FILTERS: Array<{ key: QuickFilter; label: string }> = [
   { key: "nodossier", label: "No dossier" },
 ];
 
-/** A KPI reading: label over a tabular figure, right-aligned in its column. */
-function Kpi({ label, value, sub }: { label: string; value: ReactNode; sub: ReactNode }) {
+type KpiStatus = "loading" | "ready" | "error";
+
+/** A KPI reading: a count-up tabular figure with a supporting line beneath it. */
+function KpiTile({
+  label,
+  tone = "neutral",
+  status,
+  valueNumber,
+  valueFormat,
+  sub,
+}: {
+  label: string;
+  tone?: Tone;
+  status: KpiStatus;
+  valueNumber: number;
+  valueFormat: (n: number) => string;
+  sub: ReactNode;
+}) {
+  // The semantic tone applies only once the figure is real; the zero count-up
+  // and the error dash both render in neutral ink rather than a false polarity.
+  const ready = status === "ready";
   return (
     <StatTile
-      className="bg-surface"
+      className="h-full bg-surface"
+      emphasis="lead"
       label={label}
-      value={<span className="block text-right">{value}</span>}
+      tone={ready ? tone : "neutral"}
       sub={sub}
+      value={ready || status === "loading" ? undefined : "—"}
+      countValue={ready || status === "loading" ? valueNumber : undefined}
+      countFormat={ready || status === "loading" ? valueFormat : undefined}
     />
   );
-}
-
-function KpiValueBar() {
-  return <span aria-hidden className="skeleton ml-auto block h-5 w-28" />;
 }
 
 function KpiSubBar() {
@@ -84,10 +106,11 @@ function matchesQuick(row: DisputeSummary, quick: QuickFilter, now: number): boo
 
 /** /disputes - the triage queue, priced by the EV engine and read by deadline. */
 export function DisputesWorkspace() {
-  const router = useRouter();
+  const reduced = useReducedMotion() ?? false;
   const [page, setPage] = useState(1);
   const [filter, setFilter] = useState("");
   const [quick, setQuick] = useState<QuickFilter>("all");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const now = useNow(15000);
 
   const query = usePolledQuery(
@@ -112,6 +135,7 @@ export function DisputesWorkspace() {
 
   const activeFilterCount = (filter.trim().length > 0 ? 1 : 0) + (quick === "all" ? 0 : 1);
   const summaryData = summary.data;
+  const summaryStatus: KpiStatus = summaryData ? "ready" : summary.error ? "error" : "loading";
 
   const gridHeight = Math.min(
     GRID_MAX_HEIGHT,
@@ -144,65 +168,91 @@ export function DisputesWorkspace() {
         }
       />
 
-      <Panel role="group" aria-label="Exposure readings" className="grid grid-cols-2 gap-px overflow-hidden bg-rule xl:grid-cols-4">
-        <Kpi
-          label="Open exposure"
-          value={summaryData ? formatUsd(summaryData.total_exposure_usd) : summary.loading ? <KpiValueBar /> : "-"}
-          sub={
-            summaryData ? (
-              summaryData.open_cases + " open · " + summaryData.in_inquiry + " inquiry / " + summaryData.in_claim + " claim"
-            ) : summary.loading ? (
-              <KpiSubBar />
-            ) : (
-              "Reporting unavailable"
-            )
-          }
-        />
-        <Kpi
-          label="Protected"
-          value={summaryData ? formatUsd(summaryData.protected_usd) : summary.loading ? <KpiValueBar /> : "-"}
-          sub={
-            summaryData ? (
-              summaryData.chain_verified_customers + " chain-verified customers"
-            ) : summary.loading ? (
-              <KpiSubBar />
-            ) : (
-              "Reporting unavailable"
-            )
-          }
-        />
-        <Kpi
-          label="Fees avoided"
-          value={summaryData ? formatUsd(summaryData.fees_avoided_usd) : summary.loading ? <KpiValueBar /> : "-"}
-          sub={
-            summaryData ? (
-              summaryData.subscription_suspensions + " subscriptions suspended"
-            ) : summary.loading ? (
-              <KpiSubBar />
-            ) : (
-              "Reporting unavailable"
-            )
-          }
-        />
-        <Kpi
-          label="Average p(win)"
-          value={summaryData ? formatPercent(summaryData.avg_p_win) : summary.loading ? <KpiValueBar /> : "-"}
-          sub={
-            summaryData ? (
-              "win-rate estimate " +
-              formatPercent(summaryData.win_rate_estimate) +
-              " · ratio " +
-              formatPercent(summaryData.high_volume.ratio, 2) +
-              " / " +
-              formatPercent(summaryData.high_volume.threshold, 2)
-            ) : summary.loading ? (
-              <KpiSubBar />
-            ) : (
-              "Reporting unavailable"
-            )
-          }
-        />
-      </Panel>
+      <motion.div
+        variants={stagger}
+        initial={reduced ? false : "hidden"}
+        animate="show"
+        role="group"
+        aria-label="Exposure readings"
+        className="panel grid grid-cols-2 gap-px overflow-hidden bg-rule xl:grid-cols-4"
+      >
+        <motion.div variants={staggerItem} className="bg-surface">
+          <KpiTile
+            label="Open exposure"
+            status={summaryStatus}
+            valueNumber={summaryData ? summaryData.total_exposure_usd : 0}
+            valueFormat={formatUsd}
+            sub={
+              summaryData ? (
+                summaryData.open_cases +
+                " open · " +
+                summaryData.in_inquiry +
+                " in inquiry · " +
+                summaryData.in_claim +
+                " in claim"
+              ) : summaryStatus === "error" ? (
+                "Reporting unavailable"
+              ) : (
+                <KpiSubBar />
+              )
+            }
+          />
+        </motion.div>
+        <motion.div variants={staggerItem} className="bg-surface">
+          <KpiTile
+            label="Protected"
+            tone="positive"
+            status={summaryStatus}
+            valueNumber={summaryData ? summaryData.protected_usd : 0}
+            valueFormat={formatUsd}
+            sub={
+              summaryData ? (
+                summaryData.chain_verified_customers + " chain-verified customers"
+              ) : summaryStatus === "error" ? (
+                "Reporting unavailable"
+              ) : (
+                <KpiSubBar />
+              )
+            }
+          />
+        </motion.div>
+        <motion.div variants={staggerItem} className="bg-surface">
+          <KpiTile
+            label="Fees avoided"
+            tone="positive"
+            status={summaryStatus}
+            valueNumber={summaryData ? summaryData.fees_avoided_usd : 0}
+            valueFormat={formatUsd}
+            sub={
+              summaryData ? (
+                summaryData.subscription_suspensions + " subscriptions suspended"
+              ) : summaryStatus === "error" ? (
+                "Reporting unavailable"
+              ) : (
+                <KpiSubBar />
+              )
+            }
+          />
+        </motion.div>
+        <motion.div variants={staggerItem} className="bg-surface">
+          <KpiTile
+            label="Average p(win)"
+            tone="accent"
+            status={summaryStatus}
+            valueNumber={summaryData ? summaryData.avg_p_win : 0}
+            valueFormat={formatPercent}
+            sub={
+              summaryData ? (
+                "win-rate estimate " + formatPercent(summaryData.win_rate_estimate)
+              ) : summaryStatus === "error" ? (
+                "Reporting unavailable"
+              ) : (
+                <KpiSubBar />
+              )
+            }
+          />
+        </motion.div>
+      </motion.div>
 
       {summary.error ? (
         <ErrorBanner
@@ -224,7 +274,7 @@ export function DisputesWorkspace() {
         />
 
         <div className="row-rule flex flex-wrap items-center gap-x-3 gap-y-2.5 px-4 py-2.5">
-          <div className="relative">
+          <div className="relative w-full sm:w-64">
             <Search
               size={13}
               aria-hidden
@@ -236,11 +286,21 @@ export function DisputesWorkspace() {
               onChange={(event) => setFilter(event.target.value)}
               placeholder="Filter id, payer, or reason"
               aria-label="Filter dispute cases"
-              className="h-control w-64 rounded-card border border-control bg-raised pr-3 pl-8 text-sm text-ink placeholder:text-muted"
+              className="h-control w-full rounded-card border border-control bg-raised pr-8 pl-8 text-sm text-ink placeholder:text-muted [&::-webkit-search-cancel-button]:hidden"
             />
+            {filter.length > 0 ? (
+              <button
+                type="button"
+                aria-label="Clear search"
+                onClick={() => setFilter("")}
+                className="absolute top-1/2 right-2 -translate-y-1/2 rounded-full p-1 text-muted transition-colors duration-120 hover:text-ink"
+              >
+                <X size={13} aria-hidden />
+              </button>
+            ) : null}
           </div>
 
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1" role="group" aria-label="Quick filters">
+          <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Quick filters">
             {QUICK_FILTERS.map((option) => {
               const active = quick === option.key;
               return (
@@ -250,11 +310,26 @@ export function DisputesWorkspace() {
                   aria-pressed={active}
                   onClick={() => setQuick(option.key)}
                   className={cn(
-                    "relative py-1 text-sm transition-colors duration-120",
-                    active ? "sig text-ink" : "text-muted hover:text-ink",
+                    "relative h-7 rounded-full px-3 text-sm transition-colors duration-120",
+                    active ? "text-ink" : "text-muted hover:text-ink",
                   )}
                 >
-                  {option.label}
+                  {active ? (
+                    reduced ? (
+                      <span
+                        aria-hidden
+                        className="absolute inset-0 rounded-full border border-line bg-raised"
+                      />
+                    ) : (
+                      <motion.span
+                        layoutId="disputes-quick-filter"
+                        transition={SPRING}
+                        aria-hidden
+                        className="absolute inset-0 rounded-full border border-line bg-raised"
+                      />
+                    )
+                  ) : null}
+                  <span className="relative z-[1]">{option.label}</span>
                 </button>
               );
             })}
@@ -294,7 +369,7 @@ export function DisputesWorkspace() {
               action={
                 <Link
                   href="/"
-                  className="inline-flex h-8 items-center rounded-full border border-control bg-raised px-3 text-xs font-medium text-ink transition-colors duration-120 hover:bg-[#29282c]"
+                  className="inline-flex h-8 items-center rounded-full border border-control bg-raised px-3 text-xs font-medium text-ink transition-colors duration-120 hover:bg-raised/80"
                 >
                   Run the sandbox flow
                 </Link>
@@ -321,11 +396,8 @@ export function DisputesWorkspace() {
             <div className="overflow-hidden" style={{ height: gridHeight }}>
               <DisputesGridLoader
                 rows={visible}
-                now={referenceNow}
                 height={gridHeight}
-                onRowClick={(disputeId) => {
-                  router.push("/disputes/" + encodeURIComponent(disputeId));
-                }}
+                onRowClick={(disputeId) => setSelectedId(disputeId)}
               />
             </div>
           )}
@@ -341,34 +413,43 @@ export function DisputesWorkspace() {
           </div>
         ) : null}
 
-        <PanelBody className="row-rule flex flex-wrap items-center justify-between gap-2">
+        <PanelFooter className="flex flex-wrap items-center justify-between gap-2">
           <span className="num text-2xs text-muted">
-            {meta
-              ? "page " + meta.page + " / " + totalPages + " · " + meta.total + " cases · " + meta.per_page + " per page"
-              : "page -"}
+            {meta ? meta.total + " cases · " + meta.per_page + " per page" : "0 cases"}
           </span>
           <div className="flex items-center gap-2">
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={page <= 1}
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
-              icon={<ChevronLeft size={13} aria-hidden />}
-            >
-              Prev
-            </Button>
-            <Button
-              variant="secondary"
-              size="sm"
-              disabled={page >= totalPages}
-              onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
-              trailingIcon={<ChevronRight size={13} aria-hidden />}
-            >
-              Next
-            </Button>
+            <span className="num text-2xs text-muted">
+              Page {meta ? meta.page : 1} of {totalPages}
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={page <= 1}
+                onClick={() => setPage((current) => Math.max(1, current - 1))}
+                icon={<ChevronLeft size={13} aria-hidden />}
+              >
+                Prev
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={page >= totalPages}
+                onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+                trailingIcon={<ChevronRight size={13} aria-hidden />}
+              >
+                Next
+              </Button>
+            </div>
           </div>
-        </PanelBody>
+        </PanelFooter>
       </Panel>
+
+      <DisputeDrawer
+        disputeId={selectedId ?? ""}
+        open={selectedId !== null}
+        onClose={() => setSelectedId(null)}
+      />
     </div>
   );
 }
