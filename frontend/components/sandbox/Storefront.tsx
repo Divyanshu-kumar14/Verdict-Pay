@@ -69,7 +69,7 @@ function StepNode({ rail, index, reduced }: { rail: RailState; index: number; re
 
 function RailConnector({ filled, reduced }: { filled: boolean; reduced: boolean }) {
   return (
-    <div aria-hidden className="mx-auto h-4 w-px shrink-0 overflow-hidden relative sm:mx-0 sm:h-px sm:w-full sm:min-w-6 sm:self-center">
+    <div aria-hidden className="mx-auto h-4 w-px shrink-0 overflow-hidden relative sm:mx-0 sm:h-px sm:w-8 sm:self-center">
       <span className="absolute inset-0 bg-rule" />
       <motion.span
         className="absolute inset-0 bg-accent"
