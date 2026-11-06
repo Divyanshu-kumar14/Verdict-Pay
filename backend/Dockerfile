@@ -54,4 +54,9 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD curl -fsS http://localhost:8000/api/v1/health || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Seed the deterministic demo dataset, then hand over to the server.
+# The seed is idempotent and failure-tolerant: if it errors we log and still serve,
+# so a deploy never fails over optional demo data. Doing this in the image CMD
+# (rather than a host-specific "docker command" override) keeps 'docker run' and
+# every PaaS behaving identically.
+CMD ["sh", "-c", "python scripts/seed_demo.py || echo '[boot] seed skipped'; exec uvicorn app.main:app --host 0.0.0.0 --port 8000"]

@@ -3,9 +3,10 @@
 #   Dashboard: New + > Blueprint > connect this repo > Apply.
 #
 # WHAT THIS FIXES vs the first draft
-#   1. The API now SEEDS ON BOOT. The image CMD runs uvicorn only, so a fresh
-#      deploy previously came up with an empty database and the UI showed no
-#      cases. dockerCommand seeds first, then execs the server.
+#   1. The API SEEDS ON BOOT. The seed lives in the backend image's own CMD
+#      (backend/Dockerfile), not in a Render-only override, so 'docker run' and
+#      every host behave identically and a fresh deploy never comes up with an
+#      empty database.
 #   2. Secrets are shared through one env group. The web service needs the same
 #      VERDICTPAY_SIGNING_SECRET as the API, otherwise the server-side SDK route
 #      signs telemetry with a different key and every ingest is rejected.
@@ -54,11 +55,6 @@ services:
     dockerContext: .
     healthCheckPath: /api/v1/health
     autoDeploy: true
-    # Seed the deterministic demo dataset, then hand over to the server. The seed
-    # is idempotent; a failure is logged and the API still starts.
-    dockerCommand: >-
-      sh -c "python scripts/seed_demo.py || echo '[boot] seed skipped';
-      exec uvicorn app.main:app --host 0.0.0.0 --port 8000"
     envVars:
       - fromGroup: verdictpay-shared
       - key: APP_ENV
