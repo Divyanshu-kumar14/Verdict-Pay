@@ -53,3 +53,9 @@ artifacts/
 # Playwright / QA screenshots
 .qa/
 frontend/.qa/
+
+# Local agent tooling: never published
+.agent-teams/
+.taste-skill/
+.orchestrator/
+fix-frontend-gaps.md
