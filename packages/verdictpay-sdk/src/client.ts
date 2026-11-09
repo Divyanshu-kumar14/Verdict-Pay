@@ -26,7 +26,9 @@ const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_BATCH_SIZE = 10;
 const DEFAULT_FLUSH_INTERVAL_MS = 5_000;
+const DEFAULT_MAX_BUFFER_SIZE = 10_000;
 const MAX_BATCH_SIZE = 500;
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 const RETRY_BASE_MS = 250;
 const RETRY_MAX_MS = 2_000;
 const DEFAULT_CLIENT_IP = "0.0.0.0";
@@ -208,7 +210,12 @@ function normaliseOccurredAt(value: Date | string | undefined): string {
   return date.toISOString();
 }
 
-/** Validate metadata is a plain object. */
+/**
+ * Validate metadata is a JSON-serialisable plain object.
+ *
+ * Checked when the event is tracked: an unserialisable value found only at
+ * flush time would make the whole batch unsendable.
+ */
 function normaliseMetadata(value: Record<string, unknown> | undefined): Record<string, unknown> {
   if (value === undefined) {
     return {};
@@ -216,7 +223,14 @@ function normaliseMetadata(value: Record<string, unknown> | undefined): Record<s
   if (!isRecord(value)) {
     throw new VerdictPayError("validation_error", "metadata must be a plain object.");
   }
-  return { ...value };
+  let serialised: string;
+  try {
+    serialised = JSON.stringify(value);
+  } catch (cause) {
+    throw new VerdictPayError("validation_error", "metadata must be JSON-serialisable.", { cause });
+  }
+  // A snapshot, so later mutation by the caller cannot change a queued event.
+  return JSON.parse(serialised) as Record<string, unknown>;
 }
 
 /** Generate a replay-safe event id. */
@@ -258,8 +272,13 @@ function normaliseInteger(
   return value;
 }
 
-/** Validate and normalise the API base URL. */
-function normaliseBaseUrl(value: unknown): string {
+/**
+ * Validate and normalise the API base URL.
+ *
+ * Plain http is accepted only for local hosts: the API key travels in a
+ * header, so a remote http URL would send it in clear text.
+ */
+function normaliseBaseUrl(value: unknown, allowInsecureHttp: boolean): string {
   if (typeof value !== "string" || value.trim().length === 0) {
     throw new VerdictPayError("invalid_config", "baseUrl must be an absolute http(s) URL.");
   }
@@ -277,19 +296,41 @@ function normaliseBaseUrl(value: unknown): string {
   if (parsed.search.length > 0 || parsed.hash.length > 0) {
     throw new VerdictPayError("invalid_config", "baseUrl must not contain a query string or fragment.");
   }
-  return value.replace(/\/+$/, "");
+  if (parsed.username.length > 0 || parsed.password.length > 0) {
+    throw new VerdictPayError("invalid_config", "baseUrl must not contain credentials.");
+  }
+  if (parsed.protocol === "http:" && !LOCAL_HOSTS.has(parsed.hostname) && !allowInsecureHttp) {
+    throw new VerdictPayError(
+      "invalid_config",
+      "baseUrl must use https for non-local hosts (the API key would be sent in clear text). " +
+      "Pass allowInsecureHttp: true only on a trusted private network.",
+    );
+  }
+  return value.trim().replace(/\/+$/, "");
 }
 
 /** Empty result returned when flush() is called with nothing buffered. */
 function emptyFlushResult(): FlushResult {
-  return { accepted: 0, duplicates: 0, events: [], chain: null };
+  return { accepted: 0, duplicates: 0, rejected: 0, events: [], chain: null };
+}
+
+/**
+ * True when the API refused the request for good: a 4xx other than auth and
+ * rate limiting. Resending the same bytes would fail the same way.
+ */
+function isPermanentRejection(error: unknown): error is VerdictPayError {
+  if (!(error instanceof VerdictPayError) || error.status === undefined) {
+    return false;
+  }
+  const { status } = error;
+  return status >= 400 && status < 500 && status !== 401 && status !== 403 && status !== 429;
 }
 
 /**
  * VerdictPay telemetry client.
  *
  * @example
- * const client = new VerdictPayClient({ apiKey: "vp_...", webhookSecret: "..." });
+ * const client = new VerdictPayClient({ apiKey: "vp_...", signingSecret: "..." });
  * client.trackCheckout({ paypalPayerId: "YRZ829104KLA", tosVersion: "v2.4-2026-01", tosContentSha256: sha });
  * await client.flush();
  */
@@ -302,9 +343,13 @@ export class VerdictPayClient {
   private readonly timeoutMs: number;
   private readonly batchSize: number;
   private readonly flushIntervalMs: number;
+  private readonly maxBufferSize: number;
+  private readonly onError: ((error: VerdictPayError) => void) | undefined;
   private buffer: WireTelemetryEvent[] = [];
-  private timer: ReturnType<typeof setInterval> | null = null;
+  private timer: ReturnType<typeof setTimeout> | null = null;
   private flushChain: Promise<void> = Promise.resolve();
+  private closed = false;
+  private droppedCount = 0;
 
   /**
    * @param options API key, signing secret, endpoint and buffering behaviour.
@@ -317,8 +362,12 @@ export class VerdictPayClient {
     if (typeof options.apiKey !== "string" || options.apiKey.trim().length === 0) {
       throw new VerdictPayError("invalid_config", "apiKey must be a non-empty string.");
     }
-    if (typeof options.webhookSecret !== "string" || options.webhookSecret.trim().length === 0) {
-      throw new VerdictPayError("invalid_config", "webhookSecret must be a non-empty string.");
+    const secret = options.signingSecret ?? options.webhookSecret;
+    if (typeof secret !== "string" || secret.trim().length === 0) {
+      throw new VerdictPayError("invalid_config", "signingSecret must be a non-empty string.");
+    }
+    if (options.onError !== undefined && typeof options.onError !== "function") {
+      throw new VerdictPayError("invalid_config", "onError must be a function.");
     }
     const fetchImpl = options.fetch ?? globalThis.fetch;
     if (typeof fetchImpl !== "function") {
@@ -328,8 +377,16 @@ export class VerdictPayClient {
       );
     }
     this.apiKey = options.apiKey;
-    this.webhookSecret = options.webhookSecret;
-    this.baseUrl = normaliseBaseUrl(options.baseUrl ?? DEFAULT_BASE_URL);
+    this.webhookSecret = secret;
+    this.baseUrl = normaliseBaseUrl(options.baseUrl ?? DEFAULT_BASE_URL, options.allowInsecureHttp === true);
+    this.onError = options.onError;
+    this.maxBufferSize = normaliseInteger(
+      options.maxBufferSize,
+      DEFAULT_MAX_BUFFER_SIZE,
+      1,
+      1_000_000,
+      "maxBufferSize",
+    );
     this.fetchImpl = fetchImpl;
     this.maxRetries = normaliseInteger(options.maxRetries, DEFAULT_MAX_RETRIES, 0, 10, "maxRetries");
     this.timeoutMs = normaliseInteger(options.timeoutMs, DEFAULT_TIMEOUT_MS, 1, 120_000, "timeoutMs");
@@ -398,15 +455,51 @@ export class VerdictPayClient {
 
   /** Low-level typed event ingestion. Use for SESSION_AUTH and custom metadata. */
   trackEvent(event: EventInput): void {
+    if (this.closed) {
+      throw new VerdictPayError("invalid_config", "This VerdictPayClient has been closed.");
+    }
     const wire = this.toWireEvent(event);
     this.buffer.push(wire);
+    if (this.buffer.length > this.maxBufferSize) {
+      // Bounded memory during a long outage: the oldest events go first.
+      const overflow = this.buffer.length - this.maxBufferSize;
+      this.buffer.splice(0, overflow);
+      this.droppedCount += overflow;
+      this.report(
+        new VerdictPayError(
+          "buffer_overflow",
+          "Telemetry buffer is full (" + this.maxBufferSize + " events); dropped the " +
+          overflow + " oldest event(s).",
+        ),
+      );
+    }
     if (this.buffer.length >= this.batchSize) {
-      void this.flush().catch(() => {
-        // flush() re-buffers the batch and restarts the timer; nothing to add here.
+      void this.flush().catch((error: unknown) => {
+        this.report(error);
       });
       return;
     }
     this.ensureTimer();
+  }
+
+  /** Events dropped so far because the buffer overflowed or the API rejected them. */
+  get droppedEvents(): number {
+    return this.droppedCount;
+  }
+
+  /** Events waiting to be sent. */
+  get pendingEvents(): number {
+    return this.buffer.length;
+  }
+
+  /**
+   * Stops the background timer and sends everything still buffered. Call it
+   * before the process exits; a closed client rejects new events.
+   */
+  async close(): Promise<FlushResult> {
+    this.closed = true;
+    this.stopTimer();
+    return this.flush();
   }
 
   /**
@@ -482,28 +575,74 @@ export class VerdictPayClient {
     };
   }
 
-  /** Serialises the queue so concurrent flushes cannot interleave batches. */
+  /**
+   * Sends the buffer in batchSize chunks. Runs serialised through flushChain,
+   * so concurrent flushes cannot interleave batches.
+   *
+   * A transient failure (network, 401/403, 429, 5xx) puts the unsent events
+   * back at the front of the buffer and throws. A permanent rejection (any
+   * other 4xx) is narrowed down to the offending events, which are dropped and
+   * reported, so one bad event can never block the events behind it.
+   */
   private async drain(): Promise<FlushResult> {
-    if (this.buffer.length === 0) {
-      this.stopTimer();
-      return emptyFlushResult();
-    }
-    const batch = this.buffer.splice(0, this.buffer.length);
-    try {
-      const response = await this.sendBatch(batch);
-      if (this.buffer.length === 0) {
-        this.stopTimer();
+    const result = emptyFlushResult();
+    while (this.buffer.length > 0) {
+      const chunk = this.buffer.splice(0, this.batchSize);
+      try {
+        await this.sendIsolatingRejects(chunk, result);
+      } catch (error) {
+        this.buffer.unshift(...chunk);
+        if (!this.closed) {
+          this.ensureTimer();
+        }
+        throw error;
       }
-      return {
-        accepted: response.accepted,
-        duplicates: response.duplicates,
-        events: response.events,
-        chain: response.chain,
-      };
+    }
+    this.stopTimer();
+    return result;
+  }
+
+  /** Sends one chunk; on a permanent rejection, bisects to drop only bad events. */
+  private async sendIsolatingRejects(
+    chunk: WireTelemetryEvent[],
+    result: FlushResult,
+  ): Promise<void> {
+    try {
+      const response = await this.sendBatch(chunk);
+      result.accepted += response.accepted;
+      result.duplicates += response.duplicates;
+      result.events.push(...response.events);
+      result.chain = response.chain;
+      return;
     } catch (error) {
-      this.buffer.unshift(...batch);
-      this.ensureTimer();
-      throw error;
+      if (!isPermanentRejection(error)) {
+        throw error;
+      }
+      if (chunk.length === 1) {
+        this.droppedCount += 1;
+        result.rejected += 1;
+        this.report(error);
+        return;
+      }
+    }
+    const middle = Math.ceil(chunk.length / 2);
+    await this.sendIsolatingRejects(chunk.slice(0, middle), result);
+    await this.sendIsolatingRejects(chunk.slice(middle), result);
+  }
+
+  /** Delivers a background failure to onError; never throws. */
+  private report(error: unknown): void {
+    if (this.onError === undefined) {
+      return;
+    }
+    const typed =
+      error instanceof VerdictPayError
+        ? error
+        : new VerdictPayError("network_error", "Background flush failed.", { cause: error });
+    try {
+      this.onError(typed);
+    } catch {
+      // A throwing handler must not break the client.
     }
   }
 
@@ -629,15 +768,20 @@ export class VerdictPayClient {
     return Math.round(exponential * (0.5 + Math.random() * 0.5));
   }
 
-  /** Starts the background flush timer when events are waiting. */
+  /**
+   * Schedules one background flush when events are waiting.
+   *
+   * A one-shot timeout, re-armed after each attempt. (An interval whose handle
+   * was forgotten kept firing forever and stacked a new interval per retry.)
+   */
   private ensureTimer(): void {
-    if (this.timer !== null || this.buffer.length === 0) {
+    if (this.timer !== null || this.buffer.length === 0 || this.closed) {
       return;
     }
-    const handle = setInterval(() => {
+    const handle = setTimeout(() => {
       this.timer = null;
-      void this.flush().catch(() => {
-        this.ensureTimer();
+      void this.flush().catch((error: unknown) => {
+        this.report(error);
       });
     }, this.flushIntervalMs);
     const unrefable = handle as unknown as { unref?: () => void };
@@ -645,12 +789,12 @@ export class VerdictPayClient {
     this.timer = handle;
   }
 
-  /** Stops the background flush timer. */
+  /** Cancels the pending background flush. */
   private stopTimer(): void {
     if (this.timer === null) {
       return;
     }
-    clearInterval(this.timer);
+    clearTimeout(this.timer);
     this.timer = null;
   }
 }

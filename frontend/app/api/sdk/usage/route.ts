@@ -69,10 +69,21 @@ function sha256Hex(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }
 
+/** The real body is a few hundred bytes; anything far larger is refused unread. */
+const MAX_BODY_BYTES = 16 * 1024;
+
 export async function POST(request: Request): Promise<NextResponse> {
+  const declared = Number(request.headers.get("content-length") ?? "0");
+  if (Number.isFinite(declared) && declared > MAX_BODY_BYTES) {
+    return errorResponse(413, "payload_too_large", "Request body is too large.");
+  }
   let payload: unknown;
   try {
-    payload = await request.json();
+    const text = await request.text();
+    if (new TextEncoder().encode(text).length > MAX_BODY_BYTES) {
+      return errorResponse(413, "payload_too_large", "Request body is too large.");
+    }
+    payload = JSON.parse(text);
   } catch {
     return errorResponse(400, "invalid_json", "Request body must be valid JSON.");
   }
@@ -97,8 +108,10 @@ export async function POST(request: Request): Promise<NextResponse> {
 
   const client = new VerdictPayClient({
     apiKey: API_KEY,
-    webhookSecret: SIGNING_SECRET,
+    signingSecret: SIGNING_SECRET,
     baseUrl: API_BASE_URL,
+    // Only for a server-to-server hop on a private network (docker compose).
+    allowInsecureHttp: process.env.VERDICTPAY_ALLOW_INSECURE_HTTP === "true",
     maxRetries: 1,
     timeoutMs: 15_000,
     // One batch for the four-event step: the response should carry the full chain.

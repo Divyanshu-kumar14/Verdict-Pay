@@ -63,6 +63,8 @@ export interface TelemetryIngestResponse {
 export interface FlushResult {
   accepted: number;
   duplicates: number;
+  /** Events the API refused permanently (4xx); dropped and passed to onError. */
+  rejected: number;
   events: TelemetryEventOut[];
   /** Null when flush() ran on an empty buffer. */
   chain: ChainVerification | null;
@@ -92,10 +94,27 @@ export interface ApiErrorResponse {
 export interface VerdictPayClientOptions {
   /** Merchant API key. Sent as X-API-Key. Never logged. */
   apiKey: string;
-  /** Shared HMAC secret (VERDICTPAY_SIGNING_SECRET). Never logged. */
-  webhookSecret: string;
-  /** API root, default "http://localhost:8000". */
+  /**
+   * Shared HMAC signing secret (VERDICTPAY_SIGNING_SECRET). Never logged.
+   * Keep it on a server: anyone holding it can sign telemetry as you.
+   */
+  signingSecret?: string;
+  /** @deprecated Use signingSecret. Accepted for backward compatibility. */
+  webhookSecret?: string;
+  /**
+   * API root, default "http://localhost:8000". Must be https unless the host is
+   * localhost, 127.0.0.1 or ::1.
+   */
   baseUrl?: string;
+  /** Allow a plain-http baseUrl on a non-local host. Default false. */
+  allowInsecureHttp?: boolean;
+  /** Oldest events are dropped beyond this many buffered events. Default 10000. */
+  maxBufferSize?: number;
+  /**
+   * Called for failures nobody awaits: background flushes, dropped or rejected
+   * events and buffer overflow. Without it those failures are silent.
+   */
+  onError?: (error: import("./errors").VerdictPayError) => void;
   /** Injectable fetch implementation (tests, browsers, edge runtimes). */
   fetch?: typeof fetch;
   /** Retries after the first attempt. Default 3. */

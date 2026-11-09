@@ -12,7 +12,8 @@ export type VerdictPayErrorCode =
   | "rate_limited"
   | "server_error"
   | "network_error"
-  | "validation_error";
+  | "validation_error"
+  | "buffer_overflow";
 
 /** Extra context attached to a {@link VerdictPayError}. */
 export interface VerdictPayErrorOptions {

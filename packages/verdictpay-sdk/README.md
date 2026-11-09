@@ -4,8 +4,11 @@ Pre-dispute telemetry for PayPal-backed SaaS, digital goods and metered AI apps.
 Events are batched, HMAC-signed and appended to a per-payer SHA-256 hash chain, so
 "the customer used it" is a verifiable system of record instead of a screenshot.
 
-Node 20+ (or any runtime with `fetch` and WebCrypto). Zero runtime dependencies.
-Ships ESM + CJS + TypeScript declarations.
+Node 20+ (or any server runtime with `fetch` and WebCrypto). Zero runtime
+dependencies. Ships ESM + CJS + TypeScript declarations.
+
+**Server-side only.** The client needs your signing secret, and anyone holding it
+can sign telemetry as you. Never ship it to a browser or a mobile app.
 
 ## Install
 
@@ -20,8 +23,9 @@ import { VerdictPayClient } from "@verdictpay/sdk";
 
 const verdict = new VerdictPayClient({
   apiKey: process.env.VERDICTPAY_API_KEY!,
-  webhookSecret: process.env.VERDICTPAY_SIGNING_SECRET!,
-  // baseUrl defaults to http://localhost:8000
+  signingSecret: process.env.VERDICTPAY_SIGNING_SECRET!,
+  baseUrl: "https://verdictpay-api.onrender.com", // defaults to http://localhost:8000
+  onError: (error) => console.warn("verdictpay", error.code, error.message),
 });
 
 // 1. At checkout: bind the PayPal payer/order to the exact ToS they accepted.
@@ -53,6 +57,9 @@ await verdict.flush();
 // 5. Prove the ledger was not rewritten after the fact.
 const chain = await verdict.verifyChain("YRZ829104KLA");
 if (!chain.valid) throw new Error("ledger tampered at sequence " + chain.broken_at_sequence);
+
+// 6. On shutdown: stop the timer and send what is left.
+process.on("SIGTERM", () => void verdict.close());
 ```
 
 ## API
@@ -62,8 +69,11 @@ if (!chain.valid) throw new Error("ledger tampered at sequence " + chain.broken_
 | Option | Default | Meaning |
 |---|---|---|
 | `apiKey` | required | Sent as `X-API-Key`. Never logged. |
-| `webhookSecret` | required | HMAC-SHA256 signing secret (`VERDICTPAY_SIGNING_SECRET`). Never logged. |
-| `baseUrl` | `http://localhost:8000` | Absolute http(s) API root, no query/fragment. |
+| `signingSecret` | required | HMAC-SHA256 signing secret (`VERDICTPAY_SIGNING_SECRET`). Never logged. `webhookSecret` is accepted as a deprecated alias. |
+| `baseUrl` | `http://localhost:8000` | Absolute API root, no query, fragment or credentials. Must be `https` unless the host is `localhost`, `127.0.0.1` or `::1`. |
+| `allowInsecureHttp` | `false` | Allow plain `http` to a non-local host, for a private network only. |
+| `onError` | none | Receives failures nobody awaits: background flushes, rejected events, buffer overflow. Without it they are silent. |
+| `maxBufferSize` | `10000` | Buffered events kept during an outage; beyond it the oldest are dropped and reported. |
 | `fetch` | `globalThis.fetch` | Inject a fetch implementation for tests or edge runtimes. |
 | `maxRetries` | `3` | Retries after the first attempt (0-10). |
 | `timeoutMs` | `10000` | Per-attempt timeout (1-120000). |
@@ -81,8 +91,10 @@ network call. The constructor never logs and never puts the key in an error.
 | `trackDelivery(input)` | `ASSET_DELIVERED` | Requires `resourceId` + `resourceSha256`; `computeUnitsConsumed` becomes `units_consumed`. |
 | `trackUsage(input)` | `USAGE_METERED` | Requires a non-negative integer `units`. |
 | `trackEvent(event)` | caller chooses | Low-level typed event, e.g. `SESSION_AUTH` with custom `metadata`. |
-| `flush()` | — | Sends every buffered event now. Resolves to `{ accepted, duplicates, events, chain }`; on failure the batch is re-buffered and a typed error is thrown. |
+| `flush()` | — | Sends every buffered event now, in `batchSize` requests. Resolves to `{ accepted, duplicates, rejected, events, chain }`. On a transient failure the unsent events stay buffered and a typed error is thrown. |
 | `verifyChain(payerId)` | — | `GET /api/v1/telemetry/chain/{payerId}/verify`. |
+| `close()` | — | Stops the background timer and flushes. A closed client rejects new events. |
+| `pendingEvents` / `droppedEvents` | — | Counters for monitoring. |
 
 `clientIp` defaults to `0.0.0.0` and `deviceFingerprint` to `sdk-unknown-device`
 when omitted; pass real values — seller protection turns on IP and device match.
@@ -91,15 +103,21 @@ batch is deduplicated by the server instead of double-counted.
 
 ### Batching and delivery
 
-* Events buffer in memory and flush when `batchSize` is reached **or** every
-  `flushIntervalMs`; the timer is `unref()`ed so it never holds a process open.
+* Events buffer in memory and flush when `batchSize` is reached **or**
+  `flushIntervalMs` after the last attempt. The timer is a single `unref()`ed
+  timeout, so it never holds a process open.
 * `POST {baseUrl}/api/v1/telemetry/events` with body `{"events":[...]}`.
 * `429` and `5xx` are retried `maxRetries` times with exponential backoff and
   jitter. Other `4xx` responses fail immediately.
 * Network failures and timeouts are retried under the same policy.
-* A failed batch stays buffered, so the next `flush()` or timer retries it.
-* The SDK is fire-and-forget by design; call `flush()` before process exit if the
-  last few seconds of telemetry matter.
+* Transient failures (network, timeout, `401`/`403`, `429`, `5xx`) keep the events
+  buffered, so the next `flush()` or timer retries them.
+* Permanent rejections (any other `4xx`, such as `422`) are narrowed down by
+  splitting the batch, so only the offending events are dropped. Each one is passed
+  to `onError` and counted in `rejected`. One bad event never blocks the rest.
+* `metadata` must be JSON-serialisable; this is checked when the event is tracked.
+* Call `close()` (or `flush()`) before process exit if the last few seconds of
+  telemetry matter.
 
 ### Signing
 
@@ -108,7 +126,7 @@ Every ingest request carries:
 ```
 X-API-Key: <apiKey>
 X-VerdictPay-Timestamp: <unix seconds>
-X-VerdictPay-Signature: hex(HMAC-SHA256(webhookSecret, "<unixSeconds>.<exactBody>"))
+X-VerdictPay-Signature: hex(HMAC-SHA256(signingSecret, "<unixSeconds>.<exactBody>"))
 ```
 
 The signature covers the exact JSON body bytes sent, and the API verifies it against
@@ -133,6 +151,7 @@ try {
       case "rate_limited":     // 429 after the retry budget
       case "server_error":     // 5xx after the retry budget
       case "network_error":    // timeout or transport failure after the retry budget
+      case "buffer_overflow":  // only via onError: oldest events dropped
     }
   }
 }
@@ -144,7 +163,7 @@ try {
 
 ```bash
 pnpm install
-pnpm test        # vitest: buffering, HMAC, retries, error taxonomy
+pnpm test        # vitest: buffering, HMAC, retries, rejection isolation, error taxonomy
 pnpm typecheck   # tsc --noEmit
 pnpm build       # tsup -> dist/index.js, dist/index.cjs, dist/index.d.ts
 ```

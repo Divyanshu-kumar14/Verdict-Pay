@@ -105,7 +105,7 @@ async function main() {
 
   const client = new VerdictPayClient({
     apiKey: API_KEY,
-    webhookSecret: SIGNING_SECRET,
+    signingSecret: SIGNING_SECRET,
     baseUrl: API_BASE_URL,
     maxRetries: 1,
     timeoutMs: 15_000,

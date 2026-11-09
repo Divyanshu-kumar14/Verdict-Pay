@@ -3,6 +3,19 @@
   "version": "0.1.0",
   "description": "Pre-dispute telemetry SDK for PayPal-backed SaaS: batched, signed, hash-chain ready.",
   "license": "MIT",
+  "author": "Divyanshu Kumar",
+  "homepage": "https://github.com/Divyanshu-kumar14/Verdict-Pay/tree/main/packages/verdictpay-sdk#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Divyanshu-kumar14/Verdict-Pay.git",
+    "directory": "packages/verdictpay-sdk"
+  },
+  "bugs": {
+    "url": "https://github.com/Divyanshu-kumar14/Verdict-Pay/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -21,7 +34,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=20"
@@ -38,12 +52,14 @@
     "build": "tsup",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "prepublishOnly": "pnpm run typecheck && pnpm run test && pnpm run clean && pnpm run build"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "tsup": "^8.3.5",
     "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "vite": "^7.3.8",
+    "vitest": "^4.1.12"
   }
 }

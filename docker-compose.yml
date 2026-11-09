@@ -62,6 +62,12 @@ services:
     environment:
       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
       NEXT_PUBLIC_VERDICTPAY_API_KEY: ${VERDICTPAY_API_KEY:-vp_demo_sk_local}
+      # Server-side SDK route: inside this container "localhost" is the web
+      # container itself, so reach the API by its compose service name. That
+      # hop is plain http on the private compose network, hence the opt-in.
+      VERDICTPAY_API_BASE_URL: http://api:8000
+      VERDICTPAY_ALLOW_INSECURE_HTTP: "true"
+      VERDICTPAY_SIGNING_SECRET: ${VERDICTPAY_SIGNING_SECRET:-dev-signing-secret-change-me}
     ports:
       - "3000:3000"
     depends_on:

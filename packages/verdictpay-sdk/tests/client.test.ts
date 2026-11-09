@@ -179,7 +179,7 @@ describe("buffering", () => {
 
     const result = await client.flush();
 
-    expect(result).toEqual({ accepted: 0, duplicates: 0, events: [], chain: null });
+    expect(result).toEqual({ accepted: 0, duplicates: 0, rejected: 0, events: [], chain: null });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
@@ -544,5 +544,150 @@ describe("input validation", () => {
     expect(error.message).toBe(
       "eventType must be one of TOS_ACCEPTED, SESSION_AUTH, ASSET_DELIVERED, USAGE_METERED.",
     );
+  });
+});
+
+/** Payer ids carried by a request body, in order. */
+function payersIn(init: RequestInit): string[] {
+  const body = JSON.parse(String(init.body)) as { events: { paypal_payer_id: string }[] };
+  return body.events.map((event) => event.paypal_payer_id);
+}
+
+describe("hardening", () => {
+  it("drops only the event the API rejects, so later events still send", async () => {
+    const onError = vi.fn();
+    const { client, fetchMock, calls } = createClient({ onError, batchSize: 50 });
+    fetchMock.mockImplementation(async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return payersIn(init).includes("BAD-PAYER")
+        ? jsonResponse(422, errorEnvelope("validation_error", "bad event"))
+        : jsonResponse(200, ingestBody(payersIn(init).length));
+    });
+
+    client.trackUsage({ paypalPayerId: "GOOD-ONE", units: 1 });
+    client.trackUsage({ paypalPayerId: "BAD-PAYER", units: 1 });
+    client.trackUsage({ paypalPayerId: "GOOD-TWO", units: 1 });
+    const result = await client.flush();
+
+    expect(result.accepted).toBe(2);
+    expect(result.rejected).toBe(1);
+    expect(client.pendingEvents).toBe(0);
+    expect(client.droppedEvents).toBe(1);
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect((onError.mock.calls[0]?.[0] as VerdictPayError).status).toBe(422);
+
+    // The poisoned event is gone: the next flush sends only the new event.
+    client.trackUsage({ paypalPayerId: "GOOD-THREE", units: 1 });
+    await client.flush();
+    expect(payersIn(calls[calls.length - 1]?.init ?? {})).toEqual(["GOOD-THREE"]);
+  });
+
+  it("keeps events for a later retry on transient failures", async () => {
+    const { client, fetchMock } = createClient({ maxRetries: 0 });
+    fetchMock.mockResolvedValue(jsonResponse(503, errorEnvelope("server_error", "down")));
+    client.trackUsage({ paypalPayerId: PAYER, units: 1 });
+    const error = await captureRejection(client.flush());
+    expect(isVerdictPayError(error) && error.code).toBe("server_error");
+    expect(client.pendingEvents).toBe(1);
+    expect(client.droppedEvents).toBe(0);
+  });
+
+  it("splits a large buffer into batchSize requests", async () => {
+    // While the API is down, auto-flushes fail and the buffer grows past batchSize.
+    let down = true;
+    const { client, fetchMock, calls } = createClient({ batchSize: 4, maxRetries: 0 });
+    fetchMock.mockImplementation(async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return down
+        ? jsonResponse(503, errorEnvelope("server_error", "down"))
+        : jsonResponse(200, ingestBody(payersIn(init).length));
+    });
+    for (let index = 0; index < 10; index += 1) {
+      client.trackUsage({ paypalPayerId: PAYER, units: index });
+    }
+    await waitFor(() => calls.length >= 2);
+    await client.flush().catch(() => undefined);
+    expect(client.pendingEvents).toBe(10);
+
+    down = false;
+    calls.length = 0;
+    const result = await client.flush();
+    expect(result.accepted).toBe(10);
+    expect(calls.map((call) => payersIn(call.init).length)).toEqual([4, 4, 2]);
+  });
+
+  it("bounds the buffer and reports the overflow", () => {
+    const onError = vi.fn();
+    const { client } = createClient({ maxBufferSize: 3, batchSize: 500, onError });
+    for (let index = 0; index < 5; index += 1) {
+      client.trackUsage({ paypalPayerId: PAYER, units: index });
+    }
+    expect(client.pendingEvents).toBe(3);
+    expect(client.droppedEvents).toBe(2);
+    expect(onError).toHaveBeenCalledTimes(2);
+    expect((onError.mock.calls[0]?.[0] as VerdictPayError).code).toBe("buffer_overflow");
+  });
+
+  it("uses one re-armed timeout, not a leaking interval", async () => {
+    const setIntervalSpy = vi.spyOn(globalThis, "setInterval");
+    const { client, calls } = createClient({ flushIntervalMs: 10 });
+    client.trackUsage({ paypalPayerId: PAYER, units: 1 });
+    await waitFor(() => calls.length === 1);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    expect(calls).toHaveLength(1);
+    expect(setIntervalSpy).not.toHaveBeenCalled();
+    setIntervalSpy.mockRestore();
+  });
+
+  it("reports background flush failures to onError", async () => {
+    const onError = vi.fn();
+    const { client, fetchMock } = createClient({ flushIntervalMs: 10, maxRetries: 0, onError });
+    fetchMock.mockResolvedValue(jsonResponse(503, errorEnvelope("server_error", "down")));
+    client.trackUsage({ paypalPayerId: PAYER, units: 1 });
+    await waitFor(() => onError.mock.calls.length > 0);
+    expect((onError.mock.calls[0]?.[0] as VerdictPayError).code).toBe("server_error");
+    await client.close().catch(() => undefined);
+  });
+
+  it("rejects unserialisable metadata when the event is tracked", () => {
+    const { client } = createClient();
+    const circular: Record<string, unknown> = {};
+    circular["self"] = circular;
+    const error = captureError(() =>
+      client.trackEvent({ eventType: "SESSION_AUTH", paypalPayerId: PAYER, metadata: circular }),
+    );
+    expect(isVerdictPayError(error) && error.code).toBe("validation_error");
+    expect(client.pendingEvents).toBe(0);
+  });
+
+  it("refuses plain http to a remote host unless explicitly allowed", () => {
+    const error = captureError(() => createClient({ baseUrl: "http://api.example.com" }));
+    expect(isVerdictPayError(error) && error.code).toBe("invalid_config");
+    expect(() => createClient({ baseUrl: "http://localhost:8000" })).not.toThrow();
+    expect(() =>
+      createClient({ baseUrl: "http://10.0.0.5:8000", allowInsecureHttp: true }),
+    ).not.toThrow();
+    const creds = captureError(() => createClient({ baseUrl: "https://user:pw@api.example.com" }));
+    expect(isVerdictPayError(creds) && creds.code).toBe("invalid_config");
+  });
+
+  it("close() flushes the buffer and then rejects new events", async () => {
+    const { client, calls } = createClient();
+    client.trackUsage({ paypalPayerId: PAYER, units: 1 });
+    await client.close();
+    expect(calls).toHaveLength(1);
+    const error = captureError(() => client.trackUsage({ paypalPayerId: PAYER, units: 2 }));
+    expect(isVerdictPayError(error) && error.code).toBe("invalid_config");
+  });
+
+  it("accepts signingSecret as the secret option", async () => {
+    const { client, calls } = createClient({ webhookSecret: undefined, signingSecret: "s3cret" });
+    client.trackUsage({ paypalPayerId: PAYER, units: 1 });
+    await client.flush();
+    const headers = calls[0]?.init.headers as Record<string, string>;
+    const expected = createHmac("sha256", "s3cret")
+      .update(headers["x-verdictpay-timestamp"] + "." + String(calls[0]?.init.body))
+      .digest("hex");
+    expect(headers["x-verdictpay-signature"]).toBe(expected);
   });
 });
