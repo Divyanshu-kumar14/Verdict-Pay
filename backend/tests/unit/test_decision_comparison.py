@@ -366,3 +366,66 @@ def test_divergence_says_so_when_the_cheapest_row_is_not_available() -> None:
     explanation = comparison.divergence_explanation or ""
     assert "cheapest modelled loss but PayPal does not offer" in explanation
     assert "require-evidence" in explanation
+
+
+# --------------------------------- real-engine policy vs cheapest regressions
+def test_real_engine_policy_vs_cheapest_divergence_uses_engine_values() -> None:
+    """End-to-end on real engine numbers: policy fight vs cheapest offer.
+
+    The frozen engine prices fight/settle/offer; the comparison must keep the
+    policy judgement ("fight per the ladder") distinct from the financial
+    ranking ("offer is the cheapest modelled loss") with the exact dollar gap.
+    """
+    breakdown = _breakdown()  # engine best_action is MAKE_OFFER (-29.70)
+    assert breakdown.best_action is RecommendedAction.MAKE_OFFER
+    assert breakdown.ev_offer_usd == Decimal("-29.70")
+
+    comparison = compare(
+        breakdown=breakdown,
+        policy_action=RecommendedAction.PROVIDE_EVIDENCE,
+        allowed_actions=_allowed(),
+    )
+
+    assert comparison.agree is False
+    assert comparison.policy_action is RecommendedAction.PROVIDE_EVIDENCE
+    assert comparison.best_financial_action is RecommendedAction.MAKE_OFFER
+    assert comparison.divergence_explanation is not None
+    explanation = comparison.divergence_explanation
+    # Names both actions, states the exact $34.50 gap, and keeps the concepts
+    # separate: policy preference vs lowest modelled loss.
+    assert "Fight (provide evidence)" in explanation
+    assert "Make offer" in explanation
+    assert "$34.50" in explanation  # 64.20 - 29.70
+    assert "lowest modelled loss" in explanation
+    assert "policy preference" in explanation or "not the cheapest" in explanation
+    for banned in ("highest expected value", "most profitable", "optimal"):
+        assert banned not in explanation.lower()
+
+    fight = _option(comparison, RecommendedAction.PROVIDE_EVIDENCE)
+    offer = _option(comparison, RecommendedAction.MAKE_OFFER)
+    assert fight.is_policy_choice is True
+    assert fight.is_best_financial is False
+    assert offer.is_policy_choice is False
+    assert offer.is_best_financial is True
+
+
+def test_real_engine_agree_only_when_policy_is_the_cheapest_row() -> None:
+    """agree is true iff the policy action is literally the cheapest EV row."""
+    breakdown = _breakdown()
+    agree = compare(
+        breakdown=breakdown,
+        policy_action=breakdown.best_action,
+        allowed_actions=_allowed(),
+    )
+    assert agree.agree is True
+    assert agree.divergence_explanation is None
+
+    disagree = compare(
+        breakdown=breakdown,
+        policy_action=RecommendedAction.ACCEPT_CLAIM,
+        allowed_actions=_allowed(),
+    )
+    assert disagree.agree is False
+    assert disagree.divergence_explanation is not None
+    # The $84.30 gap between settle (-114.00) and offer (-29.70) is stated.
+    assert "$84.30" in disagree.divergence_explanation

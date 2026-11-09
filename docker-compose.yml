@@ -1,7 +1,7 @@
-# One-command judge stack: FastAPI (simulator gateway) + Next.js command center.
-#   cp .env.example .env   # optional; every value below has a safe demo default
+# One-command judge stack: FastAPI (sandbox gateway) + Next.js command center.
+#   cp .env.example .env   # then set PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET (sandbox credentials required)
 #   docker compose up --build
-# No PayPal account, Elastic cluster, Supabase project or LLM key is required.
+# PayPal sandbox credentials are required; there is no keyless mode.
 name: verdictpay
 
 services:
@@ -18,7 +18,7 @@ services:
       DEMO_MODE: ${DEMO_MODE:-true}
       # Inside the container the DB must live on the mounted volume, not in /app.
       DATABASE_URL: sqlite+aiosqlite:////app/data/verdictpay.db
-      PAYPAL_MODE: ${PAYPAL_MODE:-simulator}
+      PAYPAL_MODE: ${PAYPAL_MODE:-PAYPAL_SANDBOX}
       LLM_MODE: ${LLM_MODE:-template}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
       ALLOW_UNSIGNED_WEBHOOKS: ${ALLOW_UNSIGNED_WEBHOOKS:-false}

@@ -256,7 +256,9 @@ def _formula_notes(
     return tuple(notes)
 
 
-def ratio_relation(ratio: float | Decimal, threshold: float | Decimal) -> Literal["below", "at_or_above"]:
+def ratio_relation(
+    ratio: float | Decimal, threshold: float | Decimal
+) -> Literal["below", "at_or_above"]:
     """Which side of the high-volume line a dispute ratio sits on.
 
     One implementation for the dashboard, the case room, the dossier and the AI

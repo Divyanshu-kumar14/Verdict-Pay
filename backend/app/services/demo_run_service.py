@@ -81,7 +81,7 @@ STEP_DONE = "done"
 STEP_FAILED = "failed"
 
 _ORDER_STAGES = frozenset({"CREATED", "APPROVED", "CAPTURED", "FAILED"})
-_PROVENANCE = frozenset({"local_simulator", "paypal_sandbox", "paypal_live"})
+_PROVENANCE = frozenset({"paypal_sandbox", "paypal_live"})
 _WEBHOOK_ID_TEMPLATE = "WH-{dispute_id}"
 _RUN_ID_MIN_LENGTH = len(DEMO_RUN_PREFIX) + 1
 _RUN_ID_MAX_LENGTH = 64

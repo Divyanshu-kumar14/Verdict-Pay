@@ -11,6 +11,7 @@ from app.domain.disputes.ev import (
     compute_ev,
     effective_high_volume_fee,
     pick_best_action,
+    ratio_relation,
     to_breakdown,
 )
 from app.domain.enums import RecommendedAction
@@ -308,3 +309,169 @@ def test_breakdown_carries_the_engine_inputs_used() -> None:
     assert breakdown.disputes_3mo == 149
     assert breakdown.high_volume_min_sales == inputs.high_volume_min_sales
     assert breakdown.ratio_relation in {"below", "at_or_above"}
+
+
+# ------------------------------------------------- FIX 4 + fee/EV regressions
+def test_frozen_fee_and_threshold_defaults() -> None:
+    """The frozen spec values: 1.50% line, 15 standard, 30 high-volume, 0.30 offer."""
+    inputs = EvInputs(amount_usd=Decimal("10.00"), p_win=0.5, sales_3mo=1, disputes_3mo=0)
+    assert inputs.ratio_threshold == Decimal("0.015")
+    assert inputs.standard_fee_usd == Decimal("15.00")
+    assert inputs.high_volume_fee_usd == Decimal("30.00")
+    assert inputs.offer_ratio == Decimal("0.30")
+    assert inputs.penalty_multiplier == Decimal("3")
+    assert inputs.high_volume_min_sales == 100
+
+
+def test_ratio_uses_rolling_3mo_counts_with_max_sales_one() -> None:
+    outcome = compute_ev(
+        EvInputs(amount_usd=Decimal("10.00"), p_win=0.5, sales_3mo=0, disputes_3mo=0)
+    )
+    # max(sales,1): 0/1 -> 0.0 before, 1/1 -> 1.0 after.
+    assert outcome.ratio_before == 0.0
+    assert outcome.ratio_after == 1.0
+
+    outcome = compute_ev(
+        EvInputs(amount_usd=Decimal("10.00"), p_win=0.5, sales_3mo=200, disputes_3mo=3)
+    )
+    assert outcome.ratio_before == pytest.approx(3 / 200)
+    assert outcome.ratio_after == pytest.approx(4 / 200)
+
+
+def test_ratio_relation_exact_boundary_at_015() -> None:
+    # 74/5000 = 1.48% below; 75/5000 = 1.50% exactly at the line.
+    assert ratio_relation(74 / 5000, Decimal("0.015")) == "below"
+    assert ratio_relation(75 / 5000, Decimal("0.015")) == "at_or_above"
+    assert ratio_relation(Decimal("0.015"), Decimal("0.015")) == "at_or_above"
+    assert ratio_relation(0.01499, Decimal("0.015")) == "below"
+
+
+def test_canonical_3pct_vs_1_5pct_already_above_fix4() -> None:
+    """FIX 4 canonical: 150 disputes / 5000 sales = 3.00% is above 1.50%.
+
+    Already above the line, so no new cliff lands on this dispute — but the
+    breakdown must still say "at_or_above", never "below".
+    """
+    inputs = EvInputs(amount_usd=Decimal("99.00"), p_win=0.42, sales_3mo=5000, disputes_3mo=150)
+    outcome = compute_ev(inputs)
+    breakdown = to_breakdown(inputs, outcome)
+
+    assert breakdown.ratio_before == pytest.approx(0.03)
+    assert breakdown.ratio_after == pytest.approx(151 / 5000)
+    assert breakdown.ratio_threshold == pytest.approx(0.015)
+    assert breakdown.ratio_relation == "at_or_above"
+    assert breakdown.crosses_cliff is False
+    assert breakdown.threshold_crossed_now is False
+    assert breakdown.penalty_ratio_usd == Decimal("0.00")
+    assert breakdown.high_volume_fee_usd == Decimal("30.00")
+    # Hand-computed: 0.42*(-30) + 0.58*(-99-15-30) = -12.60 - 83.52.
+    assert breakdown.ev_fight_usd == Decimal("-96.12")
+    assert breakdown.ev_settle_usd == Decimal("-99.00")
+    assert breakdown.ev_offer_usd == Decimal("-29.70")
+
+
+def test_high_volume_false_never_penalised_even_when_ratio_crosses() -> None:
+    """Non-high-volume merchants pay no cliff even when the ratio crosses 1.5%."""
+    inputs = EvInputs(
+        amount_usd=Decimal("25.00"),
+        p_win=0.7,
+        sales_3mo=100,
+        disputes_3mo=1,
+        high_volume=False,
+        claim_fee_attached=True,
+    )
+    outcome = compute_ev(inputs)
+    assert outcome.ratio_before == pytest.approx(0.01)
+    assert outcome.ratio_after == pytest.approx(0.02)
+    assert outcome.crosses_cliff is False
+    assert outcome.penalty_ratio == Decimal("0.00")
+    # No high-volume leg at all: 0.7*0 + 0.3*(-25-15) = -12.00.
+    assert outcome.ev_fight == Decimal("-12.00")
+
+
+def test_fight_win_leg_pays_only_nonrefundable_high_volume_fee() -> None:
+    """Standard 15 is refunded on a win; high-volume 30 is never refunded."""
+    won = compute_ev(
+        _inputs(amount_usd=Decimal("100.00"), p_win=1.0, high_volume=True,
+                claim_fee_attached=True)
+    )
+    # p=1: win leg is exactly -high_volume_fee.
+    assert won.ev_fight == Decimal("-30.00")
+
+    won_non_hv = compute_ev(
+        _inputs(amount_usd=Decimal("100.00"), p_win=1.0, high_volume=False,
+                claim_fee_attached=True)
+    )
+    assert won_non_hv.ev_fight == Decimal("0.00")
+
+    lost = compute_ev(
+        _inputs(amount_usd=Decimal("100.00"), p_win=0.0, high_volume=True,
+                claim_fee_attached=True)
+    )
+    # p=0, no cliff here: -(100 + 15 + 30).
+    assert lost.ev_fight == Decimal("-145.00")
+
+
+def test_settle_claim_fee_attached_distinction() -> None:
+    """Settle is principal+15 claim fee in claim stages, principal only in inquiry."""
+    with_fee = compute_ev(_inputs(amount_usd=Decimal("99.00"), claim_fee_attached=True))
+    without_fee = compute_ev(_inputs(amount_usd=Decimal("99.00"), claim_fee_attached=False))
+    assert with_fee.ev_settle == Decimal("-114.00")
+    assert without_fee.ev_settle == Decimal("-99.00")
+
+
+def test_offer_ratio_scales_linearly_with_amount() -> None:
+    outcome = compute_ev(_inputs(amount_usd=Decimal("99.00")))
+    assert outcome.ev_offer == Decimal("-29.70")  # -0.30 * 99.00
+    custom = compute_ev(
+        _inputs(amount_usd=Decimal("200.00"), offer_ratio=Decimal("0.50"))
+    )
+    assert custom.ev_offer == Decimal("-100.00")
+
+
+def test_penalty_is_high_volume_fee_times_multiplier() -> None:
+    crossing = compute_ev(_inputs(sales_3mo=100, disputes_3mo=1))
+    assert crossing.penalty_ratio == Decimal("90.00")  # 30.00 x 3
+
+
+def test_tie_order_is_fight_then_offer_then_settle() -> None:
+    """Frozen tie-break: cheaper fee first, then PROVIDE_EVIDENCE > MAKE_OFFER.
+
+    Frontend parity is read-only here (frontend/lib/ev.ts): the backend order
+    is pinned so a naive max() port that prefers settle over offer on ties
+    is caught by this test, not by changing the engine.
+    """
+    # Offer/settle tie at -60 with claim fee attached: offer (no fee) wins.
+    assert pick_best_action(
+        ev_fight=Decimal("-100.00"),
+        ev_settle=Decimal("-60.00"),
+        ev_offer=Decimal("-60.00"),
+        claim_fee_attached=True,
+    ) is RecommendedAction.MAKE_OFFER
+    # Three-way tie with no fees: fight first.
+    assert pick_best_action(
+        ev_fight=Decimal("-10.00"),
+        ev_settle=Decimal("-10.00"),
+        ev_offer=Decimal("-10.00"),
+        claim_fee_attached=False,
+    ) is RecommendedAction.PROVIDE_EVIDENCE
+
+
+def test_breakdown_relation_matches_helper_for_all_states() -> None:
+    """Dashboard, analytics, case room and dossier share one helper.
+
+    to_breakdown derives ratio_relation from ratio_after via ratio_relation();
+    it must never be inferred from crosses_cliff (false both below the line
+    and already above it).
+    """
+    cases = [
+        EvInputs(amount_usd=Decimal("10.00"), p_win=0.5, sales_3mo=5000, disputes_3mo=10),
+        EvInputs(amount_usd=Decimal("10.00"), p_win=0.5, sales_3mo=5000, disputes_3mo=74),
+        EvInputs(amount_usd=Decimal("10.00"), p_win=0.5, sales_3mo=5000, disputes_3mo=150),
+    ]
+    for inputs in cases:
+        breakdown = to_breakdown(inputs, compute_ev(inputs))
+        assert breakdown.ratio_relation == ratio_relation(
+            breakdown.ratio_after, inputs.ratio_threshold
+        )
+        assert breakdown.threshold_crossed_now is breakdown.crosses_cliff

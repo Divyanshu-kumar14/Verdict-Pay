@@ -18,10 +18,13 @@ def _client(tmp_path, **overrides) -> TestClient:
     base = {
         "app_env": "test",
         "database_url": f"sqlite+aiosqlite:///{tmp_path / 'health.db'}",
-        "paypal_mode": "simulator",
+        "paypal_mode": "PAYPAL_SANDBOX",
         "paypal_client_id": "",
         "paypal_client_secret": "",
         "paypal_webhook_id": "",
+        "paypal_sandbox_client_id": "",
+        "paypal_sandbox_client_secret": "",
+        "paypal_sandbox_webhook_id": "",
         "demo_mode": True,
         "rate_limit_requests": 10_000,
     }
@@ -29,15 +32,19 @@ def _client(tmp_path, **overrides) -> TestClient:
     return TestClient(create_app(Settings(**base)))
 
 
-def test_simulator_reports_ready_and_simulation(tmp_path) -> None:
-    with _client(tmp_path) as client:
+def test_sandbox_reports_ready_and_live(tmp_path) -> None:
+    with _client(
+        tmp_path,
+        paypal_client_id="client-abc",
+        paypal_client_secret="secret-xyz",
+    ) as client:
         payload = client.get("/api/v1/health").json()
 
     status = payload["gateway_status"]
-    assert status["mode"] == "LOCAL_SIMULATOR"
+    assert status["mode"] == "PAYPAL_SANDBOX"
     assert status["readiness"] == "ready"
-    assert status["simulation"] is True
-    assert status["sandbox"] is False
+    assert status["simulation"] is False
+    assert status["sandbox"] is True
     assert status["live"] is False
     assert status["blockers"] == []
     assert payload["ai_status"]["provider"] in {"gemini", "template"}
@@ -73,7 +80,7 @@ def test_sandbox_with_credentials_is_ready_and_hides_them(tmp_path) -> None:
         assert needle not in response.text
 
 
-@pytest.mark.parametrize("mode", ["LOCAL_SIMULATOR", "simulator", "PAYPAL_SANDBOX"])
+@pytest.mark.parametrize("mode", ["PAYPAL_SANDBOX"])
 def test_health_never_leaks_mode_secrets(tmp_path, mode: str) -> None:
     with _client(
         tmp_path,

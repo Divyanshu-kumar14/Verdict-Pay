@@ -5,6 +5,9 @@
  * base URL is the same variable the app itself reads (NEXT_PUBLIC_API_BASE_URL),
  * defaulting to the local demo stack. Failing to reach the API is a hard error
  * with the exact remediation command, never a silent skip.
+ *
+ * The stack runs in PAYPAL_SANDBOX mode and requires sandbox credentials
+ * (PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET).
  */
 
 import { z } from "zod";
@@ -106,7 +109,7 @@ export async function assertDemoApiReachable(): Promise<void> {
   const healthUrl = `${E2E_API_BASE_URL}/api/v1/health`;
   const startApi =
     'cd ../backend && DATABASE_URL="sqlite+aiosqlite:///./verdict-pay/demo.db" ' +
-    "PAYPAL_MODE=simulator .venv/bin/uvicorn app.main:app --app-dir . --host 127.0.0.1 --port 8000";
+    "PAYPAL_MODE=PAYPAL_SANDBOX PAYPAL_CLIENT_ID=<sandbox-id> PAYPAL_CLIENT_SECRET=<sandbox-secret> .venv/bin/uvicorn app.main:app --app-dir . --host 127.0.0.1 --port 8000";
   const seedDemo =
     'cd ../backend && DATABASE_URL="sqlite+aiosqlite:///./verdict-pay/demo.db" ' +
     ".venv/bin/python scripts/seed_demo.py --reset";

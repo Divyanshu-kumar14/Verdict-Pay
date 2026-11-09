@@ -72,7 +72,7 @@ class TelemetryLedger(Base):
 
 
 class PaypalTransaction(Base):
-    """Historical transaction cache / simulator ledger used for Visa CE 3.0 lookbacks."""
+    """Historical transaction cache used for Visa CE 3.0 lookbacks."""
 
     __tablename__ = "paypal_transactions"
     __table_args__ = (Index("ix_txn_payer_created", "merchant_id", "payer_id", "created_at"),)
@@ -87,7 +87,7 @@ class PaypalTransaction(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     client_ip: Mapped[str] = mapped_column(String(64), nullable=False)
     device_fingerprint: Mapped[str] = mapped_column(String(128), nullable=False)
-    source: Mapped[str] = mapped_column(String(32), nullable=False, default="local_simulator")
+    source: Mapped[str] = mapped_column(String(32), nullable=False, default="paypal_sandbox")
     capture_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     run_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -199,7 +199,7 @@ class PaypalOrder(Base):
     capture_status: Mapped[str | None] = mapped_column(String(48), nullable=True)
     approval_url: Mapped[str | None] = mapped_column(String(1024), nullable=True)
     gateway_mode: Mapped[str] = mapped_column(String(32), nullable=False)
-    provenance: Mapped[str] = mapped_column(String(32), nullable=False, default="local_simulator")
+    provenance: Mapped[str] = mapped_column(String(32), nullable=False, default="paypal_sandbox")
     paypal_debug_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     raw_response: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
@@ -218,7 +218,7 @@ class DemoRunRecord(Base):
     merchant_id: Mapped[str] = mapped_column(String(40), ForeignKey("merchants.id"), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="OPEN")
     gateway_mode: Mapped[str] = mapped_column(String(32), nullable=False)
-    provenance: Mapped[str] = mapped_column(String(32), nullable=False, default="local_simulator")
+    provenance: Mapped[str] = mapped_column(String(32), nullable=False, default="paypal_sandbox")
     payer_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     order_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     capture_id: Mapped[str | None] = mapped_column(String(64), nullable=True)

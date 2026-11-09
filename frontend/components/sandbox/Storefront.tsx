@@ -14,7 +14,7 @@ import { DEMO_BUYER_EMAIL, DEMO_MERCHANT_NAME, DEMO_PLAN } from "@/lib/constants
 import { formatPercent, formatUsd, shortHash } from "@/lib/format";
 import type { SandboxFlowState, StepStatus } from "@/lib/hooks/useSandboxFlow";
 import { SPRING } from "@/lib/motion";
-import { CHANNEL_META, REASON_META, STAGE_META, type Tone } from "@/lib/vocab";
+import { STAGE_META, type Tone } from "@/lib/vocab";
 
 const STEP_BADGE: Record<StepStatus, { label: string; tone: Tone }> = {
   idle: { label: "Ready", tone: "neutral" },
@@ -203,7 +203,6 @@ function buildSteps(
   const canEvidence = !busy && state.disputeStatus === "success" && state.evidenceStatus !== "success";
   const canAI = !busy && state.disputeStatus === "success" && state.aiStatus !== "success";
   const canDossier = !busy && state.disputeStatus === "success" && state.dossierStatus !== "success";
-  const reasonShort = REASON_META.MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED.short;
   return [
     {
       key: "checkout",
@@ -211,7 +210,7 @@ function buildSteps(
       title: "PayPal Checkout",
       subtitle: "Orders v2 · ToS captured · lifecycle_stage=CREATED",
       successDetail: state.checkout
-        ? "order " + shortHash(state.checkout.order_id, 10, 4) + " · payer " + shortHash(state.checkout.payer_id, 8, 4) + " · " + formatUsd(state.checkout.amount_usd) + " · " + (state.checkout.gateway_mode ?? "simulator")
+        ? "order " + shortHash(state.checkout.order_id, 10, 4) + " · payer " + shortHash(state.checkout.payer_id, 8, 4) + " · " + formatUsd(state.checkout.amount_usd) + " · " + (state.checkout.gateway_mode ?? "sandbox")
         : null,
       action: "Run checkout",
       status: state.checkoutStatus,
@@ -221,7 +220,7 @@ function buildSteps(
     {
       key: "usage",
       index: 2,
-      title: "Simulate usage",
+      title: "Record usage",
       subtitle: "15 logins · 42k AI tokens · signed ZIP export",
       successDetail: state.usage
         ? state.usage.events.length + " events chained · head " + shortHash(state.usage.chain.head_hash, 8, 4) + " · chain " + (state.usage.chain.valid ? "valid" : "broken")
@@ -234,12 +233,12 @@ function buildSteps(
     {
       key: "dispute",
       index: 3,
-      title: "File dispute",
-      subtitle: reasonShort + " · " + STAGE_META.INQUIRY.short + " · " + CHANNEL_META.INTERNAL.short + " · " + formatUsd(DEMO_PLAN.priceUsd) + " claim",
+      title: "Await PayPal dispute",
+      subtitle: "Create dispute as sandbox buyer → webhook creates case",
       successDetail: state.dispute
         ? STAGE_META.INQUIRY.short + " " + shortHash(state.dispute.dispute.dispute_id, 10, 4) + " · p(win) " + formatPercent(state.dispute.dispute.p_win)
         : null,
-      action: "File dispute",
+      action: "Check for dispute",
       status: state.disputeStatus,
       canRun: canDispute || state.disputeStatus === "error",
       run: onDispute,
@@ -357,7 +356,7 @@ export function DemoStepper({ state, onCheckout, onUsage, onDispute, onEvidence,
 
 const LEGEND_ROWS = [
   { dot: "bg-accent", label: "Gemini", detail: "claim classification and evidence drafting call the live Google API." },
-  { dot: "bg-control", label: "PayPal simulator", detail: "checkout, usage and the dispute webhook. No funds move." },
+  { dot: "bg-control", label: "PayPal Sandbox", detail: "checkout, usage and the dispute webhook via the PayPal sandbox API. Test funds only." },
   { dot: "bg-muted/50", label: "Deterministic engine", detail: "EV, win probability and the verdict are local rules, never a model." },
 ];
 

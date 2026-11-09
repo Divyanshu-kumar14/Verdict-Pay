@@ -85,10 +85,10 @@ const checkoutFixture = {
   currency: "USD",
   approval_url: "https://paypal.com/approve/ord_123",
   created_at: "2026-11-06T03:00:00.000Z",
-  gateway_mode: "LOCAL_SIMULATOR",
-  sandbox: false,
+  gateway_mode: "PAYPAL_SANDBOX",
+  sandbox: true,
   lifecycle_stage: "CREATED",
-  provenance: "local_simulator",
+  provenance: "paypal_sandbox",
   paypal_debug_id: null,
 };
 
@@ -289,7 +289,12 @@ describe("useSandboxFlow", () => {
     const fetchMock = vi.fn(async (url: string) => {
       if (url.includes("/sandbox/checkout")) return jsonResponse(checkoutFixture);
       if (url.includes("/api/sdk/usage") || url.includes("/sandbox/usage")) return jsonResponse(usageFixture);
-      if (url.includes("/sandbox/dispute")) return jsonResponse(disputeFixture);
+      if (url.includes("/api/v1/disputes")) {
+        return jsonResponse({
+          data: [disputeFixture.dispute],
+          meta: { total: 1, page: 1, per_page: 50, total_pages: 1 },
+        });
+      }
       return jsonResponse({}, { status: 404 });
     });
     vi.stubGlobal("fetch", fetchMock);
@@ -321,8 +326,7 @@ describe("useSandboxFlow", () => {
     expect(screen.getByTestId("disputeStage").textContent).toBe("INQUIRY");
     expect(screen.getByTestId("disputeId").textContent).toBe("disp_001");
     // The step log reads in sentence case, not in the enum the API speaks.
-    expect(screen.getByTestId("logs").textContent).toContain("Inquiry disp_001 opened");
-    expect(screen.getByTestId("logs").textContent).toContain("Not as described · Inquiry · PayPal");
+    expect(screen.getByTestId("logs").textContent).toContain("via PayPal webhook");
 
     vi.unstubAllGlobals();
   });

@@ -10,28 +10,44 @@ import type { SignalStep } from "@/components/evidence/EvidenceSignal";
 import { api, ApiError } from "@/lib/api";
 import { usePolledQuery } from "@/lib/hooks/usePolledQuery";
 import { useSandboxFlow } from "@/lib/hooks/useSandboxFlow";
-import type { CustomerTimeline, DisputeDetail } from "@/lib/types";
+import type { CustomerTimeline, DemoRun, DisputeDetail } from "@/lib/types";
 
 /**
  * /demo: the judge-facing front door. The full-width pipeline shows the seven
  * evidence-signal stages; below it the left rail runs the buyer flow that
  * opens the dispute while the live pipeline log and the command centre
- * verdict respond on the right. The command centre reads the real case the
- * API persisted, polls it while visible, and executes the recommended
- * HATEOAS action.
+ * verdict respond on the right. The command centre reads ONLY the case that
+ * belongs to the current isolated run — never the global newest case — polls
+ * it while visible, and executes the recommended HATEOAS action. The run id
+ * survives refresh via `?run=` / localStorage (see useSandboxFlow), so a
+ * reload re-attaches to the same run instead of surfacing a stale dispute.
  */
 export function SandboxWorkspace() {
   const flow = useSandboxFlow();
 
-  const latest = usePolledQuery(
-    "sandbox:latest-case",
-    (signal) => api.listDisputes({ page: 1, perPage: 1 }, signal),
-    { intervalMs: 5000 },
+  // The isolated run this demo is attached to (URL/localStorage -> checkout).
+  const runId = flow.state.runId ?? flow.state.checkout?.run_id ?? null;
+  const runQuery = usePolledQuery<DemoRun>(
+    runId ? "sandbox:run:" + runId : "sandbox:run:none",
+    (signal) => {
+      if (!runId) {
+        return Promise.reject(
+          new ApiError({ code: "no_run", message: "No demo run selected yet." }),
+        );
+      }
+      return api.getDemoRun(runId, signal);
+    },
+    { intervalMs: 5000, enabled: runId !== null },
   );
 
   const flowDispute = flow.state.dispute;
-  const activeId = flowDispute?.dispute.dispute_id ?? latest.data?.data[0]?.dispute_id ?? null;
-  const restoredFromQueue = flowDispute === null && activeId !== null;
+  // Run-scoped only: the flow's own dispute, else this run's recorded dispute.
+  // The global newest case is NEVER used — that was the stale-attach bug.
+  // Guard on runId so a disabled (stale) runQuery payload can't leak in.
+  const activeId =
+    flowDispute?.dispute.dispute_id ??
+    (runId ? (runQuery.data?.dispute_id ?? null) : null);
+  const restoredFromQueue = false;
 
   const caseQuery = usePolledQuery<DisputeDetail>(
     activeId ? "sandbox:case:" + activeId : "sandbox:case:none",
@@ -46,7 +62,11 @@ export function SandboxWorkspace() {
     { intervalMs: 2000, enabled: activeId !== null },
   );
 
-  const payerId = caseQuery.data?.payer_id ?? flow.state.checkout?.payer_id ?? null;
+  const payerId =
+    (runId ? (runQuery.data?.payer_id ?? null) : null) ??
+    flow.state.checkout?.payer_id ??
+    caseQuery.data?.payer_id ??
+    null;
   const timeline = usePolledQuery<CustomerTimeline>(
     payerId ? "sandbox:timeline:" + payerId : "sandbox:timeline:none",
     (signal) => {
@@ -75,8 +95,10 @@ export function SandboxWorkspace() {
                 ? flow.runCheckout
                 : null;
   const handleReset = () => {
+    // flow.reset() clears stale local state AND mints a fresh isolated run
+    // via POST /sandbox/runs/reset; the run poll below re-attaches when ready.
     flow.reset();
-    latest.refresh();
+    runQuery.refresh();
   };
 
   const checkoutDone = flow.state.checkoutStatus === "success" || flow.state.checkout !== null;
@@ -219,7 +241,7 @@ export function SandboxWorkspace() {
             caseQuery={caseQuery}
             timeline={timeline}
             onCaseChanged={() => {
-              latest.refresh();
+              runQuery.refresh();
             }}
             onRunStep1={() => { void flow.runCheckout(); }}
           />

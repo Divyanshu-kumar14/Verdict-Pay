@@ -1,6 +1,6 @@
 """Shared test fixtures.
 
-Every integration test uses an isolated SQLite file and the real simulator
+Every integration test uses an isolated SQLite file and the PayPal Sandbox
 gateway — the same code path the judge demo uses. No PayPal mocks.
 """
 
@@ -23,7 +23,13 @@ def settings(tmp_path) -> Settings:
     return Settings(
         app_env="test",
         database_url=f"sqlite+aiosqlite:///{tmp_path / 'test.db'}",
-        paypal_mode="simulator",
+        paypal_mode="PAYPAL_SANDBOX",
+        paypal_client_id="test-client-abc",
+        paypal_client_secret="test-secret-xyz",
+        paypal_webhook_id="WH-TEST-ID",
+        paypal_sandbox_client_id="test-client-abc",
+        paypal_sandbox_client_secret="test-secret-xyz",
+        paypal_sandbox_webhook_id="WH-TEST-ID",
         llm_mode="template",
         demo_mode=True,
         verdictpay_api_key="test_key_local",

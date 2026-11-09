@@ -20,7 +20,6 @@ import {
   DemoRunSchema,
   DisputeDetailSchema,
   DisputePageSchema,
-  DisputeSimulationResponseSchema,
   DossierManifestSchema,
   DossierVerificationSchema,
   ErrorEnvelopeSchema,
@@ -45,8 +44,6 @@ import {
   type DisputeAction,
   type DisputeDetail,
   type DisputePage,
-  type DisputeSimulationRequestInput,
-  type DisputeSimulationResponse,
   type DossierManifest,
   type DossierVerification,
   type ErrorDetail,
@@ -387,20 +384,7 @@ export const api = {
   /** POST /api/sdk/usage — same-origin route that runs @verdictpay/sdk server-side. */
   sdkUsage: requestSdkUsage,
 
-  /** POST /sandbox/dispute — opens an INQUIRY through the real webhook path. */
-  sandboxDispute(
-    input: DisputeSimulationRequestInput,
-    signal?: AbortSignal,
-  ): Promise<DisputeSimulationResponse> {
-    return request("/api/v1/sandbox/dispute", {
-      method: "POST",
-      body: input,
-      schema: DisputeSimulationResponseSchema,
-      signal,
-    });
-  },
-
-  /** GET /disputes — paginated triage queue. */
+  /** GET /disputes — paginated triage queue. Real PayPal disputes arrive via webhook. */
   listDisputes(
     params: { page?: number; perPage?: number } = {},
     signal?: AbortSignal,
@@ -511,10 +495,9 @@ export const API_ENDPOINTS = [
   { method: "GET", path: "/api/v1/health", purpose: "Gateway mode, readiness and uptime" },
   { method: "POST", path: "/api/v1/sandbox/checkout", purpose: "Create PayPal order (unpaid)" },
   { method: "GET", path: "/api/v1/sandbox/orders/{id}", purpose: "Live order lifecycle stage" },
-  { method: "POST", path: "/api/v1/sandbox/orders/{id}/approve", purpose: "Simulate approval" },
   { method: "POST", path: "/api/v1/sandbox/orders/{id}/capture", purpose: "Capture (moves money)" },
   { method: "POST", path: "/api/v1/sandbox/usage", purpose: "Four chained telemetry events" },
-  { method: "POST", path: "/api/v1/sandbox/dispute", purpose: "Open INQUIRY via webhook path" },
+  { method: "POST", path: "/api/v1/webhooks/paypal", purpose: "Real PayPal dispute webhook (buyer creates dispute)" },
   { method: "GET", path: "/api/v1/sandbox/runs", purpose: "Isolated judge runs" },
   { method: "GET", path: "/api/v1/sandbox/runs/{id}", purpose: "One run and its steps" },
   { method: "POST", path: "/api/v1/sandbox/runs/reset", purpose: "Reset demo runs, keep records" },

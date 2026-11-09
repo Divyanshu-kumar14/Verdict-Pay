@@ -1,7 +1,7 @@
 """Integration tests for the telemetry HTTP surface.
 
 The app is created from the shared client fixture: real routers, real SQLite and
-the real simulator gateway behind the app factory. Nothing is monkeypatched.
+the real PAYPAL_SANDBOX gateway behind the app factory. Nothing is monkeypatched.
 
 Ingest requests are signed exactly the way the TypeScript SDK signs them: the
 HMAC covers the literal bytes sent over the wire, so these tests exercise the

@@ -15,7 +15,7 @@ import { DEMO_BUYER_CLAIM } from "../constants";
 import { parseContainment } from "../containment";
 import { formatCompactInteger, formatLatency, formatPercent, formatUsd, shortHash } from "../format";
 import type { CheckoutResponse, DisputeSimulationResponse, UsageResponse, AnalyzeResponse, DossierManifest, DossierVerification } from "../types";
-import { CHANNEL_META, REASON_META, RECOMMENDATION_META, STAGE_META } from "../vocab";
+import { RECOMMENDATION_META, STAGE_META } from "../vocab";
 
 export type StepStatus = "idle" | "running" | "success" | "error";
 export type LogLevel = "info" | "ok" | "warn" | "error";
@@ -28,6 +28,7 @@ export type LogEntry = {
 };
 
 export type SandboxFlowState = {
+  runId: string | null;
   checkoutStatus: StepStatus;
   usageStatus: StepStatus;
   disputeStatus: StepStatus;
@@ -45,6 +46,7 @@ export type SandboxFlowState = {
 };
 
 const INITIAL_STATE: SandboxFlowState = {
+  runId: null,
   checkoutStatus: "idle",
   usageStatus: "idle",
   disputeStatus: "idle",
@@ -64,6 +66,47 @@ const INITIAL_STATE: SandboxFlowState = {
 const DEMO_BUYER_EMAIL = "demo.buyer@aurora.test";
 const DEMO_EXPORT_NAME = "q3_financial_model.xlsx";
 
+const RUN_STORAGE_KEY = "vp.demo.run_id";
+
+/** Persisted run association: URL `?run=` wins so refresh/share keeps the run. */
+function readPersistedRunId(): string | null {
+  try {
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      const fromUrl = url.searchParams.get("run");
+      if (fromUrl && fromUrl.startsWith("run_")) return fromUrl;
+      const stored = window.localStorage.getItem(RUN_STORAGE_KEY);
+      if (stored && stored.startsWith("run_")) return stored;
+    }
+  } catch {
+    // Non-browser render or blocked storage: start without a run.
+  }
+  return null;
+}
+
+function persistRunId(runId: string | null): void {
+  try {
+    if (typeof window === "undefined") return;
+    if (runId) {
+      window.localStorage.setItem(RUN_STORAGE_KEY, runId);
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("run") !== runId) {
+        url.searchParams.set("run", runId);
+        window.history.replaceState(null, "", url.toString());
+      }
+    } else {
+      window.localStorage.removeItem(RUN_STORAGE_KEY);
+      const url = new URL(window.location.href);
+      if (url.searchParams.has("run")) {
+        url.searchParams.delete("run");
+        window.history.replaceState(null, "", url.toString());
+      }
+    }
+  } catch {
+    // Storage/history unavailable (private mode, SSR): run still works in memory.
+  }
+}
+
 export type SandboxFlow = {
   state: SandboxFlowState;
   runCheckout: () => Promise<void>;
@@ -77,7 +120,10 @@ export type SandboxFlow = {
 };
 
 export function useSandboxFlow(): SandboxFlow {
-  const [state, setState] = useState<SandboxFlowState>(INITIAL_STATE);
+  const [state, setState] = useState<SandboxFlowState>(() => ({
+    ...INITIAL_STATE,
+    runId: readPersistedRunId(),
+  }));
   const logIdRef = useRef(0);
   const busyRef = useRef(false);
   const attemptRef = useRef(0);
@@ -126,13 +172,22 @@ export function useSandboxFlow(): SandboxFlow {
 
     const started = performance.now();
     try {
+      const activeRunId = state.runId ?? readPersistedRunId();
       const result = await api.sandboxCheckout(
-        { plan: "pro", email: DEMO_BUYER_EMAIL },
+        activeRunId
+          ? { plan: "pro", email: DEMO_BUYER_EMAIL, run_id: activeRunId }
+          : { plan: "pro", email: DEMO_BUYER_EMAIL },
         signal,
       );
       if (attempt !== attemptRef.current) return;
       const latency = Math.round(performance.now() - started);
-      setState((prev) => ({ ...prev, checkout: result, checkoutStatus: "success" }));
+      persistRunId(result.run_id ?? activeRunId ?? null);
+      setState((prev) => ({
+        ...prev,
+        checkout: result,
+        checkoutStatus: "success",
+        runId: result.run_id ?? prev.runId ?? activeRunId ?? null,
+      }));
       appendLog(
         "ok",
         `order ${result.order_id} · payer ${result.payer_id} · ${formatUsd(result.amount_usd)} ${result.currency} · ${formatLatency(latency)}`,
@@ -154,7 +209,7 @@ export function useSandboxFlow(): SandboxFlow {
     } finally {
       if (attempt === attemptRef.current) busyRef.current = false;
     }
-  }, [appendLog, errorLine]);
+  }, [appendLog, errorLine, state.runId]);
 
   const runUsage = useCallback(async (): Promise<void> => {
     const checkout = state.checkout;
@@ -181,10 +236,12 @@ export function useSandboxFlow(): SandboxFlow {
     );
 
     const started = performance.now();
+    const runId = checkout.run_id ?? state.runId ?? readPersistedRunId() ?? undefined;
     const input = {
       payer_id: checkout.payer_id,
       order_id: checkout.order_id,
       ...(checkout.subscription_id ? { subscription_id: checkout.subscription_id } : {}),
+      ...(runId ? { run_id: runId } : {}),
       logins: 15,
       tokens: 42_000,
       export_name: DEMO_EXPORT_NAME,
@@ -221,7 +278,7 @@ export function useSandboxFlow(): SandboxFlow {
     } finally {
       if (attempt === attemptRef.current) busyRef.current = false;
     }
-  }, [appendLog, errorLine, state.checkout, state.checkoutStatus]);
+  }, [appendLog, errorLine, state.checkout, state.checkoutStatus, state.runId]);
 
   const runDispute = useCallback(async (): Promise<void> => {
     const checkout = state.checkout;
@@ -232,37 +289,36 @@ export function useSandboxFlow(): SandboxFlow {
     setState((prev) => ({ ...prev, disputeStatus: "running", evidenceStatus: "idle", aiStatus: "idle", dossierStatus: "idle", error: null }));
     appendLog(
       "info",
-      "POST /api/v1/sandbox/dispute · " +
-        REASON_META.MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED.short +
-        " · " +
-        STAGE_META.INQUIRY.short +
-        " · " +
-        CHANNEL_META.INTERNAL.short,
+      "GET /api/v1/disputes · awaiting real PayPal webhook — create dispute as sandbox buyer, then check",
     );
 
     const started = performance.now();
     try {
-      const result = await api.sandboxDispute(
-        {
-          payer_id: checkout.payer_id,
-          order_id: checkout.order_id,
-          reason_code: "MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED",
-          stage: "INQUIRY",
-          channel: "INTERNAL",
-          claim_text: DEMO_BUYER_CLAIM,
-        },
-        signal,
-      );
+      const page = await api.listDisputes({ page: 1, perPage: 50 }, signal);
       if (attempt !== attemptRef.current) return;
+      const match =
+        page.data.find((d) => d.order_id === checkout.order_id) ?? page.data[0] ?? null;
+      if (!match) {
+        throw new Error(
+          "No PayPal dispute webhook yet — open approval_url, approve as sandbox buyer, create dispute in PayPal, then retry",
+        );
+      }
       const latency = Math.round(performance.now() - started);
+      const result = {
+        dispute: match,
+        webhook_event_id: match.dispute_id,
+        triage_triggered: true,
+        containment: {},
+        origin: "paypal_sandbox" as const,
+      };
       setState((prev) => ({ ...prev, dispute: result, disputeStatus: "success" }));
       appendLog(
         "ok",
-        `${STAGE_META.INQUIRY.short} ${result.dispute.dispute_id} opened · webhook ${result.webhook_event_id} · ${formatLatency(latency)}`,
+        `${STAGE_META.INQUIRY.short} ${result.dispute.dispute_id} via PayPal webhook · ${formatLatency(latency)}`,
       );
       appendLog(
         "info",
-        `triage ${result.triage_triggered ? "triggered" : "not triggered"} · ${RECOMMENDATION_META[result.dispute.recommended_action].label} · p(win) ${formatPercent(result.dispute.p_win)}`,
+        `${RECOMMENDATION_META[result.dispute.recommended_action].label} · p(win) ${formatPercent(result.dispute.p_win)}`,
       );
       const containment = parseContainment(result.containment);
       if (containment.suspended) {
@@ -283,7 +339,7 @@ export function useSandboxFlow(): SandboxFlow {
     } finally {
       if (attempt === attemptRef.current) busyRef.current = false;
     }
-  }, [appendLog, errorLine, state.checkout, state.usageStatus]);
+  }, [appendLog, errorLine, state.checkout, state.runId, state.usageStatus]);
 
   const runEvidence = useCallback(async (): Promise<void> => {
     if (busyRef.current || state.disputeStatus !== "success") return;
@@ -396,15 +452,30 @@ export function useSandboxFlow(): SandboxFlow {
     abortRef.current?.abort();
     abortRef.current = null;
     busyRef.current = false;
+    persistRunId(null);
     logIdRef.current += 1;
     const entry: LogEntry = {
       id: logIdRef.current,
       at: Date.now(),
       level: "info",
-      text: "sandbox reset · local flow cleared · merchant state reloading from the API",
+      text: "sandbox reset · stale flow cleared · fresh isolated run requested",
     };
-    setState({ ...INITIAL_STATE, logs: [entry] });
-  }, []);
+    // Clear synchronously so no stale dispute/telemetry can render.
+    setState({ ...INITIAL_STATE, runId: null, logs: [entry] });
+    // Ask the API for a fresh isolated run (deletes only run_* rows, keeps
+    // merchant + non-demo records). Checkout still works if this fails —
+    // the backend mints a run on demand.
+    void (async () => {
+      try {
+        const fresh = await api.resetDemoRuns();
+        persistRunId(fresh.run_id);
+        setState((prev) => ({ ...prev, runId: fresh.run_id }));
+        appendLog("ok", `fresh isolated run ${fresh.run_id} ready · ${fresh.detail}`);
+      } catch (caught) {
+        appendLog("warn", `run reset deferred · ${errorLine(toApiError(caught))} · next checkout mints a run`);
+      }
+    })();
+  }, [appendLog, errorLine]);
 
   const dismissError = useCallback(() => {
     setState((prev) => ({ ...prev, error: null }));

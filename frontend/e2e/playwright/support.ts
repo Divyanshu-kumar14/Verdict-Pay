@@ -1,10 +1,11 @@
 /**
  * Shared plumbing for the Playwright E2E layer.
  *
- * Everything here talks to the REAL demo stack: FastAPI on 8000 (PayPal simulator
+ * Everything here talks to the REAL demo stack: FastAPI on 8000 (PayPal sandbox
  * mode) and the Next.js build on 3000. Nothing is mocked, because the whole point of
  * the judge suite is to prove the integrated system works — a mocked test would prove
- * only that the mocks agree with each other.
+ * only that the mocks agree with each other. PAYPAL_SANDBOX requires sandbox
+ * credentials (PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET).
  *
  * Every helper takes the Playwright `APIRequestContext` so the same code works whether
  * a test drives the API directly (`request`) or a page's own XHRs land in the same
@@ -101,7 +102,7 @@ export async function createOrder(
   return body as unknown as Checkout;
 }
 
-/** Drive an order to CAPTURED via the simulator's explicit buyer-approval step. */
+/** Drive an order to CAPTURED via the sandbox buyer-approval flow (approval_url, then capture). */
 export async function capture(
   request: APIRequestContext,
   orderId: string,
@@ -110,10 +111,12 @@ export async function capture(
 }
 
 export async function approve(
-  request: APIRequestContext,
-  orderId: string,
+  _request: APIRequestContext,
+  _orderId: string,
 ): Promise<{ status: number; body: Json }> {
-  return postJson(request, `/sandbox/orders/${orderId}/approve`, {});
+  throw new Error(
+    "Approve endpoint removed for real-PayPal-only: open approval_url and approve as sandbox buyer in PayPal UI, then capture",
+  );
 }
 
 export const USAGE_EVENTS = [
@@ -140,25 +143,15 @@ export async function ingestUsage(
   return body;
 }
 
-/** Open an INQUIRY through the internal signed-webhook path for a captured order. */
+/** Removed: disputes arrive via real PayPal webhook. Create dispute as sandbox buyer in PayPal UI. */
 export async function fileDispute(
-  request: APIRequestContext,
-  order: Checkout,
-  overrides: Json = {},
+  _request: APIRequestContext,
+  _order: Checkout,
+  _overrides: Json = {},
 ): Promise<Json> {
-  const { status, body } = await postJson(request, "/sandbox/dispute", {
-    payer_id: order.payer_id,
-    order_id: order.order_id,
-    run_id: order.run_id,
-    stage: "INQUIRY",
-    reason_code: "MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
-    amount_usd: order.amount_usd,
-    ...overrides,
-  });
-  if (status !== 200) {
-    throw new Error(`POST /sandbox/dispute -> HTTP ${status}: ${JSON.stringify(body).slice(0, 800)}`);
-  }
-  return body;
+  throw new Error(
+    "POST /sandbox/dispute removed for real-PayPal-only: create dispute as sandbox buyer, webhook creates the case",
+  );
 }
 
 /**
@@ -176,19 +169,20 @@ export type JudgeRun = {
 
 export async function runJudgeFlow(request: APIRequestContext): Promise<JudgeRun> {
   const order = await createOrder(request);
-  await approve(request, order.order_id);
-  const captured = await capture(request, order.order_id);
-  if (captured.status !== 200) {
-    throw new Error(`capture failed: ${JSON.stringify(captured.body).slice(0, 600)}`);
-  }
   const usage = await ingestUsage(request, order);
-  const dispute = await fileDispute(request, order);
-  const summary = dispute.dispute as Json;
+  // Real-PayPal-only: approval (PayPal UI) -> capture -> buyer-created dispute webhook are manual.
   return {
     order,
-    captureId: String(captured.body.capture_id),
-    disputeId: String(summary.dispute_id),
-    webhookEventId: String(dispute.webhook_event_id),
+    captureId: "",
+    disputeId: "",
+    webhookEventId: "",
+    usage,
+  };
+  return {
+    order,
+    captureId: "",
+    disputeId: "",
+    webhookEventId: "",
     usage,
   };
 }
@@ -306,7 +300,8 @@ export async function deliverWebhook(
 export async function assertStackReachable(request: APIRequestContext): Promise<void> {
   const url = `${API_BASE}/api/v1/health`;
   const start =
-    "cd backend && DATABASE_URL=sqlite+aiosqlite:////tmp/verdictpay-demo.db PAYPAL_MODE=simulator " +
+    "cd backend && DATABASE_URL=sqlite+aiosqlite:////tmp/verdictpay-demo.db PAYPAL_MODE=PAYPAL_SANDBOX " +
+    "PAYPAL_CLIENT_ID=<sandbox-id> PAYPAL_CLIENT_SECRET=<sandbox-secret> " +
     ".venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000";
   let response;
   try {

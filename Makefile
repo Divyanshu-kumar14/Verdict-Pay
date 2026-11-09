@@ -92,7 +92,7 @@ design-gate: ## Judge every route with the design inspector in app mode (needs t
 	node frontend/scripts/design-gate.mjs
 
 demo: ## Verify the full judge flow: seed, boot, assert 26 checks, shut down
-	@echo "==> verifying the VerdictPay judge flow on :$(API_PORT) (simulator mode)"
+	@echo "==> verifying the VerdictPay judge flow on :$(API_PORT) (sandbox mode - credentials required)"
 	@$(PY) python scripts/run_demo.py --port $(API_PORT)
 
 stack: ## Seed + boot the API and KEEP it running (then run: make web)

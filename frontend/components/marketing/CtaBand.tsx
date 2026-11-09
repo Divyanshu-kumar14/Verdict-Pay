@@ -24,7 +24,7 @@ export function CtaBand() {
               Price your next dispute before you answer it.
             </h2>
             <p className="relative mx-auto mt-3 max-w-[54ch] text-sm leading-relaxed text-muted">
-              Run the three-step simulation — checkout, usage, friendly-fraud inquiry — and watch it score and defend itself.
+              Run the live sandbox flow — checkout, usage, friendly-fraud inquiry — and watch it score and defend itself.
             </p>
             <div className="relative mt-7 flex flex-wrap items-center justify-center gap-3">
               <Link

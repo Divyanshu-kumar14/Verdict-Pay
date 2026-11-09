@@ -62,8 +62,8 @@ async def test_created_order_is_not_a_payment(client) -> None:
     # The buyer still has to approve, so a real approval URL must be handed out.
     assert checkout["approval_url"].startswith("https://")
     assert checkout["order_id"] in checkout["approval_url"]
-    assert checkout["gateway_mode"] == "LOCAL_SIMULATOR"
-    assert checkout["provenance"] == "local_simulator"
+    assert checkout["gateway_mode"] == "PAYPAL_SANDBOX"
+    assert checkout["provenance"] == "paypal_sandbox"
     assert checkout["run_id"].startswith("run_")
 
     # The invariant that matters: no ledger row exists for an unpaid order.
@@ -186,7 +186,7 @@ async def test_captured_transaction_is_visible_on_the_reporting_read_path(client
     assert reported["order_id"] == order_id
     assert reported["status"] == "CAPTURED"
     assert reported["amount_usd"] == "99.00"
-    assert reported["source"] == "local_simulator"
+    assert reported["source"] == "paypal_sandbox"
 
 
 # ------------------------------------------------------------------ webhook idempotency

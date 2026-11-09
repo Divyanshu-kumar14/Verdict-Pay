@@ -10,7 +10,7 @@ This page is written to be read aloud while clicking.
 
 ```bash
 # Option A — Docker (builds both images, seeds on first boot)
-cp .env.example .env          # the defaults already work; no PayPal keys needed
+cp .env.example .env          # the defaults require sandbox credentials (PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET)
 docker compose up --build
 # open http://localhost:3000
 
@@ -26,9 +26,9 @@ make api                      # terminal 1  (API on :8000)
 make web                      # terminal 2  (UI on :3000)
 ```
 
-Both paths start in `LOCAL_SIMULATOR` gateway mode. The gateway badge in the header comes from
-`health.gateway_status` and reads **LOCAL_SIMULATOR**; in sandbox mode it reads **PAYPAL_SANDBOX**.
-Every money figure carries a **SIMULATED** or **REAL SANDBOX** provenance chip, sourced from the same
+Both paths start in `PAYPAL_SANDBOX` gateway mode. The gateway badge in the header comes from
+`health.gateway_status` and reads **PAYPAL_SANDBOX**.
+Every money figure carries a **REAL SANDBOX** provenance chip, sourced from the same
 response that produced the number.
 
 For the AI requirement on camera, export a Gemini key before recording:
@@ -57,24 +57,20 @@ That is a correct, labelled state — not a broken one.
 
 ### Step 1 — PayPal checkout
 
-In `LOCAL_SIMULATOR` the approve action is labelled **Simulate buyer approval (local simulator)** and
-calls `POST /api/v1/sandbox/orders/{id}/approve`. It is deliberately worded so it can never be mistaken for a real
-PayPal approval.
+Open the `approval_url`, log in as the **sandbox buyer** (not your own PayPal login),
+approve, then return to the app and press **Capture**. The UI polls
+`GET /api/v1/sandbox/orders/{id}` and shows `APPROVED → CAPTURED` with a `capture_id`.
 
-In `PAYPAL_SANDBOX` the `approval_url` is a real `sandbox.paypal.com/checkoutnow?token=…` link:
-
-1. Click it, log in with the **sandbox buyer** account (not your own PayPal login), approve.
-2. Return to the app and press **Capture**. The UI polls `GET /api/v1/sandbox/orders/{id}` and shows
-   `APPROVED → CAPTURED` with a `capture_id`.
-3. Pressing Capture before approval returns `409 order_not_approved`. Say so: that is the lifecycle
+1. Open the `approval_url` (a real `sandbox.paypal.com/checkoutnow?token=…` link).
+2. Pressing Capture before approval returns `409 order_not_approved`. Say so: that is the lifecycle
    enforcing itself, and it mirrors PayPal's 422 `ORDER_NOT_APPROVED`.
 
-Expected values on a freshly seeded simulator stack:
+Expected values on a freshly seeded sandbox stack (ids are PayPal-assigned):
 
 | Field | Expected |
 |---|---|
-| Order id | `5O14B26DBBB1A5529` (deterministic for a fresh seed) |
-| Subscription id | `I-BW2BDCA160D9` |
+| Order id | PayPal-assigned (see `approval_url`) |
+| Subscription id | PayPal-assigned |
 | Payer id | `YRZ829104KLA` |
 | Amount | `$99.00` USD |
 
@@ -111,7 +107,7 @@ a PayPal webhook or through the Disputes API is labelled `paypal_sandbox` instea
 
 ### Step 5 — deterministic triage
 
-| Field | Expected (seeded, simulator) |
+| Field | Expected (seeded, sandbox) |
 |---|---|
 | p(win) | `90.0%` (SNAD multiplier 0.90, all six signals present) |
 | EV · Fight | `-$41.40` |
@@ -171,8 +167,8 @@ confused on screen.
 ## CLI variant: `make demo`
 
 ```
-[0] Health + gateway mode              ok v0.1.0 - gateway=simulator - demo_mode=True
-[1] Buyer checks out the Pro plan      ok order=5O14B26DBBB1A5529 sub=I-BW2BDCA160D9 payer=YRZ829104KLA
+[0] Health + gateway mode              ok v0.1.0 - gateway=sandbox - demo_mode=True
+[1] Buyer checks out the Pro plan      ok order=<paypal-assigned> sub=<paypal-assigned> payer=YRZ829104KLA
 [2] Buyer burns 42k tokens…            ok 4 events - chain … - 42000 tokens
 [3] Buyer files an INR dispute         ok PP-D-40006 - DEFLECT_INQUIRY - suspended in 0ms
 [4] Command center loads the case room ok p(win)=0.95 - EV_fight=$-35.70 - EV_offer=$-29.70 - 6/6 signals
@@ -195,7 +191,7 @@ dossier, which is why it ends at 7 cases / $695 instead of 6 / $596.
 |---|---|---|
 | "No dispute on file" | No cases seeded | `make seed`, or restart `docker compose up` |
 | Step 6 shows `degraded=true` | No `GEMINI_API_KEY`, or `AI_ENABLED=false` | Export the key and restart the API |
-| Step 1 capture returns `409 order_not_approved` | Order still `CREATED` | Approve in PayPal first, or press the simulator approve action |
+| Step 1 capture returns `409 order_not_approved` | Order still `CREATED` | Open the approval_url and approve as the sandbox buyer, then capture |
 | "Chain unverified" | Ledger edited out-of-band | Delete `backend/verdictpay.db*` and `make seed` |
 | Health badge red | API not on :8000 | `make api`; check `curl localhost:8000/api/v1/health` |
 | Numbers differ by a few ms | Latency is measured live | Latency and timestamps are the only moving values |

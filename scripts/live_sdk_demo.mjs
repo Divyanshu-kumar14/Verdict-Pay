@@ -28,7 +28,7 @@ const API_BASE_URL = (
 const API_KEY = process.env.VERDICTPAY_API_KEY ?? "vp_demo_sk_local";
 const SIGNING_SECRET =
   process.env.VERDICTPAY_SIGNING_SECRET ?? "dev-signing-secret-change-me";
-const PAYPAL_MODE = process.env.PAYPAL_MODE ?? "simulator";
+const PAYPAL_MODE = process.env.PAYPAL_MODE ?? "LOCAL_SIMULATOR";
 
 /* Byte-identical to backend/app/api/routers/sandbox.py. */
 const TOS_VERSION = "v2.4-2026-01";
@@ -84,7 +84,7 @@ async function main() {
   console.log(`  API       : ${API_BASE_URL}`);
   console.log(`  SDK       : packages/verdictpay-sdk/dist/index.js`);
   console.log(`  PAYPAL_MODE: ${PAYPAL_MODE} (the running backend decides the gateway)`);
-  if (PAYPAL_MODE === "live") {
+  if (PAYPAL_MODE === "PAYPAL_LIVE" || PAYPAL_MODE === "live") {
     console.log("  note      : live mode calls the real PayPal sandbox; the backend needs credentials.");
   }
 

@@ -13,7 +13,7 @@ def _settings(tmp_path) -> Settings:
     return Settings(
         app_env="test",
         database_url=f"sqlite+aiosqlite:///{tmp_path / 'body.db'}",
-        paypal_mode="simulator",
+        paypal_mode="PAYPAL_SANDBOX",
         llm_mode="template",
         verdictpay_api_key="body_test_key",
         webhook_tolerance_seconds=300,

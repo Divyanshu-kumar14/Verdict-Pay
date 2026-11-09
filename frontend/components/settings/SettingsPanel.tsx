@@ -76,17 +76,16 @@ function formatUptime(seconds: number): string {
 }
 
 /** The backend's gateway enum, in the order the product exposes it. */
-const GATEWAY_MODES = ["LOCAL_SIMULATOR", "PAYPAL_SANDBOX", "PAYPAL_LIVE"] as const;
+const GATEWAY_MODES = ["PAYPAL_SANDBOX", "PAYPAL_LIVE"] as const;
 
 /**
  * Canonicalise a gateway mode string. The API sends the enum spelling, but the
- * legacy `gateway`/`mode` fields used lowercase words ("simulator", "live"), so
- * both spellings must resolve to the same mode — otherwise a simulator
- * deployment renders as "PayPal Live", which is the exact inversion to avoid.
+ * legacy `gateway`/`mode` fields used lowercase words ("sandbox", "live"), so
+ * both spellings must resolve to the same mode.
  */
 function normaliseMode(raw: string): string {
   const value = raw.trim().toUpperCase();
-  if (value === "SIMULATOR" || value === "LOCAL") return "LOCAL_SIMULATOR";
+  if (value === "SIMULATOR" || value === "LOCAL") return "PAYPAL_SANDBOX";
   if (value === "SANDBOX") return "PAYPAL_SANDBOX";
   if (value === "LIVE") return "PAYPAL_LIVE";
   return GATEWAY_MODES.includes(value as (typeof GATEWAY_MODES)[number]) ? value : "unknown";
@@ -95,8 +94,6 @@ function normaliseMode(raw: string): string {
 /** The judge-facing name for a mode, falling back to the raw value when unknown. */
 function gatewayModeLabel(raw: string): string {
   switch (normaliseMode(raw)) {
-    case "LOCAL_SIMULATOR":
-      return "Local simulator";
     case "PAYPAL_SANDBOX":
       return "PayPal Sandbox";
     case "PAYPAL_LIVE":
@@ -421,15 +418,14 @@ export function SettingsPanel() {
     return () => observer.disconnect();
   }, []);
 
-  /* The backend spells modes as an enum (LOCAL_SIMULATOR / PAYPAL_SANDBOX /
-     PAYPAL_LIVE). The health payload's own `gateway_status` booleans are the
+  /* The backend spells modes as an enum (PAYPAL_SANDBOX / PAYPAL_LIVE).
+     The health payload's own `gateway_status` booleans are the
      authority; the older `gateway`/`mode` strings are only a fallback for a
      deployment that predates it. */
   const gateway = health.data?.gateway_status ?? null;
   const ai = health.data?.ai_status ?? null;
   const rawMode = gateway?.mode ?? health.data?.gateway ?? health.data?.mode ?? "unknown";
   const mode = normaliseMode(rawMode);
-  const isSimulator = mode === "LOCAL_SIMULATOR";
   const isLive = mode === "PAYPAL_LIVE";
   const modeLabel = gatewayModeLabel(rawMode);
   const modeKnown = health.data !== null;
@@ -531,7 +527,7 @@ export function SettingsPanel() {
             <Panel>
               <PanelHeader
                 title="Gateway & environment"
-                description="The simulator implements the same gateway protocol as the live adapter, so triage, pricing and the action rail behave identically. Live mode needs one environment variable plus PayPal client credentials."
+                description="Both modes call the real PayPal API, so triage, pricing and the action rail behave identically. Live mode needs PayPal client credentials plus an explicit opt-in."
                 actions={<Badge tone={gatewayStatus.tone}>{gatewayStatus.label}</Badge>}
               />
               <PanelBody className="grid gap-4 sm:grid-cols-2">
@@ -617,71 +613,57 @@ export function SettingsPanel() {
             <Panel>
               <PanelHeader
                 title="What changes between modes"
-                description="The four moving parts that differ across the three modes. Sandbox and live both call the real PayPal API; only live moves real money."
+                description="The four moving parts that differ between the two modes. Both call the real PayPal API; only live moves real money."
                 actions={<Badge tone={gatewayStatus.tone}>{modeLabel}</Badge>}
               />
               <PanelBody className="space-y-2.5">
                 <SwitchRow
                   title="Money movement"
                   status={{
-                    label: isSimulator ? "Local ledger" : isLive ? "Real funds" : "Sandbox funds",
-                    tone: isSimulator ? "accent" : isLive ? "negative" : "positive",
+                    label: isLive ? "Real funds" : "Sandbox funds",
+                    tone: isLive ? "negative" : "positive",
                   }}
                   description={
-                    isSimulator
-                      ? "Orders, captures and refunds are written to a local ledger. No funds move."
-                      : isLive
-                        ? "Orders, captures and refunds hit the production PayPal API and move real money."
-                        : "Orders, captures and refunds hit the real PayPal API against sandbox accounts. Test funds move; no real money does."
+                    isLive
+                      ? "Orders, captures and refunds hit the production PayPal API and move real money."
+                      : "Orders, captures and refunds hit the real PayPal API against sandbox accounts. Test funds move; no real money does."
                   }
-                  on={!isSimulator}
+                  on
                 />
                 <SwitchRow
                   title="Credentials"
                   status={{
-                    label: isSimulator ? "None required" : isLive ? "Live client id and secret" : "Sandbox client id and secret",
-                    tone: isSimulator ? "positive" : "warning",
+                    label: isLive ? "Live client id and secret" : "Sandbox client id and secret",
+                    tone: "warning",
                   }}
-                  description={
-                    isSimulator
-                      ? "The simulator answers without PayPal credentials."
-                      : "Network modes authenticate with OAuth2 using credentials held in the deployment environment. Presence is reported as a boolean; the values are never rendered."
-                  }
-                  on={!isSimulator}
+                  description="Sandbox and live authenticate with OAuth2 using credentials held in the deployment environment. Presence is reported as a boolean; the values are never rendered."
+                  on
                 />
                 <SwitchRow
                   title="Webhook verify"
                   status={{
-                    label: isSimulator ? "Shared secret" : "PayPal signature",
-                    tone: isSimulator ? "accent" : "positive",
+                    label: "PayPal signature",
+                    tone: "positive",
                   }}
-                  description={
-                    isSimulator
-                      ? "Inbound events are signed with the local webhook secret."
-                      : "Inbound events are verified against the PayPal signature header, with replay protection keyed on the event id."
-                  }
-                  on={!isSimulator}
+                  description="Inbound events are verified against the PayPal signature header, with replay protection keyed on the event id."
+                  on
                 />
                 <SwitchRow
                   title="Determinism"
                   status={{
-                    label: isSimulator ? "Seeded, replayable" : "Network-timed",
-                    tone: isSimulator ? "positive" : "warning",
+                    label: "Network-timed",
+                    tone: "warning",
                   }}
-                  description={
-                    isSimulator
-                      ? "Seeded inputs make every run replayable."
-                      : "Timing and status depend on the live PayPal network; the pricing and EV maths stay deterministic either way."
-                  }
-                  on={!isSimulator}
+                  description="Timing and status depend on the PayPal network; the pricing and EV maths stay deterministic either way."
+                  on
                 />
                 <Field
                   label="Switch"
                   value="PAYPAL_MODE env"
                   note={
                     isLive
-                      ? "Live is active. Switching back to LOCAL_SIMULATOR stops all network calls."
-                      : "Set PAYPAL_MODE to LOCAL_SIMULATOR, PAYPAL_SANDBOX or PAYPAL_LIVE. Live additionally requires ALLOW_PAYPAL_LIVE=true."
+                      ? "Live is active. Switching back to PAYPAL_SANDBOX returns to test funds."
+                      : "Set PAYPAL_MODE to PAYPAL_SANDBOX or PAYPAL_LIVE. Live additionally requires ALLOW_PAYPAL_LIVE=true."
                   }
                 />
               </PanelBody>
@@ -801,8 +783,7 @@ export function SettingsPanel() {
                 <p className="flex max-w-[60ch] items-start gap-2 text-sm text-muted">
                   <ShieldCheck size={14} className="mt-0.5 shrink-0 text-muted" aria-hidden />
                   <span>
-                    In simulator mode the signature is computed with VERDICTPAY_WEBHOOK_SECRET. In
-                    live mode the PayPal verify-webhook-signature endpoint is called. Unsigned
+                    In sandbox and live modes the PayPal verify-webhook-signature endpoint is called. Unsigned
                     traffic is rejected unless ALLOW_UNSIGNED_WEBHOOKS is true and APP_ENV is local.
                   </span>
                 </p>

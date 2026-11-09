@@ -47,7 +47,7 @@ def _aware(value: datetime | None) -> datetime | None:
 
 
 def dispute_case_to_record(case: DisputeCase) -> PayPalDisputeRecord:
-    """Rebuild the gateway view of a persisted case (used to rehydrate the simulator)."""
+    """Rebuild the gateway view of a persisted case."""
     return PayPalDisputeRecord(
         dispute_id=case.dispute_id,
         reason_code=case.reason_code,
@@ -67,10 +67,9 @@ def dispute_case_to_record(case: DisputeCase) -> PayPalDisputeRecord:
 
 
 async def restore_gateway_state(session: AsyncSession, gateway: PayPalGateway) -> int:
-    """Rehydrate the in-memory simulator from persisted cases after a restart.
+    """No-op unless the gateway exposes hydrate (live gateway is stateless).
 
-    The simulator is intentionally stateless on disk; the database is the system
-    of record. Without this step a restarted demo would list cases it cannot act on.
+    The database is the system of record.
     """
     hydrate = getattr(gateway, "hydrate", None)
     if hydrate is None:

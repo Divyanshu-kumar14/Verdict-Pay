@@ -1,7 +1,7 @@
 """Inbound PayPal webhooks.
 
 No API key here: authenticity is established by the gateway's signature check
-(PayPal verify-webhook-signature in live mode, HMAC in simulator mode).
+(PayPal verify-webhook-signature).
 """
 
 from __future__ import annotations

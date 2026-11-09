@@ -31,7 +31,7 @@ async def test_api_returns_429_envelope_and_exempts_health(tmp_path) -> None:
     settings = Settings(
         app_env="test",
         database_url=f"sqlite+aiosqlite:///{tmp_path / 'rate.db'}",
-        paypal_mode="simulator",
+        paypal_mode="PAYPAL_SANDBOX",
         llm_mode="template",
         verdictpay_api_key="rate_test_key",
         rate_limit_per_minute=2,

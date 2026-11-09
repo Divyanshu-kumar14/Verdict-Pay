@@ -1,8 +1,8 @@
 # Deploying VerdictPay to Render
 
-Two Docker web services from one blueprint: an API (FastAPI, simulator gateway by
-default) and a web app (Next.js). No PayPal account, database, or object store is
-required — the API seeds its own deterministic demo data on boot.
+Two Docker web services from one blueprint: an API (FastAPI, `PAYPAL_SANDBOX` by
+default; requires PayPal sandbox credentials) and a web app (Next.js). A PayPal sandbox app, database, or object store is
+required — the API seeds its own deterministic demo data on boot once credentials are set.
 
 ## Live deployment (this repository)
 
@@ -145,6 +145,6 @@ closes one of the two remaining hackathon items; the demo video is the other.
 
 - **The demo video** (< 3 min, required by the hackathon) does not exist yet.
 - **Elastic, Supabase** — optional adapters, not wired into the demo path.
-- **PayPal network mode** — the deploy defaults to `PAYPAL_MODE=LOCAL_SIMULATOR`. To use the
+- **PayPal network mode** — local default is `PAYPAL_MODE=LOCAL_SIMULATOR`. The Render blueprint sets `PAYPAL_SANDBOX` so a configured deploy hits the real sandbox; without `PAYPAL_CLIENT_ID`/`SECRET` the API boots as `UnconfiguredGateway` (health names blockers, payment calls 502, never silent simulator). To use the
   sandbox, set `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` and change `PAYPAL_MODE` to
   `PAYPAL_SANDBOX`. `PAYPAL_LIVE` additionally requires `ALLOW_PAYPAL_LIVE=true`.

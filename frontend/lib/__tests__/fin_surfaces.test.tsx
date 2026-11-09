@@ -9,16 +9,16 @@ import type { AiStatus, DecisionComparison, GatewayStatus } from "@/lib/types";
 /* --------------------------------------------------------------------------
    These tests pin the two judge-facing claims that were wrong or missing:
    1. a merchant already above the threshold is never described as "below" it;
-   2. settings presents three gateway modes and never leaks a credential value.
+   2. settings presents two gateway modes and never leaks a credential value.
 -------------------------------------------------------------------------- */
 
 function makeGateway(overrides: Partial<GatewayStatus> = {}): GatewayStatus {
   return {
-    mode: "LOCAL_SIMULATOR",
+    mode: "PAYPAL_SANDBOX",
     readiness: "ready",
-    sandbox: false,
+    sandbox: true,
     live: false,
-    simulation: true,
+    simulation: false,
     api_base: "https://api-m.sandbox.paypal.com",
     credentials_configured: true,
     webhook_configured: true,
@@ -86,17 +86,16 @@ function makeComparison(overrides: Partial<DecisionComparison> = {}): DecisionCo
 }
 
 describe("GatewayModes", () => {
-  it("renders all three modes", () => {
+  it("renders both modes", () => {
     render(<GatewayModes status={makeGateway()} ai={makeAi()} />);
-    // "Local simulator" also appears in the header badge for the active mode.
-    expect(screen.getAllByText("Local simulator").length).toBeGreaterThan(0);
-    expect(screen.getByText("PayPal Sandbox")).toBeInTheDocument();
-    expect(screen.getByText("PayPal Live")).toBeInTheDocument();
+    expect(screen.getAllByText("PayPal Sandbox").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("PayPal Live").length).toBeGreaterThan(0);
+    expect(screen.queryByText("Local simulator")).not.toBeInTheDocument();
   });
 
   it("marks only the active mode as current", () => {
     const { container } = render(
-      <GatewayModes status={makeGateway({ mode: "PAYPAL_SANDBOX", sandbox: true, simulation: false })} ai={makeAi()} />,
+      <GatewayModes status={makeGateway()} ai={makeAi()} />,
     );
     const current = container.querySelectorAll(".bg-raised");
     expect(screen.getAllByText("Current")).toHaveLength(1);

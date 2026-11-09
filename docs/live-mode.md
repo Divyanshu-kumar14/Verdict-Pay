@@ -5,7 +5,7 @@ VerdictPay ships three gateway modes behind one `PayPalGateway` protocol. The mo
 
 | `PAYPAL_MODE` | Gateway | Network | Use |
 |---|---|---|---|
-| `LOCAL_SIMULATOR` (default) | `SimulatorGateway` | none | demo, tests, judge laptops without accounts |
+| `PAYPAL_SANDBOX` (default) | `LivePayPalGateway` | `api-m.sandbox.paypal.com` | demo, tests, order lifecycle (sandbox credentials required) |
 | `PAYPAL_SANDBOX` | `LivePayPalGateway` | `api-m.sandbox.paypal.com` | proving the real REST integration and the order lifecycle |
 | `PAYPAL_LIVE` | `LivePayPalGateway` | `api-m.paypal.com` | real money — also needs `ALLOW_PAYPAL_LIVE=true` |
 
@@ -23,7 +23,7 @@ Two safety properties are enforced rather than documented:
   watching a real PayPal call when they are not.
 - `PAYPAL_LIVE` refuses to start unless `ALLOW_PAYPAL_LIVE` is literally `true`.
 
-Legacy values are still accepted and mapped: `simulator` → `LOCAL_SIMULATOR`, `sandbox` →
+Legacy values are still accepted and mapped: `sandbox` →
 `PAYPAL_SANDBOX`, and bare `live` is disambiguated by inspecting `PAYPAL_API_BASE`.
 
 ## The order lifecycle

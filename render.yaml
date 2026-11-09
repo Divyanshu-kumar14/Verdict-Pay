@@ -63,10 +63,12 @@ services:
         value: "true"
       - key: DATABASE_URL
         value: sqlite+aiosqlite:////app/data/verdictpay.db
-      # PAYPAL_MODE must be PAYPAL_SANDBOX for a judge to see real PayPal
-      # activity. It previously said "simulator", which is why the public
+      # PAYPAL_MODE must be PAYPAL_SANDBOX for a configured Render deploy to hit
+      # the real sandbox. It previously said "simulator", which is why the public
       # deployment reported "Gateway: simulator" while the credentials below
-      # were already configured. Set to LOCAL_SIMULATOR to run keyless.
+      # were already configured. Set to LOCAL_SIMULATOR to run keyless locally.
+      # Without PAYPAL_CLIENT_ID/SECRET the API boots as UnconfiguredGateway
+      # (health names blockers, payment calls 502) — never silent simulator.
       - key: PAYPAL_MODE
         value: PAYPAL_SANDBOX
       # Real money never moves: PAYPAL_LIVE additionally requires this flag.
@@ -78,6 +80,9 @@ services:
         sync: false
       - key: PAYPAL_CANCEL_URL
         sync: false
+      # Dossier narrative provider. Hosted default is gemini, but with empty
+      # GEMINI_API_KEY (sync:false until dashboard-filled) the dossier runs
+      # degraded=true via deterministic template — same numbers, template prose.
       - key: LLM_MODE
         value: gemini
       - key: GEMINI_MODEL
@@ -99,6 +104,12 @@ services:
       - key: PAYPAL_CLIENT_SECRET
         sync: false
       - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: PAYPAL_SANDBOX_CLIENT_ID
+        sync: false
+      - key: PAYPAL_SANDBOX_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_SANDBOX_WEBHOOK_ID
         sync: false
       - key: OPENAI_API_KEY
         sync: false

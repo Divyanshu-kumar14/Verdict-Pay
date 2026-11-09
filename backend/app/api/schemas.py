@@ -380,12 +380,12 @@ class CheckoutResponse(ApiModel):
     sandbox: bool
     lifecycle_stage: Literal["CREATED", "APPROVED", "CAPTURED", "FAILED"] = "CREATED"
     # Honest provenance: "paypal_sandbox" means a real PayPal order exists.
-    provenance: Literal["paypal_sandbox", "paypal_live", "local_simulator"] = "local_simulator"
+    provenance: Literal["paypal_sandbox", "paypal_live"] = "paypal_sandbox"
     paypal_debug_id: str | None = None
 
 
 class OrderStatusResponse(ApiModel):
-    """Live order state straight from PayPal (or the simulator)."""
+    """Live order state straight from PayPal."""
 
     order_id: str
     run_id: str | None = None
@@ -399,7 +399,7 @@ class OrderStatusResponse(ApiModel):
     capture_status: str | None = None
     captured_at: datetime | None = None
     gateway_mode: str
-    provenance: Literal["paypal_sandbox", "paypal_live", "local_simulator"]
+    provenance: Literal["paypal_sandbox", "paypal_live"]
     paypal_debug_id: str | None = None
     payer_action_required: bool = False
     detail: str | None = None
@@ -423,7 +423,7 @@ class CaptureResponse(ApiModel):
     captured_at: datetime | None = None
     transaction: TransactionOut | None = None
     gateway_mode: str
-    provenance: Literal["paypal_sandbox", "paypal_live", "local_simulator"]
+    provenance: Literal["paypal_sandbox", "paypal_live"]
     paypal_debug_id: str | None = None
     detail: str | None = None
 
@@ -463,9 +463,8 @@ class DisputeSimulationResponse(ApiModel):
     webhook_event_id: str
     triage_triggered: bool
     containment: dict[str, Any] = Field(default_factory=dict)
-    # "internal_test_event" is a locally generated event that travelled through
-    # the real verification pipeline; it is NOT a PayPal-originated dispute.
-    origin: Literal["internal_test_event", "paypal_sandbox"] = "internal_test_event"
+    # Every dispute originates from the PayPal Sandbox API surface.
+    origin: Literal["paypal_sandbox"] = "paypal_sandbox"
 
 
 # --------------------------------------------------------------------------- demo runs
@@ -477,7 +476,7 @@ class DemoRun(ApiModel):
     updated_at: datetime
     status: Literal["OPEN", "COMPLETED", "ABANDONED"]
     gateway_mode: str
-    provenance: Literal["paypal_sandbox", "paypal_live", "local_simulator"]
+    provenance: Literal["paypal_sandbox", "paypal_live"]
     payer_id: str | None = None
     order_id: str | None = None
     capture_id: str | None = None

@@ -10,7 +10,7 @@ import type { AiStatus, GatewayReadiness, GatewayStatus } from "@/lib/types";
 import type { Tone } from "@/lib/vocab";
 
 /* --------------------------------------------------------------------------
-   The three gateway modes, presented as three first-class choices.
+   The two gateway modes, presented as two first-class choices.
 
    Everything rendered here comes from `health.gateway_status` / `health.ai_status`
    — the backend's own report of which adapter is serving, whether it is ready,
@@ -18,8 +18,8 @@ import type { Tone } from "@/lib/vocab";
    and none of them are even in this payload: the API sends booleans only.
 -------------------------------------------------------------------------- */
 
-/** The three modes, in escalating trust order — the same order the backend enum uses. */
-type ModeKey = "simulator" | "sandbox" | "live";
+/** The two modes, in escalating trust order — the same order the backend enum uses. */
+type ModeKey = "sandbox" | "live";
 
 type ModeSpec = {
   key: ModeKey;
@@ -35,17 +35,6 @@ type ModeSpec = {
 };
 
 const MODES: ModeSpec[] = [
-  {
-    key: "simulator",
-    label: "Local simulator",
-    flag: (status) => status.simulation,
-    configValue: "LOCAL_SIMULATOR",
-    summary:
-      "A sealed local ledger that implements the same gateway protocol as PayPal. Nothing leaves the machine and no funds move, so every run replays identically.",
-    money: "No funds move — orders and captures are written to the local ledger.",
-    credentials: "No PayPal credentials required.",
-    tone: "accent",
-  },
   {
     key: "sandbox",
     label: "PayPal Sandbox",
@@ -198,7 +187,7 @@ function CompletenessRow({
 }
 
 /**
- * The three-mode overview plus configuration completeness.
+ * The two-mode overview plus configuration completeness.
  *
  * `status` is null while the first health check is in flight, or when an older
  * backend omits it — in that case every card is shown inactive with an explicit
@@ -221,7 +210,7 @@ export function GatewayModes({
       <Panel>
         <PanelHeader
           title="Gateway modes"
-          description="Three modes, in escalating trust order. The simulator is a sealed training sandbox, not a failure state, and it sits beside the two PayPal network modes as a first-class choice."
+          description="Two modes, in escalating trust order. Sandbox runs against PayPal test accounts; live moves real money."
           actions={
             <Badge tone={active ? active.tone : "neutral"}>
               {active ? active.label : known ? "No mode reported" : "Checking"}
@@ -229,19 +218,14 @@ export function GatewayModes({
           }
         />
         <PanelBody>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-            {MODES.map((spec, index) => (
+          <div className="grid gap-3 md:grid-cols-2">
+            {MODES.map((spec) => (
               <ModeCard
                 key={spec.key}
                 spec={spec}
                 active={active?.key === spec.key}
                 readiness={active?.key === spec.key ? readiness : null}
                 blockers={active?.key === spec.key ? blockers : []}
-                /* Three cards over a two-column grid would orphan the last one;
-                   let it take the full row until the grid itself goes 3-up. */
-                className={
-                  index === MODES.length - 1 ? "md:col-span-2 xl:col-span-1" : undefined
-                }
               />
             ))}
           </div>

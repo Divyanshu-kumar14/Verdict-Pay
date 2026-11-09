@@ -5,7 +5,7 @@ The properties under test are the ones a judge can falsify by clicking twice:
 * a fresh run never surfaces a previous run's dispute;
 * an order is not a payment — capture before approval is a 409, and only a
   completed gateway capture may say CAPTURED;
-* a simulated approval exists in LOCAL_SIMULATOR and nowhere else;
+* no simulated approval exists; approval happens in the PayPal UI;
 * reset removes demo records and keeps the merchant and every non-demo record.
 
 Settings for the network-mode test carry dummy credentials and a sentinel
@@ -129,17 +129,17 @@ async def test_checkout_creates_an_order_not_a_payment(demo_client: AsyncClient)
     order = await _checkout(demo_client)
     assert order["lifecycle_stage"] == "CREATED"
     assert order["status"] == "CREATED"
-    assert order["gateway_mode"] == "LOCAL_SIMULATOR"
-    assert order["sandbox"] is False  # sandbox is specifically PAYPAL_SANDBOX
-    assert order["provenance"] == "local_simulator"
+    assert order["gateway_mode"] == "PAYPAL_SANDBOX"
+    assert order["sandbox"] is True  # sandbox is specifically PAYPAL_SANDBOX
+    assert order["provenance"] == "paypal_sandbox"
     assert order["run_id"].startswith("run_")
 
     status = (await demo_client.get(f"/api/v1/sandbox/orders/{order['order_id']}")).json()
     assert status["lifecycle_stage"] == "CREATED"
     assert status["capture_id"] is None
     assert status["captured_at"] is None
-    # The local simulator does not need a buyer round-trip, so no prompt appears.
-    assert status["payer_action_required"] is False
+    # PAYPAL_SANDBOX needs a buyer round-trip, so a prompt appears.
+    assert status["payer_action_required"] is True
 
 
 async def test_capture_before_approval_is_409(demo_client: AsyncClient) -> None:
@@ -174,7 +174,7 @@ async def test_capture_before_approval_is_409(demo_client: AsyncClient) -> None:
 async def test_approve_then_capture_yields_a_recorded_payment(
     demo_client: AsyncClient,
 ) -> None:
-    """LOCAL_SIMULATOR approve + capture produces a real, persisted transaction."""
+    """PAYPAL_SANDBOX approve + capture produces a real, persisted transaction."""
     order = await _checkout(demo_client)
     order_id = order["order_id"]
 
@@ -190,11 +190,11 @@ async def test_approve_then_capture_yields_a_recorded_payment(
     assert body["capture_id"]
     assert body["captured_at"]
     assert body["amount_usd"] == "99.00"
-    assert body["provenance"] == "local_simulator"
+    assert body["provenance"] == "paypal_sandbox"
     assert body["transaction"] is not None
     assert body["transaction"]["transaction_id"] == body["capture_id"]
     assert body["transaction"]["status"] == "CAPTURED"
-    assert body["transaction"]["source"] == "local_simulator"
+    assert body["transaction"]["source"] == "paypal_sandbox"
     assert body["transaction"]["payer_id"] == order["payer_id"]
 
     async with demo_client.app.state.db.session() as session:
@@ -338,12 +338,9 @@ async def test_approve_in_network_mode_is_409_without_touching_the_gateway(
         await session.commit()
 
     response = await _approve(sandbox_client, order_id)
-    assert response.status_code == 409, response.text
-    body = response.json()
-    assert body["error"]["code"] == "approve_not_supported"
-    message = body["error"]["message"].lower()
-    assert "paypal ui" in message
-    assert "sandbox" in message
+    # The approve endpoint was deleted: approval happens in the PayPal UI, so
+    # any simulated approve is a 404, still without touching the gateway.
+    assert response.status_code == 404, response.text
 
     # Refused before any gateway call, so the order is still unapproved.
     async with sandbox_client.app.state.db.session() as session:

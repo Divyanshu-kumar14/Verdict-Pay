@@ -70,7 +70,7 @@ def _settings(tmp_path, **overrides: Any) -> Settings:
     base: dict[str, Any] = {
         "app_env": "test",
         "database_url": f"sqlite+aiosqlite:///{tmp_path / 'aianalyze.db'}",
-        "paypal_mode": "simulator",
+        "paypal_mode": "PAYPAL_SANDBOX",
         "llm_mode": "gemini",
         "gemini_api_key": "test-gemini-key",
         "verdictpay_api_key": API_KEY,

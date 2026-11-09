@@ -1,7 +1,7 @@
 """Application configuration.
 
 All settings are environment-driven (see .env.example). Defaults are deliberately
-safe for a local, keyless demo: simulator gateway, SQLite, template narrative.
+safe for a local demo: PayPal Sandbox gateway, SQLite, template narrative.
 """
 
 from __future__ import annotations
@@ -24,19 +24,16 @@ PAYPAL_LIVE_BASE = "https://api-m.paypal.com"
 
 
 class GatewayMode(StrEnum):
-    """The three gateway modes the product exposes, in escalating trust order.
+    """The two gateway modes the product exposes, in escalating trust order.
 
-    ``LOCAL_SIMULATOR`` never touches the network. ``PAYPAL_SANDBOX`` calls the
-    real PayPal API against the free sandbox. ``PAYPAL_LIVE`` moves real money
-    and therefore demands an explicit opt-in.
+    ``PAYPAL_SANDBOX`` calls the real PayPal API against the free sandbox.
+    ``PAYPAL_LIVE`` moves real money and therefore demands an explicit opt-in.
     """
 
-    LOCAL_SIMULATOR = "LOCAL_SIMULATOR"
     PAYPAL_SANDBOX = "PAYPAL_SANDBOX"
     PAYPAL_LIVE = "PAYPAL_LIVE"
 
 
-_LocalAliases = frozenset({"local_simulator", "simulator", "local", "mock", "test"})
 _SandboxAliases = frozenset({"paypal_sandbox", "sandbox"})
 _LiveAliases = frozenset({"paypal_live", "production"})
 # Internal marker: the legacy "live" token, resolved against the API base.
@@ -78,13 +75,18 @@ class Settings(BaseSettings):
     allowed_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     # --- PayPal -----------------------------------------------------------
-    # Accepted values (case-insensitive): LOCAL_SIMULATOR | PAYPAL_SANDBOX |
-    # PAYPAL_LIVE plus the legacy aliases "simulator" and "live".
-    paypal_mode: str = "LOCAL_SIMULATOR"
+    # Accepted values (case-insensitive): PAYPAL_SANDBOX | PAYPAL_LIVE
+    # plus the legacy alias "live".
+    paypal_mode: str = "PAYPAL_SANDBOX"
     paypal_api_base: str = ""
     paypal_client_id: str = ""
     paypal_client_secret: str = ""
     paypal_webhook_id: str = ""
+    # Per-mode overrides: when set, these win for that mode; otherwise the
+    # base trio above is used (backward compat). Never commit real values.
+    paypal_sandbox_client_id: str = ""
+    paypal_sandbox_client_secret: str = ""
+    paypal_sandbox_webhook_id: str = ""
     paypal_timeout_seconds: float = 15.0
     # PAYPAL_LIVE moves real money; this second switch stops a typo in
     # PAYPAL_MODE alone from turning the demo into a payment processor.
@@ -159,13 +161,13 @@ class Settings(BaseSettings):
     @field_validator("paypal_mode", mode="before")
     @classmethod
     def _normalise_paypal_mode(cls, value: object) -> object:
-        """Accept the canonical three modes plus the legacy aliases.
+        """Accept the canonical two modes plus the legacy "live" alias.
 
         The legacy ``live`` token is kept as a marker here and resolved in the
         model validator below, where the configured API base is already known.
         """
         if value is None:
-            return GatewayMode.LOCAL_SIMULATOR.value
+            return GatewayMode.PAYPAL_SANDBOX.value
         token = str(value).strip().lower().replace("-", "_").replace(" ", "_")
         if token == "live":
             return _LEGACY_LIVE_MARKER
@@ -173,11 +175,9 @@ class Settings(BaseSettings):
             return GatewayMode.PAYPAL_LIVE.value
         if token in _SandboxAliases:
             return GatewayMode.PAYPAL_SANDBOX.value
-        if token in _LocalAliases:
-            return GatewayMode.LOCAL_SIMULATOR.value
         raise ValueError(
-            "paypal_mode must be one of LOCAL_SIMULATOR, PAYPAL_SANDBOX, PAYPAL_LIVE "
-            f"(or legacy simulator/live); got {value!r}"
+            "paypal_mode must be one of PAYPAL_SANDBOX, PAYPAL_LIVE "
+            f"(or legacy live); got {value!r}"
         )
 
     @model_validator(mode="after")
@@ -232,42 +232,74 @@ class Settings(BaseSettings):
     # --- gateway helpers ---------------------------------------------------
     @property
     def gateway_mode(self) -> GatewayMode:
-        """Canonical gateway mode (always one of the three enum members)."""
+        """Canonical gateway mode (always one of the two enum members)."""
         return GatewayMode(self.paypal_mode)
 
     @property
     def provenance(self) -> str:
         """Provenance label stamped on every order and transaction row."""
         return {
-            GatewayMode.LOCAL_SIMULATOR: "local_simulator",
             GatewayMode.PAYPAL_SANDBOX: "paypal_sandbox",
             GatewayMode.PAYPAL_LIVE: "paypal_live",
         }[self.gateway_mode]
 
     @property
-    def is_simulator(self) -> bool:
-        return self.gateway_mode is GatewayMode.LOCAL_SIMULATOR
+    def uses_paypal_network(self) -> bool:
+        return True
 
     @property
-    def uses_paypal_network(self) -> bool:
-        return not self.is_simulator
+    def effective_paypal_client_id(self) -> str:
+        """Mode-specific client ID: SANDBOX_* wins in sandbox, else base."""
+        if self.gateway_mode is GatewayMode.PAYPAL_SANDBOX:
+            specific = self.paypal_sandbox_client_id.strip()
+            if specific:
+                return specific
+        return self.paypal_client_id.strip()
+
+    @property
+    def effective_paypal_client_secret(self) -> str:
+        """Mode-specific secret: SANDBOX_* wins in sandbox, else base."""
+        if self.gateway_mode is GatewayMode.PAYPAL_SANDBOX:
+            specific = self.paypal_sandbox_client_secret.strip()
+            if specific:
+                return specific
+        return self.paypal_client_secret.strip()
+
+    @property
+    def effective_paypal_webhook_id(self) -> str:
+        """Mode-specific webhook ID: SANDBOX_* wins in sandbox, else base."""
+        if self.gateway_mode is GatewayMode.PAYPAL_SANDBOX:
+            specific = self.paypal_sandbox_webhook_id.strip()
+            if specific:
+                return specific
+        return self.paypal_webhook_id.strip()
 
     @property
     def paypal_credentials_configured(self) -> bool:
         """True when both halves of an OAuth2 client-credentials pair exist."""
-        return bool(self.paypal_client_id.strip() and self.paypal_client_secret.strip())
+        return bool(self.effective_paypal_client_id and self.effective_paypal_client_secret)
 
     @property
     def gateway_blockers(self) -> list[str]:
         """Human-readable reasons the selected gateway mode cannot run yet."""
         blockers: list[str] = []
         mode = self.gateway_mode
-        if mode is GatewayMode.LOCAL_SIMULATOR:
-            return blockers
-        if not self.paypal_client_id.strip():
-            blockers.append("PAYPAL_CLIENT_ID is not set")
-        if not self.paypal_client_secret.strip():
-            blockers.append("PAYPAL_CLIENT_SECRET is not set")
+        if mode is GatewayMode.PAYPAL_SANDBOX:
+            if not self.effective_paypal_client_id:
+                blockers.append(
+                    "PAYPAL_SANDBOX_CLIENT_ID is not set "
+                    "(set PAYPAL_SANDBOX_CLIENT_ID or PAYPAL_CLIENT_ID)"
+                )
+            if not self.effective_paypal_client_secret:
+                blockers.append(
+                    "PAYPAL_SANDBOX_CLIENT_SECRET is not set "
+                    "(set PAYPAL_SANDBOX_CLIENT_SECRET or PAYPAL_CLIENT_SECRET)"
+                )
+        else:
+            if not self.paypal_client_id.strip():
+                blockers.append("PAYPAL_CLIENT_ID is not set")
+            if not self.paypal_client_secret.strip():
+                blockers.append("PAYPAL_CLIENT_SECRET is not set")
         if mode is GatewayMode.PAYPAL_LIVE and not self.allow_paypal_live:
             blockers.append("ALLOW_PAYPAL_LIVE is not true")
         return blockers

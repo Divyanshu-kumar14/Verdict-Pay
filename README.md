@@ -10,7 +10,7 @@
 <p><strong>Deterministic dispute economics, Gemini-drafted evidence, and a dossier a judge can verify.</strong></p>
 
 <p>Pre-dispute telemetry and fee-cliff aware triage for PayPal digital-goods disputes.<br/>
-Runs locally with no PayPal account and no model key.</p>
+Runs with PayPal sandbox credentials; no model key required for the default template path.</p>
 
 <p><sub>Real PayPal Sandbox OAuth2 + orders &nbsp;·&nbsp; SHA-256 chained custody &nbsp;·&nbsp; MIT licensed</sub></p>
 
@@ -83,12 +83,11 @@ Three processes, no broker, no cloud dependency on the demo path.
 ### Gateway modes
 
 One adapter boundary, three modes, chosen by `PAYPAL_MODE` and resolved in `backend/app/config.py`.
-`LOCAL_SIMULATOR` and the two network modes implement the same protocol, so the API surface is
-identical and only the wire behaviour differs.
+The sandbox gateway is the default path, so the API surface is sandbox-only and every order is a real sandbox order.
 
 | `PAYPAL_MODE` | Talks to | Credentials | Order ids |
 |---|---|---|---|
-| `LOCAL_SIMULATOR` (default) | nothing — in-process | none | `5O1…` derived from SHA-256 of payer + sequence |
+| `PAYPAL_SANDBOX` (default) | `https://api-m.sandbox.paypal.com` | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | PayPal-assigned |
 | `PAYPAL_SANDBOX` | `https://api-m.sandbox.paypal.com` | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | PayPal-assigned |
 | `PAYPAL_LIVE` | `https://api-m.paypal.com` | same, **plus** `ALLOW_PAYPAL_LIVE=true` | PayPal-assigned |
 
@@ -100,19 +99,18 @@ watching a real PayPal call when they are not. `PAYPAL_LIVE` additionally fails 
 
 ### Order lifecycle
 
-Every checkout traverses the same three stages, in both the simulator and the live network path.
+Every checkout traverses the same three stages in the sandbox path.
 
 ```
 POST /api/v1/sandbox/checkout            -> CREATED    order exists, approval_url returned
-        buyer approves in the PayPal UI   -> APPROVED   (or POST /sandbox/orders/{id}/approve locally)
+        buyer approves in the PayPal UI   -> APPROVED   (open approval_url, approve as sandbox buyer)
 POST /api/v1/sandbox/orders/{id}/capture -> CAPTURED   capture_id, transaction recorded
 ```
 
 Capture is the only path that yields money. Calling capture before approval returns `409
 order_not_approved`, mirroring PayPal's own 422 `ORDER_NOT_APPROVED`. In `PAYPAL_SANDBOX` the
 `approval_url` is a real `https://www.sandbox.paypal.com/checkoutnow?token=…` URL — a human has to
-open it and log in as the sandbox buyer. `POST /sandbox/orders/{id}/approve` exists only in the
-simulator and returns `409 approve_not_supported` in a network mode.
+open it and log in as the sandbox buyer. Buyer approval happens only in the PayPal UI.
 
 ### Deterministic EV engine
 
@@ -204,7 +202,7 @@ flowchart LR
 ## 3. Setup
 
 Requires Python 3.12+, Node 20+, [`uv`](https://docs.astral.sh/uv/) and `pnpm`. SQLite, seed data
-and the simulator are all local — no account of any kind is needed for the default path.
+and SQLite are local — PayPal sandbox credentials are needed for the default path.
 
 ```bash
 git clone https://github.com/Divyanshu-kumar14/Verdict-Pay
@@ -258,7 +256,7 @@ Every variable below is documented in [.env.example](.env.example). Values shown
 
 | Name | Purpose | Example placeholder |
 |---|---|---|
-| `PAYPAL_MODE` | `LOCAL_SIMULATOR`, `PAYPAL_SANDBOX` or `PAYPAL_LIVE` | `PAYPAL_SANDBOX` |
+| `PAYPAL_MODE` | `PAYPAL_SANDBOX` or `PAYPAL_LIVE` (legacy local simulator retained in code only) | `PAYPAL_SANDBOX` |
 | `PAYPAL_CLIENT_ID` | Sandbox/live app client id | `<your-paypal-sandbox-client-id>` |
 | `PAYPAL_CLIENT_SECRET` | Sandbox/live app secret | `<your-paypal-sandbox-client-secret>` |
 | `PAYPAL_WEBHOOK_ID` | Webhook id for signature verification | `<your-webhook-id>` |
@@ -302,7 +300,7 @@ Every variable below is documented in [.env.example](.env.example). Values shown
 | `ELASTIC_INDEX_PREFIX` | Index namespace | `verdictpay` |
 
 **Demo identity** — fixed so the seeded run is reproducible. Changing any of these changes the
-deterministic order, subscription and capture ids derived from them.
+seeded demo identity used across the demo. Order ids are PayPal-assigned in sandbox mode.
 
 | Name | Purpose | Default |
 |---|---|---|
@@ -389,8 +387,7 @@ failure.
 4. If you capture before approving, the API returns `409 order_not_approved`. That is the lifecycle
    working, not a bug.
 
-In `LOCAL_SIMULATOR` the same steps run keyless, using `POST /sandbox/orders/{id}/approve` instead of the
-PayPal UI.
+Capture requires prior sandbox-buyer approval: open the approval_url, log in as the sandbox buyer, approve, then capture.
 
 ### 4.4 Trigger events and inspect the result
 
@@ -520,8 +517,7 @@ Stated plainly, because a judge should not have to discover these.
   PayPal outcomes.
 - **The win probability is a prior, not a prediction.** The weights are a hand-set, documented model.
   They are not fitted to real dispute outcomes, and they should not be read as a calibrated forecast.
-- **`LOCAL_SIMULATOR` is the default.** Order ids, subscription ids, captures and disputes are
-  SHA-256 derivations. They are stable and realistic in shape, and nothing hits the network.
+- **`PAYPAL_SANDBOX` is the default (sandbox credentials required).** Order ids, subscription ids and captures are PayPal-assigned sandbox values.
 - **Single merchant, single tenant.** One demo merchant, one API key. There is no multi-tenant
   isolation, no user accounts, and no per-customer authorisation.
 - **SQLite is the demo store.** Concurrent write behaviour is SQLite's; Postgres is supported by

@@ -1,15 +1,15 @@
 """Judge-facing sandbox: real order lifecycle, isolated runs, three-button demo.
 
 Nothing here short-circuits the production path. Checkout calls the PayPal
-gateway (simulator by default), usage writes four hash-chained telemetry events
+Sandbox gateway, usage writes four hash-chained telemetry events
 through TelemetryService, and the dispute button signs a webhook body and feeds
 it through the exact same DisputeService.ingest_webhook path PayPal traffic uses.
 
 Order lifecycle honesty: creating an order is NOT a payment. ``status`` and
 ``lifecycle_stage`` are PayPal's literal answer (``CREATED`` until the buyer
 approves, ``APPROVED`` after approval, ``CAPTURED`` only after a completed
-capture). Nothing here promotes an order to CAPTURED on its own, and a simulated
-buyer approval is only ever available in LOCAL_SIMULATOR mode.
+capture). Nothing here promotes an order to CAPTURED on its own, and buyer
+approval happens only in the real PayPal UI via the approval_url.
 
 Run isolation: every artifact carries ``run_id``, so a fresh run never surfaces a
 previous run's dispute, order or AI analysis. ``POST /runs/reset`` deletes only
@@ -30,8 +30,6 @@ from app.api import schemas
 from app.api.deps import (
     GatewayDep,
     MerchantDep,
-    NarrativeDep,
-    SearchDep,
     SessionDep,
     SettingsDep,
 )
@@ -46,21 +44,15 @@ from app.services.demo_run_service import (
     STEP_APPROVAL,
     STEP_CAPTURE,
     STEP_CHECKOUT,
-    STEP_DISPUTE,
     STEP_DONE,
     STEP_EVIDENCE,
     STEP_FAILED,
     STEP_TELEMETRY,
-    STEP_TRIAGE,
     DemoRunService,
     validated_run_id,
 )
 from app.services.dispute_service import (
-    TRIAGE_SNAPSHOT_KEY,
-    DisputeService,
-    containment_snapshot,
     quantize_money,
-    to_dispute_summary,
     to_transaction_out,
     utc_aware,
 )
@@ -96,11 +88,6 @@ PLAN_DESCRIPTIONS: dict[str, str] = {
 DEFAULT_DISPUTE_AMOUNT = Decimal("99.00")
 CAPTURE_STATUS_COMPLETED = "COMPLETED"
 
-APPROVE_NOT_SUPPORTED_MESSAGE = (
-    "Buyer approval cannot be simulated in {mode} mode: the buyer must approve the "
-    "order in the PayPal UI. Open the approval_url, sign in as the sandbox buyer, "
-    "click Approve, then call POST /sandbox/orders/{order_id}/capture."
-)
 ORDER_NOT_APPROVED_MESSAGE = (
     "PayPal reports this order is not approved yet, so there is nothing to capture. "
     "Open the approval_url, approve as the buyer in PayPal, then capture again."
@@ -151,10 +138,8 @@ def _validated_order_id(value: str | None, *, default: str) -> str:
 def _upstream_code(exc: UpstreamError) -> str:
     """The machine-readable reason a gateway call refused, if it named one.
 
-    Two sources, because the two adapters differ: the simulator raises with a
-    bare token (``UpstreamError("order_not_approved")``), while the live adapter
-    raises a human message and carries PayPal's ``details[].issue`` tokens on
-    ``exc.issues``. Reading only the message would misclassify every real
+    The live adapter raises a human message and carries PayPal's ``details[].issue``
+    tokens on ``exc.issues``. Reading only the message would misclassify every real
     ``ORDER_NOT_APPROVED`` as an opaque 502.
     """
     message = (exc.message or "").strip()
@@ -164,7 +149,7 @@ def _upstream_code(exc: UpstreamError) -> str:
 
 
 def _has_issue(exc: UpstreamError, *tokens: str) -> bool:
-    """True when PayPal (or the simulator) named one of these issue tokens."""
+    """True when PayPal named one of these issue tokens."""
     wanted = {token.upper() for token in tokens}
     for issue in getattr(exc, "issues", []) or []:
         if isinstance(issue, str) and issue.upper() in wanted:
@@ -447,7 +432,7 @@ async def get_order(
     gateway: GatewayDep,
     settings: SettingsDep,
 ) -> schemas.OrderStatusResponse:
-    """Authoritative order state from PayPal (or the simulator), mirrored locally.
+    """Authoritative order state from PayPal, mirrored locally.
 
     Only orders this merchant created are visible: an order the gateway happens
     to know about but no run recorded is ``404``, never adopted across tenants.
@@ -460,13 +445,13 @@ async def get_order(
         order = await gateway.get_order(order_id)
     except UpstreamError as exc:
         if _is_not_found(exc):
-            # A restarted simulator forgets in-memory orders. Report the persisted
+            # PayPal no longer returns this order. Report the persisted
             # truth and say so, rather than inventing a payment or a spurious 502.
             return _order_status(
                 row,
                 settings=settings,
                 detail=(
-                    "The gateway no longer has this order (the simulator was restarted); "
+                    "The gateway no longer has this order; "
                     "the state below is the persisted record."
                 ),
             )
@@ -484,77 +469,6 @@ async def get_order(
     await session.commit()
 
     return _order_status(row, settings=settings)
-
-
-# --------------------------------------------------------------------------- approve
-@router.post("/sandbox/orders/{order_id}/approve", response_model=schemas.OrderStatusResponse)
-async def approve_order(
-    order_id: OrderIdPath,
-    session: SessionDep,
-    merchant: MerchantDep,
-    gateway: GatewayDep,
-    settings: SettingsDep,
-) -> schemas.OrderStatusResponse:
-    """Simulate the buyer approving — LOCAL_SIMULATOR ONLY.
-
-    In a network mode this refuses before touching the gateway: a simulated
-    approval must never be mistaken for a real PayPal approval.
-    """
-    if settings.gateway_mode is not GatewayMode.LOCAL_SIMULATOR:
-        raise ConflictError(
-            APPROVE_NOT_SUPPORTED_MESSAGE.format(
-                mode=settings.gateway_mode.value, order_id=order_id
-            ),
-            code="approve_not_supported",
-        )
-    approve = getattr(gateway, "approve_order", None)
-    if approve is None:
-        raise ConflictError(
-            APPROVE_NOT_SUPPORTED_MESSAGE.format(
-                mode=settings.gateway_mode.value, order_id=order_id
-            ),
-            code="approve_not_supported",
-        )
-
-    runs = _runs(session, settings, merchant)
-    row = await runs.get_order_row(order_id)
-    if row is None:
-        raise NotFoundError(f"Order {order_id} was not found.")
-    try:
-        order = await approve(order_id)
-    except UpstreamError as exc:
-        if _is_not_found(exc):
-            raise NotFoundError(f"Order {order_id} was not found.") from exc
-        raise
-
-    stage = _order_stage(order)
-    if stage == "CREATED":
-        # approve_order can return the stored order unchanged; never invent APPROVED.
-        stage = "APPROVED" if (order.status or "").upper() == "APPROVED" else stage
-    row.status = order.status or stage
-    row.lifecycle_stage = stage
-    row.raw_response = dict(order.raw or {})
-    await session.commit()
-
-    run = await _run_record(session, merchant_id=merchant.id, run_id=row.run_id)
-    if run is not None:
-        await runs.touch(
-            run,
-            step=STEP_APPROVAL,
-            order_stage=stage,
-            payer_id=row.payer_id,
-            amount=row.amount_usd,
-            currency=row.currency,
-        )
-    logger.info(
-        "sandbox_approve",
-        extra=log_context(order_id=order_id, lifecycle_stage=stage, run_id=row.run_id),
-    )
-    return _order_status(
-        row,
-        settings=settings,
-        detail="Simulated buyer approval recorded by the local simulator.",
-    )
 
 
 # --------------------------------------------------------------------------- capture
@@ -793,84 +707,6 @@ async def simulate_usage(
         events=[to_event_out(result.row) for result in results],
         totals={"logins": payload.logins, "tokens": payload.tokens, "assets": 1},
         run_id=run_id,
-    )
-
-
-# --------------------------------------------------------------------------- dispute
-@router.post("/sandbox/dispute", response_model=schemas.DisputeSimulationResponse)
-async def simulate_dispute(
-    payload: schemas.DisputeSimulationRequest,
-    merchant: MerchantDep,
-    session: SessionDep,
-    settings: SettingsDep,
-    gateway: GatewayDep,
-    narrative: NarrativeDep,
-    search: SearchDep,
-) -> schemas.DisputeSimulationResponse:
-    """Open a sandbox dispute and drive it through the real webhook ingest path."""
-    payer_id = _validated_payer_id(payload.payer_id) or settings.demo_payer_id
-    order_id = _validated_order_id(payload.order_id, default=settings.demo_order_id)
-    amount = (
-        quantize_money(payload.amount_usd)
-        if payload.amount_usd is not None
-        else DEFAULT_DISPUTE_AMOUNT
-    )
-    run_id = validated_run_id(payload.run_id)
-    runs = _runs(session, settings, merchant)
-    run = await _run_record(session, merchant_id=merchant.id, run_id=run_id)
-    if run_id is not None and run is None:
-        raise NotFoundError(f"Demo run {run_id} was not found.")
-
-    service = DisputeService(
-        session,
-        settings=settings,
-        gateway=gateway,
-        narrative=narrative,
-        search=search,
-        merchant_id=merchant.id,
-    )
-    record, case = await service.open_simulated_dispute_with_event(
-        payer_id=payer_id,
-        order_id=order_id,
-        reason_code=payload.reason_code.value,
-        stage=payload.stage,
-        channel=payload.channel,
-        amount=amount,
-        buyer_claim_text=payload.claim_text,
-    )
-    if run_id is not None:
-        # The tag that makes this case invisible to every other run.
-        case.run_id = run_id
-        await session.commit()
-        await session.refresh(case)
-        if run is not None:
-            await runs.touch(
-                run,
-                payer_id=payer_id,
-                order_id=order_id,
-                amount=case.amount_usd,
-                currency=case.currency,
-                steps={STEP_DISPUTE: STEP_DONE, STEP_TRIAGE: STEP_DONE},
-            )
-    logger.info(
-        "sandbox_dispute",
-        extra=log_context(
-            merchant_id=merchant.id,
-            run_id=run_id,
-            dispute_id=case.dispute_id,
-            origin="paypal_sandbox"
-            if settings.gateway_mode is GatewayMode.PAYPAL_SANDBOX
-            else "internal_test_event",
-        ),
-    )
-    return schemas.DisputeSimulationResponse(
-        dispute=to_dispute_summary(case),
-        webhook_event_id=record.event_id,
-        triage_triggered=bool(case.facts_snapshot.get(TRIAGE_SNAPSHOT_KEY)),
-        containment=containment_snapshot(case),
-        origin="paypal_sandbox"
-        if settings.gateway_mode is GatewayMode.PAYPAL_SANDBOX
-        else "internal_test_event",
     )
 
 

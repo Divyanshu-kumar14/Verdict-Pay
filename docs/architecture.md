@@ -4,8 +4,8 @@ VerdictPay turns a merchant's own product telemetry into a cryptographically cha
 system of record, prices a PayPal dispute with a deterministic EV model, and takes the
 cheapest correct PayPal action through a HATEOAS state machine.
 
-Nothing on the demo path needs a PayPal account, an Elastic cluster, a Supabase project
-or an LLM key: the PayPal boundary is a protocol with a deterministic simulator, SQLite is
+The demo path requires PayPal sandbox credentials (PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET); no Elastic cluster, Supabase project
+or LLM key is needed: the PayPal boundary is a protocol with a live sandbox gateway, SQLite is
 the default database, and the narrative layer has a template implementation.
 
 ---
@@ -27,20 +27,17 @@ The PayPal boundary is the only place that talks to PayPal. It is a protocol
 [backend/app/integrations/paypal/factory.py](../backend/app/integrations/paypal/factory.py), with
 three modes over two implementations:
 
-* `LOCAL_SIMULATOR` → `SimulatorGateway` — deterministic, keyless, records every call, derives
-  order/subscription/capture ids from SHA-256 of the input. This is the demo and E2E path, not a
-  mock. It exposes `approve_order()` as a test affordance for the CREATED → APPROVED → CAPTURED
-  lifecycle.
 * `PAYPAL_SANDBOX` → `LivePayPalGateway` against `https://api-m.sandbox.paypal.com` — OAuth token
   cache, idempotent retries, real PayPal Disputes / Orders / Subscriptions / Reporting endpoints,
-  webhook signature verification.
+  webhook signature verification. This is the demo and E2E path: open the approval_url,
+  approve as the sandbox buyer, then capture for the CREATED → APPROVED → CAPTURED lifecycle.
+* Legacy local simulator path is retained in code only as a historical note, not used by the demo.
 * `PAYPAL_LIVE` → the same `LivePayPalGateway` against `https://api-m.paypal.com`. It moves real
   money and refuses to start unless `ALLOW_PAYPAL_LIVE=true`.
 
 A network mode with missing credentials builds an `UnconfiguredGateway` instead of the live client.
 The app stays bootable so `/health` can name the blockers, but every payment call fails loudly and it
-never falls back to the simulator. `POST /sandbox/orders/{id}/approve` returns `409
-approve_not_supported` outside the simulator: buyer approval in the sandbox is a human action.
+never substitutes a local approval. Buyer approval in the sandbox is a human action: open the approval_url, log in as the sandbox buyer, approve, then capture.
 
 ---
 

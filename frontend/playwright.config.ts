@@ -18,7 +18,7 @@ import { defineConfig, devices } from "@playwright/test";
  * Override with PW_EXECUTABLE.
  *
  * Both suites require the live demo stack:
- *   backend  → uvicorn on 127.0.0.1:8000  (PAYPAL_MODE=simulator)
+ *   backend  → uvicorn on 127.0.0.1:8000  (PAYPAL_MODE=PAYPAL_SANDBOX, sandbox credentials required)
  *   frontend → next start on 127.0.0.1:3000
  * A missing stack fails loudly with remediation steps (see e2e/support.ts), never skips.
  */

@@ -31,9 +31,9 @@ async def test_checkout_usage_dispute_flow(client) -> None:
     # the bug that let a judge see a "paid" order nobody had paid for.
     assert checkout["status"] == "CREATED"
     assert checkout["lifecycle_stage"] == "CREATED"
-    assert checkout["gateway_mode"] == "LOCAL_SIMULATOR"
-    assert checkout["sandbox"] is False
-    assert checkout["provenance"] == "local_simulator"
+    assert checkout["gateway_mode"] == "PAYPAL_SANDBOX"
+    assert checkout["sandbox"] is True
+    assert checkout["provenance"] == "paypal_sandbox"
     assert checkout["payer_id"] == settings.demo_payer_id
     assert checkout["order_id"].startswith("5O1")
     assert checkout["subscription_id"].startswith("I-BW")

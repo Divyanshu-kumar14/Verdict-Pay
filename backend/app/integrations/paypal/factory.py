@@ -1,6 +1,5 @@
-"""Gateway selection across the three modes the product advertises.
+"""Gateway selection across the two modes the product advertises.
 
-LOCAL_SIMULATOR  keyless, offline, deterministic — the default demo path.
 PAYPAL_SANDBOX   the real PayPal API against api-m.sandbox.paypal.com.
 PAYPAL_LIVE      the real PayPal API against api-m.paypal.com (real money).
 
@@ -13,7 +12,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Sequence
 from datetime import datetime
-from decimal import Decimal
 from typing import Any
 
 from app.config import GatewayMode, Settings
@@ -40,7 +38,7 @@ class GatewayConfigurationError(RuntimeError):
         self.blockers = blockers
         super().__init__(
             f"{mode.value} cannot start: {'; '.join(blockers)}. "
-            "Set the credentials or switch PAYPAL_MODE to LOCAL_SIMULATOR."
+            "Add the missing PayPal credentials."
         )
 
 
@@ -49,7 +47,7 @@ class UnconfiguredGateway:
 
     The application still boots so ``/health`` can explain exactly what is
     missing, but every payment operation fails loudly. It never falls back to
-    the simulator: a judge must not see a simulated payment while the banner
+    a stub: a judge must not see a stubbed payment while the banner
     claims PayPal Sandbox.
     """
 
@@ -64,7 +62,7 @@ class UnconfiguredGateway:
         blockers = "; ".join(self._settings.gateway_blockers)
         return UpstreamError(
             f"{self.mode} is not configured: {blockers}. "
-            "Add the credentials or set PAYPAL_MODE=LOCAL_SIMULATOR."
+            "Add the missing PayPal credentials."
         )
 
     async def create_order(self, **_kwargs: Any) -> SandboxOrder:
@@ -109,7 +107,7 @@ class UnconfiguredGateway:
         raise self._refuse()
 
     async def verify_webhook(
-        self, *, headers: Any, raw_body: bytes, reason: str | None = None
+        self, headers: Any, raw_body: bytes, reason: str | None = None
     ) -> WebhookVerification:
         raise self._refuse()
 
@@ -120,16 +118,11 @@ class UnconfiguredGateway:
 def build_gateway(settings: Settings) -> PayPalGateway:
     """Build the gateway for the configured mode.
 
-    A network mode with missing credentials yields an UnconfiguredGateway: the
+    A mode with missing credentials yields an UnconfiguredGateway: the
     app boots and reports its blockers, and payments fail loudly instead of
-    being simulated behind a PayPal label.
+    being served without PayPal credentials.
     """
     mode = settings.gateway_mode
-
-    if mode is GatewayMode.LOCAL_SIMULATOR:
-        from app.integrations.paypal.simulator import SimulatorGateway
-
-        return SimulatorGateway(settings)
 
     blockers = settings.gateway_blockers
     if blockers:
@@ -149,7 +142,16 @@ def build_gateway(settings: Settings) -> PayPalGateway:
             "sandbox": mode is GatewayMode.PAYPAL_SANDBOX,
         },
     )
-    return LivePayPalGateway(settings)
+    # Fill base fields from the mode-specific pair so live.py (which reads
+    # paypal_client_id/secret) needs no changes; single PayPal code path.
+    effective = settings.model_copy(
+        update={
+            "paypal_client_id": settings.effective_paypal_client_id,
+            "paypal_client_secret": settings.effective_paypal_client_secret,
+            "paypal_webhook_id": settings.effective_paypal_webhook_id,
+        }
+    )
+    return LivePayPalGateway(effective)
 
 
 def gateway_status(settings: Settings, gateway: PayPalGateway) -> str:

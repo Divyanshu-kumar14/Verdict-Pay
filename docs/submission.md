@@ -62,9 +62,9 @@ client credentials (`POST /v1/oauth2/token`, cached token, 60 s refresh margin, 
 `.../provide-evidence` as RFC 2387 `multipart/related`, `.../require-evidence`, and case creation with a
 `PayPal-Auth-Assertion` header), Subscriptions v1 (`POST /v1/billing/subscriptions/{id}/suspend`),
 Reporting v1 (`GET /v1/reporting/transactions` for the CE 3.0 lookback), Orders v2
-(`POST /v1/checkout/orders`) and Notifications v1 (`POST /v1/notifications/verify-webhook-signature`). A
-protocol-identical simulator ships beside it and is the default gateway, because the demo must run
-with zero credentials and the demo path must be the tested path.
+(`POST /v2/checkout/orders`) and Notifications v1 (`POST /v1/notifications/verify-webhook-signature`).
+The sandbox gateway is the default, because the demo path must be the tested path
+and every demo order is a real sandbox order.
 
 **AI drafts the rebuttal; deterministic code owns every number.** The fact pack is built by pure
 functions from the ledger and the reporting API, then frozen. Only after that does a narrative
@@ -132,7 +132,8 @@ The air gap is what makes the fallback honest instead of silent. With `AI_ENABLE
 model failure, the endpoint still returns a complete, correct analysis marked `degraded=true`
 with a reason — never an error, never a hallucinated number. Every generation is recorded as an
 append-only `AI_GENERATION` event in the per-payer SHA-256 chain, so provenance is itself
-verifiable. No new keys are needed for the demo; the default path stays keyless and deterministic.
+verifiable. Sandbox credentials are required; the default path uses PAYPAL_SANDBOX
+against api-m.sandbox.paypal.com.
 
 **How the codebase was built — disclosed, not implied:** VerdictPay was implemented by an AI coding
 agent (DeepSeek-based DSH) working under human direction, with the human owning scope, the frozen
@@ -158,7 +159,7 @@ filed 36 probes, found 2 HIGH bugs, and those two now have regression tests
 | 1:55–2:08 | Click **Deflect inquiry**; result chip `EXECUTED · Send message · 1ms` | "A zero-fee, evidence-backed inquiry deflection through PayPal's send-message endpoint. The HATEOAS guard means we cannot call an action PayPal would reject." |
 | 2:08–2:22 | Case room, download **dossier.pdf**; PDF pages scroll: chain table, ToS snapshot, usage ledger, CE 3.0 exhibit | "The dossier is ReportLab, built from the locked facts. Three pages, payer id and chain head printed, no secrets. That is the prove-it artifact." |
 | 2:22–2:36 | `/analytics`: queue 6, open exposure $596.00, fees avoided $60.00, ratio 3.00% vs 1.50% | "Six cases, $596 exposure, $60 of fees avoided, and the ratio that decides whether the next dispute costs $15 or $30." |
-| 2:36–2:52 | Terminal: `git clone … && cd Verdict-Pay && make install && make stack`, then `make web` — green assertions | "Clone it, make install, make stack, make web. Twenty-six assertions, zero API keys. Everything you just saw runs on your laptop in under a minute." |
+| 2:36–2:52 | Terminal: `git clone … && cd Verdict-Pay && make install && make stack`, then `make web` — green assertions | "Clone it, make install, make stack, make web. Twenty-six assertions, sandbox credentials required. Everything you just saw runs with real sandbox orders." |
 
 **Production checklist**
 
@@ -171,7 +172,7 @@ filed 36 probes, found 2 HIGH bugs, and those two now have regression tests
 
 ## 5. Judge run instructions
 
-**Docker (one command, no keys):**
+**Docker (one command, sandbox credentials required):**
 
 ```bash
 git clone https://github.com/Divyanshu-kumar14/Verdict-Pay && cd Verdict-Pay
@@ -197,7 +198,7 @@ make verify                  # ruff + pytest + eslint + tsc + next build + vites
 curl -s localhost:8000/api/v1/health
 ```
 
-**What you will see** (fresh seed, simulator gateway; every value comes from [demo.md](demo.md)):
+**What you will see** (fresh seed, sandbox gateway; every value comes from [demo.md](demo.md)):
 
 | Field | UI path — third button files **SNAD** | CLI path — `make demo` files **INR** |
 |---|---|---|
@@ -268,7 +269,7 @@ The client is real code against the real REST contracts: OAuth2, Disputes v1, Su
 
 **Why a simulator by default?**
 
-Because the demo must run on a judge's laptop with no account, and the demo path should be the tested path. `PAYPAL_MODE=LOCAL_SIMULATOR` is the default in [config.py](../backend/app/config.py); all three modes satisfy one `PayPalGateway` protocol and the domain never imports `httpx`. Set `PAYPAL_MODE=PAYPAL_SANDBOX` plus credentials and the same calls go to `api-m.sandbox.paypal.com`. A network mode with missing credentials yields an `UnconfiguredGateway`: the app boots and `/health` names the blockers, but every payment call fails loudly rather than silently degrading, so a simulated call can never be mistaken for a real one.
+Because the demo runs against real sandbox orders. `PAYPAL_MODE=PAYPAL_SANDBOX` is the default in [config.py](../backend/app/config.py); both modes satisfy one `PayPalGateway` protocol and the domain never imports `httpx`. A network mode with missing credentials yields an `UnconfiguredGateway`: the app boots and `/health` names the blockers, but every payment call fails loudly rather than silently degrading, so a simulated call can never be mistaken for a real one.
 
 **Where is the AI?**
 
@@ -276,7 +277,7 @@ Gemini, `gemini-2.5-flash` by default, does two things: classify the buyer's cla
 
 **Does it need keys?**
 
-No. The default stack needs no PayPal key, no Gemini key, no OpenAI key, no Elastic cluster, no Supabase project. Optional keys only switch adapters: `GEMINI_API_KEY` for the dispute AI layer, `OPENAI_API_KEY` or `LLM_BASE_URL` for the dossier narrative provider, `ELASTIC_URL` for the optional search adapter, `PAYPAL_CLIENT_ID`/`SECRET` for `PAYPAL_SANDBOX`.
+Sandbox credentials are required (PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET for PAYPAL_SANDBOX). No Gemini key, no OpenAI key, no Elastic cluster, no Supabase project is needed. Optional keys only switch adapters: `GEMINI_API_KEY` for the dispute AI layer, `OPENAI_API_KEY` or `LLM_BASE_URL` for the dossier narrative provider, `ELASTIC_URL` for the optional search adapter, `PAYPAL_CLIENT_ID`/`SECRET` for `PAYPAL_SANDBOX`.
 
 **Is the data real?**
 

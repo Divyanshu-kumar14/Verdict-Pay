@@ -24,21 +24,16 @@ def _gateway_status(request: Request) -> GatewayStatus:
     settings = request.app.state.settings
     mode = settings.gateway_mode
     blockers = list(settings.gateway_blockers)
-    if mode is GatewayMode.LOCAL_SIMULATOR:
-        readiness = "ready"
-    elif blockers:
-        readiness = "unconfigured"
-    else:
-        readiness = "ready"
+    readiness = "unconfigured" if blockers else "ready"
     return GatewayStatus(
         mode=mode.value,
         readiness=readiness,
         sandbox=mode is GatewayMode.PAYPAL_SANDBOX,
         live=mode is GatewayMode.PAYPAL_LIVE,
-        simulation=mode is GatewayMode.LOCAL_SIMULATOR,
+        simulation=False,
         api_base=settings.paypal_api_base,
         credentials_configured=settings.paypal_credentials_configured,
-        webhook_configured=bool(settings.paypal_webhook_id),
+        webhook_configured=bool(settings.effective_paypal_webhook_id),
         blockers=blockers,
     )
 

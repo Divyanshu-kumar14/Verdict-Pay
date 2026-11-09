@@ -97,7 +97,7 @@ export type CaptureLifecycleStage = (typeof CAPTURE_LIFECYCLE_STAGES)[number];
 export const CaptureLifecycleStageSchema = z.enum(CAPTURE_LIFECYCLE_STAGES);
 
 /** Honest provenance: which backend produced the money movement. */
-export const PROVENANCES = ["paypal_sandbox", "paypal_live", "local_simulator"] as const;
+export const PROVENANCES = ["paypal_sandbox", "paypal_live"] as const;
 export type Provenance = (typeof PROVENANCES)[number];
 export const ProvenanceSchema = z.enum(PROVENANCES);
 
@@ -247,7 +247,7 @@ export type CustomerTimeline = z.infer<typeof CustomerTimelineSchema>;
 
 /**
  * A persisted money movement. ``source`` is the provenance label
- * ("paypal_sandbox" / "paypal_live" / "local_simulator"), never a secret.
+ * ("paypal_sandbox" / "paypal_live"), never a secret.
  */
 export const TransactionOutSchema = z.object({
   transaction_id: z.string(),
@@ -280,12 +280,12 @@ export const CheckoutResponseSchema = z.object({
   gateway_mode: z.string(),
   sandbox: z.boolean(),
   lifecycle_stage: OrderLifecycleStageSchema.default("CREATED"),
-  provenance: ProvenanceSchema.default("local_simulator"),
+  provenance: ProvenanceSchema.default("paypal_sandbox"),
   paypal_debug_id: z.string().nullable().default(null),
 });
 export type CheckoutResponse = z.infer<typeof CheckoutResponseSchema>;
 
-/** Live order state straight from PayPal (or the local simulator). */
+/** Live order state straight from PayPal. */
 export const OrderStatusResponseSchema = z.object({
   order_id: z.string(),
   run_id: z.string().nullable().default(null),

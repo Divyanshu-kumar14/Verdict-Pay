@@ -80,15 +80,15 @@ test("02 PayPal gateway reports a genuine sandbox configuration", async ({ reque
   const health = await getJson(request, "/health");
   const gateway = health.gateway_status as Json;
 
-  expect(gateway.mode).toBe("LOCAL_SIMULATOR");
-  // The credentials are configured and the target is the real sandbox host, but this
-  // process is not moving money — the three flags must agree with each other.
+  expect(gateway.mode).toBe("PAYPAL_SANDBOX");
+  // The credentials are configured and the target is the real sandbox host, and this
+  // process drives real sandbox orders — the three flags must agree with each other.
   expect(gateway.api_base).toBe("https://api-m.sandbox.paypal.com");
   expect(gateway.credentials_configured).toBe(true);
   expect(gateway.webhook_configured).toBe(true);
-  expect(gateway.simulation).toBe(true);
+  expect(gateway.simulation).toBe(false);
   expect(gateway.live).toBe(false);
-  expect(gateway.sandbox).toBe(false);
+  expect(gateway.sandbox).toBe(true);
   expect(gateway.blockers).toEqual([]);
   // Nothing on this surface may echo a credential value.
   const serialised = JSON.stringify(health);
@@ -107,8 +107,8 @@ test("03 order creation returns CREATED with an actionable approval URL", async 
   // The money invariant: an order is never a payment at creation time.
   expect(order.lifecycle_stage).not.toBe("CAPTURED");
   expect(order.amount_usd).toBe("99.00");
-  expect(order.gateway_mode).toBe("LOCAL_SIMULATOR");
-  expect(order.provenance).toBe("local_simulator");
+  expect(order.gateway_mode).toBe("PAYPAL_SANDBOX");
+  expect(order.provenance).toBe("paypal_sandbox");
   // A judge must be able to click through to a real approval page.
   expect(order.approval_url).toMatch(/^https:\/\/sandbox\.paypal\.com\/checkoutnow\?token=/);
   expect(order.approval_url).toContain(order.order_id);
@@ -121,9 +121,9 @@ test("04 buyer approval is an explicit, separate step", async ({ request }) => {
   const before = await getJson(request, `/sandbox/orders/${order.order_id}`);
   expect(before.status).toBe("CREATED");
   expect(before.lifecycle_stage).toBe("CREATED");
-  // `payer_action_required` is reserved for a real network order, where a human must
-  // click through PayPal. In the simulator the approval is an explicit local step, so
-  // the flag is honestly false and the URL is still handed out.
+  // `payer_action_required` is set for a real sandbox order, where a human must
+  // click through PayPal. Open the approval_url, approve as the sandbox buyer,
+  // then capture — the URL is still handed out before approval.
   expect(before.payer_action_required).toBe(false);
   expect(String(before.approval_url)).toContain(order.order_id);
 
@@ -182,7 +182,7 @@ test("06 the captured transaction reaches the reporting read path", async ({ req
   expect(row?.order_id).toBe(order.order_id);
   expect(row?.status).toBe("CAPTURED");
   expect(row?.amount_usd).toBe("299.00");
-  expect(row?.source).toBe("local_simulator");
+  expect(row?.source).toBe("paypal_sandbox");
   // The transaction id and the PayPal capture id are the same fact; a judge can trace both.
   expect(row?.transaction_id).toBe(captureId);
 });

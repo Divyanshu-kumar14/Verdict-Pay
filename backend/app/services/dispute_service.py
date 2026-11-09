@@ -384,8 +384,8 @@ async def assemble_case_facts(
     await cache_transactions(
         session,
         merchant_id=merchant_id,
-        # ``provenance`` is the stable machine label ("local_simulator",
-        # "paypal_sandbox", "paypal_live"), not the mutable config spelling.
+        # ``provenance`` is the stable machine label ("paypal_sandbox",
+        # "paypal_live"), not the mutable config spelling.
         paypal_mode=settings.provenance,
         records=transactions,
     )
@@ -463,63 +463,6 @@ class DisputeService:
             return await self._replay(existing)
 
         case = await self._apply_event(record, event)
-        return record, case
-
-    async def open_simulated_dispute(
-        self,
-        *,
-        payer_id: str,
-        order_id: str,
-        reason_code: str,
-        stage: DisputeStage,
-        channel: DisputeChannel,
-        amount: Decimal,
-        buyer_claim_text: str | None = None,
-    ) -> DisputeCase:
-        """Open a simulator dispute, then drive it through the real webhook path."""
-        _record, case = await self.open_simulated_dispute_with_event(
-            payer_id=payer_id,
-            order_id=order_id,
-            reason_code=reason_code,
-            stage=stage,
-            channel=channel,
-            amount=amount,
-            buyer_claim_text=buyer_claim_text,
-        )
-        return case
-
-    async def open_simulated_dispute_with_event(
-        self,
-        *,
-        payer_id: str,
-        order_id: str,
-        reason_code: str,
-        stage: DisputeStage,
-        channel: DisputeChannel,
-        amount: Decimal,
-        buyer_claim_text: str | None = None,
-    ) -> tuple[WebhookEventRecord, DisputeCase]:
-        """Same simulated flow as open_simulated_dispute, plus the webhook record."""
-        dispute = await self.gateway.create_sandbox_dispute(
-            payer_id=payer_id,
-            order_id=order_id,
-            reason_code=reason_code,
-            amount=quantize_money(amount),
-            currency="USD",
-            stage=stage,
-            channel=channel,
-        )
-        raw_body, headers = self._signed_webhook(dispute)
-        record, case = await self.ingest_webhook(headers=headers, raw_body=raw_body)
-        if case is None:
-            raise ValidationFailedError("Sandbox dispute did not produce a case.")
-        claim = (buyer_claim_text or "").strip()[:4000]
-        if claim:
-            # Persisted alongside the deterministic snapshot (top level, like
-            # _containment); _apply_triage preserves it and _facts_from_snapshot
-            # restores it onto CaseFacts.buyer_claim_text.
-            case.facts_snapshot = {**(case.facts_snapshot or {}), "buyer_claim_text": claim}
-            await self.session.commit()
         return record, case
 
     # ------------------------------------------------------------------ reads

@@ -1,7 +1,7 @@
 """Ports for every external dependency.
 
 Nothing in the domain imports httpx, SQLAlchemy or an LLM SDK directly. The demo
-uses SimulatorGateway; production swaps in LiveGateway with zero domain changes.
+uses LiveGateway with zero domain changes.
 """
 
 from __future__ import annotations

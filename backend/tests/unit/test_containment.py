@@ -1,8 +1,8 @@
 """Containment breaker: bounded, isolated and never fatal to triage.
 
-The success and failure paths use the real SimulatorGateway. Only the timeout
+The success and failure paths use a small in-memory fake gateway. Only the timeout
 path uses a latency double, because there is no honest way to make the
-in-memory simulator hang.
+fake hang.
 """
 
 from __future__ import annotations
@@ -20,15 +20,35 @@ from app.domain.subscriptions.containment import (
     ContainmentResult,
     contain_subscription,
 )
-from app.integrations.paypal.simulator import SimulatorGateway
+from app.errors import UpstreamError
 
 TIMEOUT_SUBSCRIPTION = "I-BWTESTSUBSCRIPTION"
+
+
+class FakeGateway:
+    """Minimal PAYPAL_SANDBOX double tracking suspensions in memory."""
+
+    mode = "PAYPAL_SANDBOX"
+
+    def __init__(self, settings: Settings) -> None:
+        self._demo_id = settings.demo_subscription_id
+        self.suspended_subscriptions: dict[str, str] = {}
+        self.calls: list[tuple[str, str]] = []
+
+    async def suspend_subscription(
+        self, subscription_id: str, reason: str
+    ) -> GatewayResponse:
+        self.calls.append((subscription_id, reason))
+        if subscription_id != self._demo_id:
+            raise UpstreamError("subscription_not_found")
+        self.suspended_subscriptions[subscription_id] = reason
+        return GatewayResponse(status_code=200, body={}, latency_ms=0)
 
 
 class SlowGateway:
     """Minimal gateway double whose suspend call outlives any test budget."""
 
-    mode = "simulator"
+    mode = "PAYPAL_SANDBOX"
 
     def __init__(self, delay_seconds: float) -> None:
         self.delay_seconds = delay_seconds
@@ -54,7 +74,7 @@ def _hook_recorder() -> tuple[list[str], Callable[[str], Awaitable[None]]]:
 async def test_containment_suspends_and_runs_hook(
     settings: Settings, caplog: pytest.LogCaptureFixture
 ) -> None:
-    gateway = SimulatorGateway(settings)
+    gateway = FakeGateway(settings)
     hook_calls, hook = _hook_recorder()
     caplog.set_level(logging.INFO, logger="verdictpay.containment")
 
@@ -83,7 +103,7 @@ async def test_containment_suspends_and_runs_hook(
 
 
 async def test_containment_without_hook_is_successful(settings: Settings) -> None:
-    gateway = SimulatorGateway(settings)
+    gateway = FakeGateway(settings)
 
     result = await contain_subscription(
         gateway,
@@ -99,7 +119,7 @@ async def test_containment_without_hook_is_successful(settings: Settings) -> Non
 async def test_containment_unknown_subscription_isolates_failure(
     settings: Settings,
 ) -> None:
-    gateway = SimulatorGateway(settings)
+    gateway = FakeGateway(settings)
     hook_calls, hook = _hook_recorder()
 
     result = await contain_subscription(
@@ -139,7 +159,7 @@ async def test_containment_timeout_returns_fast() -> None:
 
 
 async def test_containment_hook_failure_does_not_raise(settings: Settings) -> None:
-    gateway = SimulatorGateway(settings)
+    gateway = FakeGateway(settings)
 
     async def failing_hook(subscription_id: str) -> None:
         raise RuntimeError("api key revocation failed")
@@ -160,7 +180,7 @@ async def test_containment_hook_failure_does_not_raise(settings: Settings) -> No
 
 
 async def test_containment_without_subscription_is_skipped(settings: Settings) -> None:
-    gateway = SimulatorGateway(settings)
+    gateway = FakeGateway(settings)
     hook_calls, hook = _hook_recorder()
 
     result = await contain_subscription(

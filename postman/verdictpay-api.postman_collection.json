@@ -609,7 +609,7 @@
     },
     {
       "key": "signingSecret",
-      "value": "dev-signing-secret-change-me"
+      "value": "<paste-from-.env-VERDICTPAY_SIGNING_SECRET>"
     }
   ]
 }
