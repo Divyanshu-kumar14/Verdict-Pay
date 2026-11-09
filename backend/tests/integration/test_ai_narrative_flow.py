@@ -31,6 +31,8 @@ def _settings(tmp_path, *, local_llm: bool) -> Settings:
         app_env="test",
         database_url=f"sqlite+aiosqlite:///{tmp_path / 'aiflow.db'}",
         paypal_mode="PAYPAL_SANDBOX",
+        paypal_client_id="test-client-abc",
+        paypal_client_secret="test-secret-xyz",
         llm_mode="openai" if local_llm else "template",
         llm_base_url="http://fake-llm/v1" if local_llm else "",
         llm_model=MODEL,

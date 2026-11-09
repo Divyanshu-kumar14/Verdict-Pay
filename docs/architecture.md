@@ -4,7 +4,8 @@ VerdictPay turns a merchant's own product telemetry into a cryptographically cha
 system of record, prices a PayPal dispute with a deterministic EV model, and takes the
 cheapest correct PayPal action through a HATEOAS state machine.
 
-The demo path requires PayPal sandbox credentials (PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET); no Elastic cluster, Supabase project
+The demo path requires PayPal sandbox credentials (PAYPAL_SANDBOX_CLIENT_ID / PAYPAL_SANDBOX_CLIENT_SECRET,
+or PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET); no Elastic cluster, Supabase project
 or LLM key is needed: the PayPal boundary is a protocol with a live sandbox gateway, SQLite is
 the default database, and the narrative layer has a template implementation.
 
@@ -14,10 +15,10 @@ the default database, and the narrative layer has a template implementation.
 
 | Layer | Where | Responsibility |
 |---|---|---|
-| Judge sandbox + command center | [frontend/app](../frontend/app) | Three-button flow, live case room, triage queue, SLA board. Every response is zod-parsed in [frontend/lib/api.ts](../frontend/lib/api.ts). |
+| Judge sandbox + command center | [frontend/app](../frontend/app) | Step-by-step `/demo` flow, live case room, triage queue, SLA board. Every response is zod-parsed in [frontend/lib/api.ts](../frontend/lib/api.ts). |
 | HTTP API | [backend/app/api](../backend/app/api) | Routers mounted under `/api/v1`: health, telemetry, sandbox, disputes, evidence, webhooks, reporting. |
 | Domain core | [backend/app/domain](../backend/app/domain) | Pure functions: canonical JSON + hash chain, win probability, EV, triage policy, HATEOAS state machine, fact pack, narrative, ReportLab PDF, RFC 2387 multipart. |
-| Integrations | [backend/app/integrations](../backend/app/integrations) | PayPal gateway (simulator / live), narrative provider (template / optional OpenAI), dispute AI layer (Gemini classify + grounded draft, deterministic fallback), optional Elasticsearch mirror. |
+| Integrations | [backend/app/integrations](../backend/app/integrations) | PayPal gateway (`LivePayPalGateway` in `paypal/live.py`, for sandbox or live), narrative provider (template / optional OpenAI), dispute AI layer (Gemini classify + grounded draft, deterministic fallback), optional Elasticsearch mirror. |
 | Orchestration | [backend/app/services](../backend/app/services) | `DisputeService` (webhook → case → containment → triage → action) and `EvidenceService` (dossier build/cache/upload). |
 | Persistence | [backend/app/db/models.py](../backend/app/db/models.py) | Six portable SQL tables; append-only telemetry ledger with unique stream constraints. |
 | TypeScript SDK | [packages/verdictpay-sdk](../packages/verdictpay-sdk) | Batched, HMAC-signed pre-dispute telemetry keyed to PayPal `payer_id` / `order_id`. |
@@ -25,19 +26,25 @@ the default database, and the narrative layer has a template implementation.
 The PayPal boundary is the only place that talks to PayPal. It is a protocol
 ([backend/app/domain/protocols.py](../backend/app/domain/protocols.py)) chosen by `PAYPAL_MODE` in
 [backend/app/integrations/paypal/factory.py](../backend/app/integrations/paypal/factory.py), with
-three modes over two implementations:
+two modes over one implementation:
 
-* `PAYPAL_SANDBOX` → `LivePayPalGateway` against `https://api-m.sandbox.paypal.com` — OAuth token
+* `PAYPAL_SANDBOX` (default) → `LivePayPalGateway` against `https://api-m.sandbox.paypal.com` — OAuth token
   cache, idempotent retries, real PayPal Disputes / Orders / Subscriptions / Reporting endpoints,
   webhook signature verification. This is the demo and E2E path: open the approval_url,
   approve as the sandbox buyer, then capture for the CREATED → APPROVED → CAPTURED lifecycle.
-* Legacy local simulator path is retained in code only as a historical note, not used by the demo.
 * `PAYPAL_LIVE` → the same `LivePayPalGateway` against `https://api-m.paypal.com`. It moves real
   money and refuses to start unless `ALLOW_PAYPAL_LIVE=true`.
 
-A network mode with missing credentials builds an `UnconfiguredGateway` instead of the live client.
-The app stays bootable so `/health` can name the blockers, but every payment call fails loudly and it
-never substitutes a local approval. Buyer approval in the sandbox is a human action: open the approval_url, log in as the sandbox buyer, approve, then capture.
+Any other `PAYPAL_MODE` value, including the removed `LOCAL_SIMULATOR`, fails config validation at
+boot. Missing credentials build an `UnconfiguredGateway` instead of the live client.
+The app stays bootable so `/health` reports `readiness=unconfigured` with named blockers, but every
+payment call returns 502 and it never substitutes a local approval. There is no approve endpoint:
+buyer approval in the sandbox is a human action. Open the approval_url, log in as the sandbox buyer,
+approve, then capture.
+
+The backend test suite runs offline by installing `FakePayPalGateway`
+([backend/tests/fakes/paypal_gateway.py](../backend/tests/fakes/paypal_gateway.py)) through pytest
+fixtures. The application never imports it.
 
 ---
 
@@ -59,8 +66,12 @@ sequenceDiagram
     Judge->>Web: Checkout $99 Pro plan
     Web->>API: POST /sandbox/checkout
     API->>PP: create_order(payer, amount)
-    PP-->>API: order + subscription + payer
+    PP-->>API: order (CREATED) + approval_url
     API-->>Web: CheckoutResponse (99.00 USD)
+    Judge->>PP: approve in the PayPal sandbox UI
+    Web->>API: POST /sandbox/orders/{id}/capture
+    API->>PP: capture_order()
+    PP-->>API: CAPTURED
 
     Web->>API: POST /sandbox/usage (or @verdictpay/sdk)
     API->>Ledger: record_many(4 events)
@@ -68,12 +79,17 @@ sequenceDiagram
     Ledger-->>API: events + ChainVerification
     API-->>Web: UsageResponse (chain.valid=true)
 
-    Web->>API: POST /sandbox/dispute (SNAD, INQUIRY, INTERNAL)
-    API->>PP: create_sandbox_dispute(...)
-    API->>Hook: signed CUSTOMER.DISPUTE.CREATED body
-    Hook->>PP: verify_webhook(headers, raw_body)
-    PP-->>Hook: verified event
-    Hook->>Case: ingest_webhook()
+    alt PayPal sent a dispute webhook
+        PP->>Hook: CUSTOMER.DISPUTE.CREATED
+        Hook->>PP: verify_webhook(headers, raw_body)
+        PP-->>Hook: verified event
+        Hook->>Case: ingest_webhook()
+    else no webhook for this order
+        Web->>API: POST /sandbox/dispute (SNAD, INQUIRY, INTERNAL)
+        API->>PP: create_sandbox_dispute(...)
+        PP-->>API: dispute, or 401 for standard sandbox apps
+        API->>Case: open_sandbox_dispute() (origin paypal_sandbox or internal_test_event)
+    end
     Case->>Case: webhook_events unique event_id (replay-safe)
     Case->>PP: suspend_subscription() (<=1s, isolated)
     Case->>Domain: assemble facts -> p(win) -> EV -> triage
@@ -84,10 +100,10 @@ sequenceDiagram
     Web->>API: POST /disputes/{id}/actions/SEND_MESSAGE
     API->>Case: execute_action()
     Case->>Domain: HATEOAS guard (links[] + stage table)
-    Case->>PP: send_message()
+    Case->>PP: send_message() (paypal_sandbox cases only)
     PP-->>Case: GatewayResponse (latency, body)
     Case-->>API: ActionResponse + audit row
-    API-->>Web: EXECUTED
+    API-->>Web: EXECUTED (SKIPPED for internal_test_event)
 
     Web->>API: GET /disputes/{id}/dossier.pdf
     API->>Evidence: build_dossier()
@@ -102,8 +118,11 @@ sequenceDiagram
 `POST /api/v1/sandbox/checkout` calls `PayPalGateway.create_order`. The response is the
 frozen `CheckoutResponse` in [backend/app/api/schemas.py](../backend/app/api/schemas.py):
 `order_id`, `subscription_id`, `payer_id`, amount as a decimal string and an
-`approval_url`. The simulator derives ids from stable hashes, so the same call sequence
-produces the same ids.
+`approval_url` on `https://www.sandbox.paypal.com`. The order starts `CREATED`. The buyer approves
+it in PayPal's UI (there is no approve endpoint), then `POST /sandbox/orders/{id}/capture` moves it
+to `CAPTURED`; capturing before approval returns `409 order_not_approved`.
+`GET /sandbox/orders/{id}` mirrors PayPal's state and marks the run's approval step done once PayPal
+reports `APPROVED`. A real PayPal checkout returns no subscription.
 
 ### 2.2 Telemetry ingestion
 
@@ -126,18 +145,20 @@ trusts the stored hash. The contract is documented in
 ### 2.3 Webhook, replay safety and containment
 
 `POST /api/v1/webhooks/paypal` is the only unauthenticated route, because authenticity
-comes from the body signature:
+comes from PayPal's signature. It needs a public URL (a Render deploy, or a tunnel such as
+`ngrok http 8000`):
 
-1. `gateway.verify_webhook(headers, raw_body)` — in live mode this is PayPal's
-   `verify-webhook-signature`; in simulator mode it is HMAC-SHA256 over
-   `"<unixSeconds>.<rawBody>"` with `VERDICTPAY_WEBHOOK_SECRET` and a ±300s window
-   ([backend/app/security.py](../backend/app/security.py)).
+1. `gateway.verify_webhook(headers, raw_body)` calls PayPal's `verify-webhook-signature`
+   with `PAYPAL_SANDBOX_WEBHOOK_ID` (or `PAYPAL_WEBHOOK_ID`). This is the only check; there is
+   no HMAC webhook path, and without a webhook id every PayPal webhook is rejected.
 2. The event id is inserted into `webhook_events` under a unique constraint; a replay
    returns the existing case instead of double-charging a side effect.
 3. Containment runs before triage: `suspend_subscription` and an optional merchant hook
    are bounded by a timeout and never raise into the request path
    ([backend/app/domain/subscriptions/containment.py](../backend/app/domain/subscriptions/containment.py)).
-   The case records `subscription_suspended` and the measured latency.
+   The case records `subscription_suspended` and the measured latency. In the demo the
+   payer's fallback subscription `I-BW452GLLEP1G` does not exist in the sandbox, so
+   containment reports `suspended=false` with PayPal's error instead of claiming a suspension.
 4. The case is upserted from the verified dispute record and triaged.
 
 ### 2.4 Facts, win probability and EV
@@ -184,6 +205,9 @@ combines the frozen stage/channel table with PayPal's returned `links[]`; links 
 narrow what the table allows. An illegal action is a **422** with a machine-readable reason
 (e.g. `require-evidence_link_missing`), never a silent 200. Every executed action is
 persisted with an idempotency key and its measured latency in `dispute_actions`.
+For an `internal_test_event` case the action is recorded with status `SKIPPED` and the reason
+"internal_test_event: this dispute exists only in VerdictPay, so nothing was sent to PayPal";
+`paypal_sandbox` cases call PayPal.
 
 ### 2.6 Evidence dossier (air-gapped)
 
@@ -222,7 +246,7 @@ and every generation is recorded as an append-only `AI_GENERATION` chain event a
 |---|---|---|---|
 | 1 | Browser → API | `X-API-Key` (or bearer), merchant scoping in every query, CORS allowlist, 256 KiB body cap | [backend/app/api/deps.py](../backend/app/api/deps.py), [backend/app/main.py](../backend/app/main.py) |
 | 2 | Merchant SDK → API | `X-API-Key` authentication **and** a required HMAC signature: `X-VerdictPay-Timestamp` / `X-VerdictPay-Signature` = HMAC-SHA256 over `"<unixSeconds>.<exact raw body>"` with `VERDICTPAY_SIGNING_SECRET`, ±300 s window, verified against the raw bytes before parsing, replay-safe event ids | [packages/verdictpay-sdk/src/signing.ts](../packages/verdictpay-sdk/src/signing.ts), [backend/app/api/routers/telemetry.py](../backend/app/api/routers/telemetry.py), [backend/app/security.py](../backend/app/security.py) |
-| 3 | PayPal → webhook | Signature verification (PayPal's verify-webhook-signature live, HMAC in simulator); unsigned traffic rejected unless `ALLOW_UNSIGNED_WEBHOOKS=true` **and** `APP_ENV=local`; unique `event_id` makes replay harmless | [backend/app/integrations/paypal/simulator.py](../backend/app/integrations/paypal/simulator.py), [backend/app/api/routers/webhooks.py](../backend/app/api/routers/webhooks.py) |
+| 3 | PayPal → webhook | PayPal's verify-webhook-signature with `PAYPAL_SANDBOX_WEBHOOK_ID` / `PAYPAL_WEBHOOK_ID` is the only check; `ALLOW_UNSIGNED_WEBHOOKS` does not bypass it; unique `event_id` makes replay harmless | [backend/app/integrations/paypal/live.py](../backend/app/integrations/paypal/live.py), [backend/app/api/routers/webhooks.py](../backend/app/api/routers/webhooks.py) |
 | 4 | API → domain core | Pure functions receive validated values and frozen dataclasses; money is Decimal, probabilities are float, external input is validated at the request model | [backend/app/domain](../backend/app/domain) |
 | 5 | Domain → evidence prose | Facts are locked before the narrative layer runs; the narrative may only restate facts and is validated; PDF renderer is a pure function of facts + narrative | [backend/app/domain/evidence](../backend/app/domain/evidence) |
 | 6 | Runtime → secrets | Secrets are environment-only, omitted from `Settings.describe()`, redacted in logs, never included in an error envelope or the dossier | [backend/app/config.py](../backend/app/config.py), [backend/app/logging_setup.py](../backend/app/logging_setup.py) |
@@ -231,8 +255,8 @@ and every generation is recorded as an append-only `AI_GENERATION` chain event a
 body with `401 signature_required` and a bad/expired signature with `401 signature_invalid`;
 verification uses `settings.require_signed_telemetry` (true by default) and
 `VERDICTPAY_SIGNING_SECRET`. The signature covers the raw request bytes, so re-serialising
-the JSON cannot be used to smuggle a change past the check. `ALLOW_UNSIGNED_WEBHOOKS` only
-relaxes the **webhook** boundary, never authentication.
+the JSON cannot be used to smuggle a change past the check. `ALLOW_UNSIGNED_WEBHOOKS` does not
+relax PayPal webhook verification or authentication.
 
 ---
 
@@ -245,8 +269,9 @@ relaxes the **webhook** boundary, never authentication.
   re-read from SQLite hashes to the same bytes it hashed to on write.
 * **Pure functions** take `now` or a reference datetime as an argument; the EV,
   probability, triage and PDF modules never call `random()` or read the wall clock.
-* **External ids** are derived from stable seeds in the simulator, so a demo run is
-  reproducible (except for database sequence numbers after a replay).
+* **External ids** (order ids, capture ids, PayPal dispute ids) come from PayPal Sandbox and
+  differ between runs. Internal test disputes get `PP-D-TEST-…` ids. EV, p(win) and the hash
+  chain remain deterministic for the same inputs.
 
 ---
 
@@ -298,7 +323,7 @@ flowchart LR
         DB[(SQLite volume)]
         ART[(artifacts volume<br/>PDF dossiers)]
     end
-    PP[PayPal API or SimulatorGateway]
+    PP[PayPal Sandbox API]
     EL[Elasticsearch<br/>optional]
 
     UI -->|REST + X-API-Key| WEB
@@ -327,14 +352,17 @@ flowchart LR
 
 ## 8. Known limits (stated, not hidden)
 
-* The simulator is the default and the tested path. The network gateway is covered by recorded
-  fixtures, and the real sandbox has been exercised for OAuth2 and order creation
+* PayPal Sandbox is the default and the demo path; `make demo` / `make verify` run against it with
+  the credentials from `.env` (26 assertions). The offline pytest suite uses `FakePayPalGateway` and
+  recorded fixtures, and the real sandbox has been exercised for OAuth2 and order creation
   (`artifacts/paypal-sandbox-proof.json`). Capture against the real network is not proven in this
   checkout because it needs a human to approve the order as the sandbox buyer; the verification
   script reports that as `pass_order_creation_capture_blocked` rather than claiming a capture.
 * The internal test-dispute event (`POST /sandbox/dispute`, `origin: "internal_test_event"`) is not a
-  PayPal-originated dispute. It travels the real ingest, triage and dossier pipeline, but PayPal did
-  not create it. Only webhook- or API-originated disputes are labelled `paypal_sandbox`.
+  PayPal-originated dispute. PayPal's `POST /v1/customer/disputes` returns 401 for standard sandbox
+  apps, so in demo mode the API builds the case locally with a `PP-D-TEST-…` id. It travels the real
+  dedup, triage, EV, containment, AI and dossier pipeline, but PayPal did not create it, and its seller
+  actions are recorded as `SKIPPED`. Only webhook- or API-originated disputes are labelled `paypal_sandbox`.
 * Telemetry ingest requires an HMAC signature by default
   (`REQUIRE_SIGNED_TELEMETRY=true`); disabling it is a deliberate, local-only escape hatch.
 * The Elastic adapter implements the `SearchIndex` port and is selected by configuration;

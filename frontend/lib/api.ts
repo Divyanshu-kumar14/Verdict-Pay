@@ -13,6 +13,7 @@ import {
   ActionResponseSchema,
   AnalyzeResponseSchema,
   CaptureResponseSchema,
+  ChainVerificationSchema,
   CheckoutResponseSchema,
   CustomerTimelineSchema,
   DemoResetResponseSchema,
@@ -20,6 +21,7 @@ import {
   DemoRunSchema,
   DisputeDetailSchema,
   DisputePageSchema,
+  DisputeSimulationResponseSchema,
   DossierManifestSchema,
   DossierVerificationSchema,
   ErrorEnvelopeSchema,
@@ -34,6 +36,7 @@ import {
   type AnalyzeResponse,
   type CaptureOrderInput,
   type CaptureResponse,
+  type ChainVerification,
   type CheckoutRequestInput,
   type CheckoutResponse,
   type CreateOrderInput,
@@ -44,6 +47,8 @@ import {
   type DisputeAction,
   type DisputeDetail,
   type DisputePage,
+  type DisputeSimulationRequestInput,
+  type DisputeSimulationResponse,
   type DossierManifest,
   type DossierVerification,
   type ErrorDetail,
@@ -330,11 +335,10 @@ export const api = {
     });
   },
 
-  /** POST /sandbox/orders/{id}/approve — stands in for the buyer's PayPal screen. */
-  approveOrder(orderId: string, signal?: AbortSignal): Promise<OrderStatusResponse> {
-    return request(`/api/v1/sandbox/orders/${encodeURIComponent(orderId)}/approve`, {
-      method: "POST",
-      schema: OrderStatusResponseSchema,
+  /** GET /telemetry/chain/{payer_id}/verify — recomputes the customer's hash chain. */
+  verifyChain(payerId: string, signal?: AbortSignal): Promise<ChainVerification> {
+    return request(`/api/v1/telemetry/chain/${encodeURIComponent(payerId)}/verify`, {
+      schema: ChainVerificationSchema,
       signal,
     });
   },
@@ -383,6 +387,22 @@ export const api = {
 
   /** POST /api/sdk/usage — same-origin route that runs @verdictpay/sdk server-side. */
   sdkUsage: requestSdkUsage,
+
+  /**
+   * POST /sandbox/dispute — opens a dispute on a demo order without waiting
+   * for a webhook. `origin` says whether PayPal or the demo created it.
+   */
+  openDispute(
+    input: DisputeSimulationRequestInput,
+    signal?: AbortSignal,
+  ): Promise<DisputeSimulationResponse> {
+    return request("/api/v1/sandbox/dispute", {
+      method: "POST",
+      body: input,
+      schema: DisputeSimulationResponseSchema,
+      signal,
+    });
+  },
 
   /** GET /disputes — paginated triage queue. Real PayPal disputes arrive via webhook. */
   listDisputes(

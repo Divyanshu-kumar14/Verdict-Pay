@@ -287,34 +287,49 @@ export function useSandboxFlow(): SandboxFlow {
     const { attempt, signal } = startAttempt();
 
     setState((prev) => ({ ...prev, disputeStatus: "running", evidenceStatus: "idle", aiStatus: "idle", dossierStatus: "idle", error: null }));
-    appendLog(
-      "info",
-      "GET /api/v1/disputes · awaiting real PayPal webhook — create dispute as sandbox buyer, then check",
-    );
+    appendLog("info", "GET /api/v1/disputes · looking for a PayPal webhook dispute on this order");
 
     const started = performance.now();
     try {
       const page = await api.listDisputes({ page: 1, perPage: 50 }, signal);
       if (attempt !== attemptRef.current) return;
-      const match =
-        page.data.find((d) => d.order_id === checkout.order_id) ?? page.data[0] ?? null;
-      if (!match) {
-        throw new Error(
-          "No PayPal dispute webhook yet — open approval_url, approve as sandbox buyer, create dispute in PayPal, then retry",
+      // Only a dispute on this checkout's order belongs to this run. Falling
+      // back to the newest dispute would show another order's case as ours.
+      const match = page.data.find((d) => d.order_id === checkout.order_id) ?? null;
+      let result: DisputeSimulationResponse;
+      if (match) {
+        result = {
+          dispute: match,
+          webhook_event_id: match.dispute_id,
+          triage_triggered: true,
+          containment: {},
+          origin: "paypal_sandbox",
+        };
+      } else {
+        appendLog("info", "no webhook dispute yet · POST /api/v1/sandbox/dispute for this order");
+        const runId = checkout.run_id ?? state.runId ?? undefined;
+        result = await api.openDispute(
+          {
+            payer_id: checkout.payer_id,
+            order_id: checkout.order_id,
+            ...(runId ? { run_id: runId } : {}),
+            claim_text: DEMO_BUYER_CLAIM,
+          },
+          signal,
         );
+        if (attempt !== attemptRef.current) return;
       }
       const latency = Math.round(performance.now() - started);
-      const result = {
-        dispute: match,
-        webhook_event_id: match.dispute_id,
-        triage_triggered: true,
-        containment: {},
-        origin: "paypal_sandbox" as const,
-      };
       setState((prev) => ({ ...prev, dispute: result, disputeStatus: "success" }));
+      const source =
+        result.origin === "internal_test_event"
+          ? "internal test event (PayPal Sandbox did not create it)"
+          : match
+            ? "PayPal webhook"
+            : "PayPal Disputes API";
       appendLog(
         "ok",
-        `${STAGE_META.INQUIRY.short} ${result.dispute.dispute_id} via PayPal webhook · ${formatLatency(latency)}`,
+        `${STAGE_META.INQUIRY.short} ${result.dispute.dispute_id} via ${source} · ${formatLatency(latency)}`,
       );
       appendLog(
         "info",
@@ -335,26 +350,40 @@ export function useSandboxFlow(): SandboxFlow {
       if (attempt !== attemptRef.current) return;
       const apiError = toApiError(caught);
       setState((prev) => ({ ...prev, disputeStatus: "error", error: apiError }));
-      appendLog("error", `dispute simulation failed · ${errorLine(apiError)}`);
+      appendLog("error", `dispute lookup failed · ${errorLine(apiError)}`);
     } finally {
       if (attempt === attemptRef.current) busyRef.current = false;
     }
   }, [appendLog, errorLine, state.checkout, state.runId, state.usageStatus]);
 
   const runEvidence = useCallback(async (): Promise<void> => {
-    if (busyRef.current || state.disputeStatus !== "success") return;
+    const payerId = state.dispute?.dispute.payer_id ?? state.checkout?.payer_id;
+    if (!payerId || busyRef.current || state.disputeStatus !== "success") return;
     busyRef.current = true;
-    const { attempt } = startAttempt();
+    const { attempt, signal } = startAttempt();
 
     setState((prev) => ({ ...prev, evidenceStatus: "running", error: null }));
-    appendLog("info", "Evidence verification: checking SHA-256 chain validity from case facts");
+    appendLog("info", `GET /api/v1/telemetry/chain/${payerId}/verify · recomputing SHA-256 chain`);
 
+    const started = performance.now();
     try {
-      // The chain validity is checked by reading the case detail from the API
-      // We just wait for the case to be ready and log the result
+      const chain = await api.verifyChain(payerId, signal);
       if (attempt !== attemptRef.current) return;
+      const latency = Math.round(performance.now() - started);
+      if (!chain.valid) {
+        const where = chain.broken_at_sequence ?? "unknown";
+        setState((prev) => ({ ...prev, evidenceStatus: "error" }));
+        appendLog(
+          "error",
+          `Evidence chain BROKEN at sequence ${where} · ${chain.event_count} events · ${formatLatency(latency)}`,
+        );
+        return;
+      }
       setState((prev) => ({ ...prev, evidenceStatus: "success" }));
-      appendLog("ok", "Evidence chain verified: SHA-256 chain head matches, all events append-only");
+      appendLog(
+        "ok",
+        `Evidence chain verified · ${chain.event_count} events · head ${shortHash(chain.head_hash)} · ${formatLatency(latency)}`,
+      );
     } catch (caught) {
       if (attempt !== attemptRef.current) return;
       const apiError = toApiError(caught);
@@ -363,7 +392,7 @@ export function useSandboxFlow(): SandboxFlow {
     } finally {
       if (attempt === attemptRef.current) busyRef.current = false;
     }
-  }, [appendLog, errorLine, state.disputeStatus]);
+  }, [appendLog, errorLine, state.checkout, state.dispute, state.disputeStatus]);
 
   const runAI = useCallback(async (): Promise<void> => {
     const dispute = state.dispute;

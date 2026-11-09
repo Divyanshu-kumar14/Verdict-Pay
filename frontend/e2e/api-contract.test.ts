@@ -40,12 +40,13 @@ describe("api-contract", () => {
     await assertDemoApiReachable();
   });
 
-  it("serves simulator health", async () => {
+  it("serves PayPal Sandbox health", async () => {
     const res = await callJson("/api/v1/health");
 
     expect(res.status).toBe(200);
     const health = HealthResponseSchema.parse(res.payload);
-    expect(health.mode).toBe("simulator");
+    expect(health.gateway_status.mode).toBe("PAYPAL_SANDBOX");
+    expect(health.gateway_status.readiness).toBe("ready");
   });
 
   it("lists the seeded dispute queue", async () => {

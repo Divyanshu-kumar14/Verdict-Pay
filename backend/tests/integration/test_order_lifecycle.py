@@ -31,6 +31,7 @@ from sqlalchemy import func, select
 
 from app.db.models import DisputeCase, PaypalOrder, PaypalTransaction, WebhookEventRecord
 from app.security import compute_signature
+from tests.conftest import approve_order
 
 
 async def _checkout(client, plan: str = "pro") -> dict:
@@ -98,7 +99,8 @@ async def test_capture_before_approval_is_refused_and_left_retryable(client) -> 
     assert await _ledger(client) == []
 
     # A 409 is retryable: approving afterwards must make the same capture succeed.
-    approved = await client.post(f"/api/v1/sandbox/orders/{order_id}/approve")
+    await approve_order(client, order_id)
+    approved = await client.get(f"/api/v1/sandbox/orders/{order_id}")
     assert approved.status_code == 200, approved.text
     assert approved.json()["lifecycle_stage"] == "APPROVED"
 
@@ -113,7 +115,8 @@ async def test_approve_then_capture_persists_one_transaction_with_capture_id(cli
     checkout = await _checkout(client, plan="scale")
     order_id = checkout["order_id"]
 
-    approved = await client.post(f"/api/v1/sandbox/orders/{order_id}/approve")
+    await approve_order(client, order_id)
+    approved = await client.get(f"/api/v1/sandbox/orders/{order_id}")
     assert approved.status_code == 200
     assert approved.json()["lifecycle_stage"] == "APPROVED"
     assert await _ledger(client) == [], "approval alone must never write a ledger row"
@@ -153,7 +156,7 @@ async def test_replayed_capture_returns_the_same_receipt_and_does_not_double_cha
     """Capture is idempotent: the second call is a receipt, never a second payment."""
     checkout = await _checkout(client)
     order_id = checkout["order_id"]
-    await client.post(f"/api/v1/sandbox/orders/{order_id}/approve")
+    await approve_order(client, order_id)
 
     first = await client.post(f"/api/v1/sandbox/orders/{order_id}/capture", json={})
     second = await client.post(f"/api/v1/sandbox/orders/{order_id}/capture", json={})
@@ -174,7 +177,7 @@ async def test_captured_transaction_is_visible_on_the_reporting_read_path(client
     """The ledger row the capture wrote must reach the reporting contract unchanged."""
     checkout = await _checkout(client)
     order_id = checkout["order_id"]
-    await client.post(f"/api/v1/sandbox/orders/{order_id}/approve")
+    await approve_order(client, order_id)
     captured = (await client.post(f"/api/v1/sandbox/orders/{order_id}/capture", json={})).json()
 
     response = await client.get("/api/v1/reporting/transactions")

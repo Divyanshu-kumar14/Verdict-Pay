@@ -95,8 +95,8 @@ settle -$99.00, EV offer -$29.70, policy recommendation DEFLECT_INQUIRY at a $0.
 decision-comparison panel that names the cheapest modelled loss separately from the policy choice. The
 CLI variant files INR instead and asserts p(win) 0.95, EV fight -$35.70. Behind those screens: the
 backend pytest suite, the frontend unit and component suites, the HTTP contract tests that drive a real
-server, the SDK tests and the end-to-end assertions against the running simulator, all reproducible
-with `make test` and `make demo`.
+server, the SDK tests and the 26 end-to-end assertions against PayPal Sandbox, all reproducible
+with `make test` (offline, using a test-only fake gateway) and `make demo` (sandbox credentials from `.env`).
 
 ## 3. Tools
 
@@ -149,14 +149,14 @@ filed 36 probes, found 2 HIGH bugs, and those two now have regression tests
 | Time | On screen | Spoken |
 |---|---|---|
 | 0:00–0:12 | Title card: "VerdictPay — defend the dispute before the fee" | "PayPal charges $15 to fight a dispute, $30 for a high-volume merchant. VerdictPay decides whether fighting is even worth it." |
-| 0:12–0:28 | `/disputes` AG Grid queue, seeded: 5 cases `PP-D-40001…40005`, EV cells, stage/channel badges | "This is a seeded merchant: five open cases, $497 of exposure, a 2.5% rolling dispute ratio against PayPal's 1.5% high-volume threshold." |
+| 0:12–0:28 | `/disputes` AG Grid queue, seeded: 5 cases with `PP-D-TEST-…` ids, EV cells, stage/channel badges | "This is a seeded merchant: five open cases, $497 of exposure, a 2.5% rolling dispute ratio against PayPal's 1.5% high-volume threshold." |
 | 0:28–0:40 | Back to `/` judge sandbox, both panes visible | "One page. Buyer storefront left, merchant command center right. Nothing on the right is mocked." |
 | 0:40–0:55 | Click **1 · Checkout $99 Pro plan**; step log prints order, subscription, payer | "Orders v2 creates the order, Subscriptions v1 binds the plan, and the SDK ties the payer id to the exact Terms-of-Service hash the buyer accepted." |
-| 0:55–1:10 | Click **2 · Simulate usage**; ledger shows 4 events, chain badge flips to verified | "Four signed events: ToS, login, delivery with a SHA-256, and 42,000 metered tokens. Each one links to the previous hash. A judge can recompute that chain." |
+| 0:55–1:10 | Click **Record usage**; ledger shows 4 events, chain badge flips to verified | "Four signed events: ToS, login, delivery with a SHA-256, and 42,000 metered tokens. Each one links to the previous hash. A judge can recompute that chain." |
 | 1:10–1:22 | Zoom the chain hash row; click verify | "Change one row and verification reports the exact sequence number that broke. That is the system of record PayPal asks for and SaaS never keeps." |
-| 1:22–1:38 | Click **3 · File friendly-fraud dispute**; containment banner, case appears | "The buyer files a SNAD claim. The webhook verifies the signature, the subscription is suspended in under a millisecond, and the fact pack locks." |
+| 1:22–1:38 | Click **Open dispute**; origin badge, containment result, case appears | "The buyer files a SNAD claim. If PayPal sent a webhook for this order we use it; otherwise the API opens the case and labels its origin. Containment tries to suspend the subscription and reports PayPal's answer, and the fact pack locks." |
 | 1:38–1:55 | EV cards: Fight -$41.40, Settle -$99.00, Offer -$29.70 (Best EV) | "Fight is minus $41.40. Settle is the full claim. Offer is minus $29.70 and wins on raw EV — but the policy picks the zero-fee move first." |
-| 1:55–2:08 | Click **Deflect inquiry**; result chip `EXECUTED · Send message · 1ms` | "A zero-fee, evidence-backed inquiry deflection through PayPal's send-message endpoint. The HATEOAS guard means we cannot call an action PayPal would reject." |
+| 1:55–2:08 | Click **Deflect inquiry**; result chip `SKIPPED · Send message` for an `internal_test_event` case (`EXECUTED` for a `paypal_sandbox` case) | "A zero-fee, evidence-backed inquiry deflection through PayPal's send-message endpoint. This case exists only in VerdictPay, so nothing is sent to PayPal and the action is recorded as skipped. The HATEOAS guard means we cannot call an action PayPal would reject." |
 | 2:08–2:22 | Case room, download **dossier.pdf**; PDF pages scroll: chain table, ToS snapshot, usage ledger, CE 3.0 exhibit | "The dossier is ReportLab, built from the locked facts. Three pages, payer id and chain head printed, no secrets. That is the prove-it artifact." |
 | 2:22–2:36 | `/analytics`: queue 6, open exposure $596.00, fees avoided $60.00, ratio 3.00% vs 1.50% | "Six cases, $596 exposure, $60 of fees avoided, and the ratio that decides whether the next dispute costs $15 or $30." |
 | 2:36–2:52 | Terminal: `git clone … && cd Verdict-Pay && make install && make stack`, then `make web` — green assertions | "Clone it, make install, make stack, make web. Twenty-six assertions, sandbox credentials required. Everything you just saw runs with real sandbox orders." |
@@ -176,7 +176,7 @@ filed 36 probes, found 2 HIGH bugs, and those two now have regression tests
 
 ```bash
 git clone https://github.com/Divyanshu-kumar14/Verdict-Pay && cd Verdict-Pay
-cp .env.example .env
+cp .env.example .env         # then fill PAYPAL_SANDBOX_CLIENT_ID / PAYPAL_SANDBOX_CLIENT_SECRET
 docker compose up --build
 # frontend http://localhost:3000 · API docs http://localhost:8000/docs
 ```
@@ -202,15 +202,16 @@ curl -s localhost:8000/api/v1/health
 
 | Field | UI path — third button files **SNAD** | CLI path — `make demo` files **INR** |
 |---|---|---|
-| Case id | `PP-D-40006` | `PP-D-40006` |
+| Case id | `PP-D-TEST-…` (origin `internal_test_event`), or a PayPal id if PayPal creates it (`paypal_sandbox`) | same |
 | Reason / stage / channel | SNAD · INQUIRY · INTERNAL | INR · INQUIRY · INTERNAL |
 | Claim amount | `$99.00` | `$99.00` |
 | p(win) | `90.0%` (SNAD multiplier 0.90) | `95.0%` (INR multiplier 1.00) |
 | EV fight / settle / offer | `-$41.40` / `-$99.00` / `-$29.70` (best EV) | `-$35.70` / `-$99.00` / `-$29.70` |
 | Recommendation | `DEFLECT_INQUIRY`, fee `$0.00` | `DEFLECT_INQUIRY`, fee `$0.00` |
-| Containment | subscription suspended, 0–1 ms | same |
+| Containment | `suspended=false` with PayPal's error (the demo payer's fallback subscription `I-BW452GLLEP1G` does not exist in the sandbox) | same |
+| Seller action | `SKIPPED` for `internal_test_event` (nothing sent to PayPal); `EXECUTED` for `paypal_sandbox` | same |
 | Telemetry | 4 new events, `logins=15 · tokens=42,000 · assets=1`, chain verified | same, 42,000 tokens |
-| Dossier | case room → `/dossier.pdf`, `%PDF`, 3 pages | 7 KB, `%PDF` verified, uploaded via `multipart/related` |
+| Dossier | case room → `/dossier.pdf`, `%PDF`, 3 pages | 7 KB, `%PDF` verified; uploaded via `multipart/related` for a `paypal_sandbox` case, upload `SKIPPED` for `internal_test_event` |
 | Reporting | queue 6 · exposure `$596.00` · fees avoided `$60.00` · ratio `3.00%` vs `1.50%` | queue 7 · exposure `$695.00` · fees avoided `$60.00` |
 
 The CLI ends at 7 cases because it escalates a second $99 claim to CHARGEBACK and uploads a dossier.
@@ -220,7 +221,7 @@ Latency and timestamps are the only moving values; EV and p(win) are determinist
 
 | Devpost requirement | Where it is satisfied |
 |---|---|
-| Project meaningfully uses PayPal (developer platform, sandbox) | [live.py](../backend/app/integrations/paypal/live.py) — OAuth2, Disputes v1, Subscriptions v1, Reporting v1, Orders v2, webhook verification. [simulator.py](../backend/app/integrations/paypal/simulator.py) — same protocol, deterministic. [protocols.py](../backend/app/domain/protocols.py) — one boundary, three gateway modes. |
+| Project meaningfully uses PayPal (developer platform, sandbox) | [live.py](../backend/app/integrations/paypal/live.py) — OAuth2, Disputes v1, Subscriptions v1, Reporting v1, Orders v2, webhook verification. [protocols.py](../backend/app/domain/protocols.py) — one boundary, two gateway modes (`PAYPAL_SANDBOX`, `PAYPAL_LIVE`). The offline test suite swaps in [FakePayPalGateway](../backend/tests/fakes/paypal_gateway.py), which the app never uses. |
 | Project meaningfully uses AI | [openai_provider.py](../backend/app/integrations/llm/openai_provider.py) + [narrative.py](../backend/app/domain/evidence/narrative.py) validator; template fallback in [template_provider.py](../backend/app/integrations/llm/template_provider.py) |
 | Project + text description | §1 and §2 of this file |
 | Functional demo (run instructions or hosted URL) | Hosted at https://verdictpay-web.onrender.com, or run locally per §5; [README.md](../README.md) quickstart; [demo.md](demo.md) seven-step script. |
@@ -267,9 +268,11 @@ What is **not** claimed: the capture. Buyer approval in the sandbox requires a h
 
 The client is real code against the real REST contracts: OAuth2, Disputes v1, Subscriptions v1, Reporting v1, Orders v2 and webhook signature verification, with idempotency keys and bounded retries. The offline suite replays those calls with recorded HTTP fixtures ([test_paypal_live.py](../backend/tests/unit/test_paypal_live.py)).
 
-**Why a simulator by default?**
+**Is there an offline or mock mode?**
 
-Because the demo runs against real sandbox orders. `PAYPAL_MODE=PAYPAL_SANDBOX` is the default in [config.py](../backend/app/config.py); both modes satisfy one `PayPalGateway` protocol and the domain never imports `httpx`. A network mode with missing credentials yields an `UnconfiguredGateway`: the app boots and `/health` names the blockers, but every payment call fails loudly rather than silently degrading, so a simulated call can never be mistaken for a real one.
+No. The demo runs against real sandbox orders. `PAYPAL_MODE=PAYPAL_SANDBOX` is the default in [config.py](../backend/app/config.py), and `PAYPAL_LIVE` is the only other mode; any other value, including the removed `LOCAL_SIMULATOR`, fails config validation at boot. Both modes satisfy one `PayPalGateway` protocol and the domain never imports `httpx`. Missing credentials yield an `UnconfiguredGateway`: the app boots and `/health` reports `unconfigured` with named blockers, but every payment call returns 502 rather than silently degrading. The only fake gateway lives in the test suite (`backend/tests/fakes/paypal_gateway.py`).
+
+PayPal's Disputes API (`POST /v1/customer/disputes`) returns 401 for standard sandbox apps, so `POST /api/v1/sandbox/dispute` builds the case locally with a `PP-D-TEST-…` id and origin `internal_test_event` when PayPal refuses. The case runs through the same dedup, triage, EV, containment, AI and dossier code; seller actions on it are recorded as `SKIPPED` because nothing exists at PayPal to act on.
 
 **Where is the AI?**
 
@@ -277,11 +280,11 @@ Gemini, `gemini-2.5-flash` by default, does two things: classify the buyer's cla
 
 **Does it need keys?**
 
-Sandbox credentials are required (PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET for PAYPAL_SANDBOX). No Gemini key, no OpenAI key, no Elastic cluster, no Supabase project is needed. Optional keys only switch adapters: `GEMINI_API_KEY` for the dispute AI layer, `OPENAI_API_KEY` or `LLM_BASE_URL` for the dossier narrative provider, `ELASTIC_URL` for the optional search adapter, `PAYPAL_CLIENT_ID`/`SECRET` for `PAYPAL_SANDBOX`.
+Sandbox credentials are required: `PAYPAL_SANDBOX_CLIENT_ID` / `PAYPAL_SANDBOX_CLIENT_SECRET` (or `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET`). No Gemini key, no OpenAI key, no Elastic cluster, no Supabase project is needed. Optional keys only switch adapters: `GEMINI_API_KEY` for the dispute AI layer (without it, a labelled deterministic fallback), `OPENAI_API_KEY` or `LLM_BASE_URL` for the dossier narrative provider, `ELASTIC_URL` for the optional search adapter, `PAYPAL_SANDBOX_WEBHOOK_ID` to receive real PayPal dispute webhooks at a public URL.
 
 **Is the data real?**
 
-The 200 trailing-90-day sales, 15 CE 3.0 lookback rows and five seeded disputes are synthetic demo data from [seed_demo.py](../backend/scripts/seed_demo.py), deterministic and not scraped. Every number derived from it is computed live by the EV engine and the reporting endpoint. The chain hashes are real SHA-256 over the stored rows; the PDF is a real PDF.
+The 200 trailing-90-day sales and 15 CE 3.0 lookback rows are synthetic demo data from [seed_demo.py](../backend/scripts/seed_demo.py), labelled `source="seed"`, not scraped. The seed's checkouts are real PayPal sandbox orders, and its five disputes go through `POST /api/v1/sandbox/dispute`. Every number derived from it is computed live by the EV engine and the reporting endpoint. The chain hashes are real SHA-256 over the stored rows; the PDF is a real PDF.
 
 **What is deterministic and what is generated?**
 

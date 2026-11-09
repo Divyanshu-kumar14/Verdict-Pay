@@ -82,18 +82,17 @@ Three processes, no broker, no cloud dependency on the demo path.
 
 ### Gateway modes
 
-One adapter boundary, three modes, chosen by `PAYPAL_MODE` and resolved in `backend/app/config.py`.
-The sandbox gateway is the default path, so the API surface is sandbox-only and every order is a real sandbox order.
+One adapter boundary, two modes, chosen by `PAYPAL_MODE` and resolved in `backend/app/config.py`.
+The sandbox gateway is the default path, so every order is a real sandbox order.
 
 | `PAYPAL_MODE` | Talks to | Credentials | Order ids |
 |---|---|---|---|
-| `PAYPAL_SANDBOX` (default) | `https://api-m.sandbox.paypal.com` | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | PayPal-assigned |
-| `PAYPAL_SANDBOX` | `https://api-m.sandbox.paypal.com` | `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | PayPal-assigned |
+| `PAYPAL_SANDBOX` (default) | `https://api-m.sandbox.paypal.com` | `PAYPAL_SANDBOX_CLIENT_ID`/`SECRET`, or `PAYPAL_CLIENT_ID`/`SECRET` | PayPal-assigned |
 | `PAYPAL_LIVE` | `https://api-m.paypal.com` | same, **plus** `ALLOW_PAYPAL_LIVE=true` | PayPal-assigned |
 
 A network mode with missing credentials builds an `UnconfiguredGateway` rather than a live client.
 The app still boots so `GET /health` can name what is missing in `gateway_status.blockers`, but every
-payment call fails loudly. It never degrades to the simulator: a judge must never believe they are
+payment call fails loudly. There is no offline fallback: a judge must never believe they are
 watching a real PayPal call when they are not. `PAYPAL_LIVE` additionally fails validation unless
 `ALLOW_PAYPAL_LIVE` is literally `true`.
 
@@ -201,14 +200,16 @@ flowchart LR
 
 ## 3. Setup
 
-Requires Python 3.12+, Node 20+, [`uv`](https://docs.astral.sh/uv/) and `pnpm`. SQLite, seed data
-and SQLite are local — PayPal sandbox credentials are needed for the default path.
+Requires Python 3.12+, Node 20+, [`uv`](https://docs.astral.sh/uv/) and `pnpm`. The database and
+seed data are local SQLite. PayPal Sandbox credentials are required: see
+[4.1 Get sandbox credentials](#41-get-sandbox-credentials). A Gemini key is optional; without one the
+AI layer runs its labelled deterministic fallback.
 
 ```bash
 git clone https://github.com/Divyanshu-kumar14/Verdict-Pay
 cd Verdict-Pay
 make install          # uv sync + pnpm install (frontend and SDK)
-cp .env.example .env  # optional: the defaults already run offline
+cp .env.example .env  # then set PAYPAL_SANDBOX_CLIENT_ID and PAYPAL_SANDBOX_CLIENT_SECRET
 ```
 
 Backend, in one terminal:
@@ -256,7 +257,7 @@ Every variable below is documented in [.env.example](.env.example). Values shown
 
 | Name | Purpose | Example placeholder |
 |---|---|---|
-| `PAYPAL_MODE` | `PAYPAL_SANDBOX` or `PAYPAL_LIVE` (legacy local simulator retained in code only) | `PAYPAL_SANDBOX` |
+| `PAYPAL_MODE` | `PAYPAL_SANDBOX` or `PAYPAL_LIVE`. Any other value fails validation at boot | `PAYPAL_SANDBOX` |
 | `PAYPAL_CLIENT_ID` | Sandbox/live app client id | `<your-paypal-sandbox-client-id>` |
 | `PAYPAL_CLIENT_SECRET` | Sandbox/live app secret | `<your-paypal-sandbox-client-secret>` |
 | `PAYPAL_WEBHOOK_ID` | Webhook id for signature verification | `<your-webhook-id>` |
@@ -351,7 +352,7 @@ curl -s http://localhost:8000/api/v1/health | python -m json.tool
 
 If readiness is `unconfigured`, the `blockers` array names the exact missing variables. The API still
 boots so `/health` can tell you what is wrong, but every payment call fails with a `502` that repeats
-the blocker. It never falls back to the simulator behind a `PAYPAL_SANDBOX` label.
+the blocker. Nothing is ever served offline behind a `PAYPAL_SANDBOX` label.
 
 ### 4.2 Prove the lifecycle from the command line
 
@@ -404,39 +405,46 @@ curl -s -X POST localhost:8000/api/v1/sandbox/usage \
   -H 'X-API-Key: vp_demo_sk_local' \
   -d '{"payer_id":"YRZ829104KLA","order_id":"<order_id from checkout>"}' | python -m json.tool
 
-# open a dispute through the real webhook ingest path
+# open a dispute on that order; the response carries dispute.dispute_id and origin
 curl -s -X POST localhost:8000/api/v1/sandbox/dispute \
   -H 'content-type: application/json' \
   -H 'X-API-Key: vp_demo_sk_local' \
-  -d '{"payer_id":"YRZ829104KLA","reason_code":"MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED"}' \
+  -d '{"payer_id":"YRZ829104KLA","order_id":"<order_id from checkout>","claim_text":"I never received the export I paid for."}' \
   | python -m json.tool
 ```
 
-The dispute response carries `origin: "internal_test_event"` by default. That label is deliberate;
-see [Limitations](#6-limitations).
+`POST /sandbox/dispute` first asks PayPal's Disputes API to create the dispute. A standard sandbox
+app is not allowed to (PayPal answers `401`), so the API then builds the dispute itself and labels it
+`origin: "internal_test_event"`. A dispute PayPal did create is labelled `origin: "paypal_sandbox"`.
+See [Limitations](#6-limitations).
 
-To feed a real PayPal webhook instead, subscribe your sandbox app to the customer-dispute events,
-set `PAYPAL_WEBHOOK_ID`, and post to `/api/v1/webhooks/paypal`. The handler verifies the signature
-with the configured id and rejects anything outside the replay window or unsigned when
-`ALLOW_UNSIGNED_WEBHOOKS=false`.
+To receive real PayPal dispute webhooks instead, the API needs a public URL (a Render deploy or a
+tunnel such as `ngrok http 8000`). Subscribe your sandbox app's webhook to the `CUSTOMER.DISPUTE.*`
+events at `https://<public-host>/api/v1/webhooks/paypal`, and set `PAYPAL_SANDBOX_WEBHOOK_ID` to the
+webhook id PayPal shows. Every delivery is checked with PayPal's `verify-webhook-signature` API and
+de-duplicated on its event id. The `/demo` dispute step uses a webhook dispute for the order when one
+has arrived, and otherwise calls `POST /sandbox/dispute`.
 
 ### 4.5 Run the AI analysis and the integrity checks
 
 ```bash
+# use the dispute_id returned by /sandbox/dispute (or any id from GET /api/v1/disputes)
+DISPUTE=<dispute_id>
+
 # Gemini classifies the claim and drafts the rebuttal; EV stays deterministic
-curl -s -X POST localhost:8000/api/v1/disputes/PP-D-40006/ai/analyze \
+curl -s -X POST localhost:8000/api/v1/disputes/$DISPUTE/ai/analyze \
   -H 'content-type: application/json' \
   -H 'X-API-Key: vp_demo_sk_local' \
   -d '{"claim_text":"I never received the export I paid for."}' | python -m json.tool
 
 # verify the ledger for a payer
-curl -s localhost:8000/api/v1/telemetry/chain/YRZ829104KLA/verify | python -m json.tool
+curl -s -H 'X-API-Key: vp_demo_sk_local' localhost:8000/api/v1/telemetry/chain/YRZ829104KLA/verify | python -m json.tool
 
 # manifest, download, verify
-curl -s localhost:8000/api/v1/disputes/PP-D-40006/dossier/manifest | python -m json.tool
-curl -s -o /tmp/dossier.pdf -D - localhost:8000/api/v1/disputes/PP-D-40006/dossier.pdf
+curl -s -H 'X-API-Key: vp_demo_sk_local' localhost:8000/api/v1/disputes/$DISPUTE/dossier/manifest | python -m json.tool
+curl -s -H 'X-API-Key: vp_demo_sk_local' -o /tmp/dossier.pdf -D - localhost:8000/api/v1/disputes/$DISPUTE/dossier.pdf
 shasum -a 256 /tmp/dossier.pdf     # compare with manifest.sha256 and X-Dossier-SHA256
-curl -s localhost:8000/api/v1/disputes/PP-D-40006/dossier/verify | python -m json.tool
+curl -s -H 'X-API-Key: vp_demo_sk_local' localhost:8000/api/v1/disputes/$DISPUTE/dossier/verify | python -m json.tool
 ```
 
 ### 4.6 Run the test suites
@@ -508,16 +516,21 @@ Stated plainly, because a judge should not have to discover these.
 - **Sandbox capture needs a human.** Buyer approval in `PAYPAL_SANDBOX` requires a person to open the
   `approval_url` and log in as the sandbox buyer. No amount of scripting removes that step, and the
   verification script reports `capture BLOCKED` when it does not happen rather than inventing one.
-- **The internal test dispute is not a PayPal dispute.** `POST /sandbox/dispute` produces an event
-  labelled `origin: "internal_test_event"`. It travels the real verification, triage and dossier
-  pipeline, but PayPal did not originate it. Only a webhook delivered by PayPal or a dispute created
-  through the Disputes API is a genuine PayPal dispute, and those are labelled `paypal_sandbox`.
+- **The internal test dispute is not a PayPal dispute.** PayPal does not let a standard sandbox app
+  create disputes through the API, so `POST /sandbox/dispute` usually builds one locally, labelled
+  `origin: "internal_test_event"`. It runs through the same triage, EV, AI and dossier code as a real
+  dispute, but PayPal has never seen it. Its seller actions (send message, offer, accept, evidence
+  upload) are therefore recorded as `SKIPPED` with the reason, not sent to PayPal. Only a webhook
+  delivered by PayPal, or a dispute PayPal's API created, is labelled `paypal_sandbox`.
+- **Subscription containment needs a real subscription.** The demo payer's fallback subscription id
+  does not exist in your sandbox, so containment on a demo dispute reports `suspended: false` with
+  PayPal's error rather than claiming a suspension.
 - **Impact metrics are estimates.** `fees_avoided_usd`, `protected_usd` and `win_rate_estimate` in
   `/reporting/summary` extrapolate the modelled EV over the seeded case set. They are not observed
   PayPal outcomes.
 - **The win probability is a prior, not a prediction.** The weights are a hand-set, documented model.
   They are not fitted to real dispute outcomes, and they should not be read as a calibrated forecast.
-- **`PAYPAL_SANDBOX` is the default (sandbox credentials required).** Order ids, subscription ids and captures are PayPal-assigned sandbox values.
+- **`PAYPAL_SANDBOX` is the default (sandbox credentials required).** Order ids and captures are PayPal-assigned sandbox values. The seeded sales history and CE 3.0 lookback rows are synthetic and labelled `source: "seed"`.
 - **Single merchant, single tenant.** One demo merchant, one API key. There is no multi-tenant
   isolation, no user accounts, and no per-customer authorisation.
 - **SQLite is the demo store.** Concurrent write behaviour is SQLite's; Postgres is supported by
@@ -543,8 +556,8 @@ is gitignored, so a fresh clone regenerates rather than inherits them.
 | Lint and types | `make lint` and `make typecheck` |
 | Full gate incl. scripted demo | `make verify` |
 | Real PayPal Sandbox lifecycle | `./backend/.venv/bin/python backend/scripts/verify_paypal_sandbox.py --wait-for-approval 120` |
-| Ledger integrity | `curl -s localhost:8000/api/v1/telemetry/chain/YRZ829104KLA/verify` |
-| Dossier integrity | `curl -s localhost:8000/api/v1/disputes/PP-D-40006/dossier/verify` |
+| Ledger integrity | `curl -s -H 'X-API-Key: vp_demo_sk_local' localhost:8000/api/v1/telemetry/chain/YRZ829104KLA/verify` |
+| Dossier integrity | `curl -s -H 'X-API-Key: vp_demo_sk_local' localhost:8000/api/v1/disputes/<dispute_id>/dossier/verify` |
 
 Evidence artifacts:
 
@@ -562,7 +575,7 @@ manifest; a browser cannot, because the API exposes only `X-Request-Id` through 
 also carries `chain_head` and `event_count`, so the same file ties back to the ledger.
 
 ```bash
-curl -sD - -o /tmp/d.pdf localhost:8000/api/v1/disputes/PP-D-40006/dossier.pdf \
+curl -sD - -o /tmp/d.pdf localhost:8000/api/v1/disputes/<dispute_id>/dossier.pdf \
   -H 'X-API-Key: vp_demo_sk_local' | grep -i x-dossier-sha256
 shasum -a 256 /tmp/d.pdf
 ```

@@ -23,6 +23,10 @@ const eslintConfig = [
         },
       ],
       "@typescript-eslint/no-explicit-any": "error",
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
+      ],
     },
   },
   /* scripts/ holds standalone Node CLIs, not app code: their whole job is to

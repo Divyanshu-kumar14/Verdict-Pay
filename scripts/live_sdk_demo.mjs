@@ -28,7 +28,7 @@ const API_BASE_URL = (
 const API_KEY = process.env.VERDICTPAY_API_KEY ?? "vp_demo_sk_local";
 const SIGNING_SECRET =
   process.env.VERDICTPAY_SIGNING_SECRET ?? "dev-signing-secret-change-me";
-const PAYPAL_MODE = process.env.PAYPAL_MODE ?? "LOCAL_SIMULATOR";
+const PAYPAL_MODE = process.env.PAYPAL_MODE ?? "PAYPAL_SANDBOX";
 
 /* Byte-identical to backend/app/api/routers/sandbox.py. */
 const TOS_VERSION = "v2.4-2026-01";

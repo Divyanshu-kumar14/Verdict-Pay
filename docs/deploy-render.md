@@ -1,8 +1,8 @@
 # Deploying VerdictPay to Render
 
 Two Docker web services from one blueprint: an API (FastAPI, `PAYPAL_SANDBOX` by
-default; requires PayPal sandbox credentials) and a web app (Next.js). A PayPal sandbox app, database, or object store is
-required — the API seeds its own deterministic demo data on boot once credentials are set.
+default; requires PayPal sandbox credentials) and a web app (Next.js). A PayPal sandbox app is
+required; no database or object store is. The API seeds its own demo data on boot once credentials are set.
 
 ## Live deployment (this repository)
 
@@ -28,17 +28,22 @@ signing secret, webhook secret) lives in Render, not in the repo.
 3. Connect the repository `Divyanshu-kumar14/Verdict-Pay`.
    Render reads `render.yaml` from the repo root.
 4. It will show two services and one env group. For each `sync: false` value Render
-   prompts you inline — you only have to fill **one**:
+   prompts you inline:
 
    | Prompt | Service | What to put |
    |---|---|---|
    | `VERDICTPAY_API_KEY` | shared group | any random string, e.g. `openssl rand -hex 24`. Both services inherit it. |
    | `NEXT_PUBLIC_VERDICTPAY_API_KEY` | verdictpay-web | **the same string**, because the browser sends it as `X-API-Key` |
-   | `PAYPAL_CLIENT_ID` / `SECRET` / `WEBHOOK_ID` | verdictpay-api | **leave empty.** They are optional; simulator mode is the default. |
+   | `PAYPAL_SANDBOX_CLIENT_ID` / `PAYPAL_SANDBOX_CLIENT_SECRET` (or `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET`) | verdictpay-api | **required.** Your PayPal sandbox app's REST credentials. Without them the API boots with an `UnconfiguredGateway`: `/health` reports `unconfigured` with named blockers and payment calls return 502. |
+   | `PAYPAL_SANDBOX_WEBHOOK_ID` (or `PAYPAL_WEBHOOK_ID`) | verdictpay-api | the id of a sandbox webhook pointing at `https://verdictpay-api.onrender.com/api/v1/webhooks/paypal`. Needed to receive real dispute webhooks; without it incoming PayPal webhooks are rejected. |
+   | `GEMINI_API_KEY` | verdictpay-api | optional. Without it the dispute AI runs a labelled deterministic fallback. |
    | `OPENAI_API_KEY` | verdictpay-api | leave empty. The narrative falls back to the deterministic template. |
 
    The two secrets that must match are the API key pair. The signing and webhook
    secrets are generated once by Render and shared automatically.
+   `PAYPAL_MODE` is fixed to `PAYPAL_SANDBOX` by `render.yaml`. Do not set it to
+   `LOCAL_SIMULATOR` in the dashboard: that mode no longer exists and fails config
+   validation, so the API would crash on boot.
 
 5. Click **Apply**. First build takes ~4-6 minutes per service.
 6. When both are live, open `https://<your-web-service>.onrender.com`.
@@ -145,6 +150,9 @@ closes one of the two remaining hackathon items; the demo video is the other.
 
 - **The demo video** (< 3 min, required by the hackathon) does not exist yet.
 - **Elastic, Supabase** — optional adapters, not wired into the demo path.
-- **PayPal network mode** — local default is `PAYPAL_MODE=LOCAL_SIMULATOR`. The Render blueprint sets `PAYPAL_SANDBOX` so a configured deploy hits the real sandbox; without `PAYPAL_CLIENT_ID`/`SECRET` the API boots as `UnconfiguredGateway` (health names blockers, payment calls 502, never silent simulator). To use the
-  sandbox, set `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` and change `PAYPAL_MODE` to
-  `PAYPAL_SANDBOX`. `PAYPAL_LIVE` additionally requires `ALLOW_PAYPAL_LIVE=true`.
+- **PayPal Live** — the only modes are `PAYPAL_SANDBOX` (the default locally and in
+  `render.yaml`) and `PAYPAL_LIVE`. The deploy talks to the real PayPal sandbox once
+  `PAYPAL_SANDBOX_CLIENT_ID` / `PAYPAL_SANDBOX_CLIENT_SECRET` (or `PAYPAL_CLIENT_ID` /
+  `PAYPAL_CLIENT_SECRET`) are set; without them the API boots as `UnconfiguredGateway`
+  (health names blockers, payment calls 502). `PAYPAL_LIVE` additionally requires
+  `ALLOW_PAYPAL_LIVE=true` and is not used by this deployment.

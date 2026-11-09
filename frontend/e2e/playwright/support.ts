@@ -143,15 +143,30 @@ export async function ingestUsage(
   return body;
 }
 
-/** Removed: disputes arrive via real PayPal webhook. Create dispute as sandbox buyer in PayPal UI. */
+/**
+ * Open a dispute on the order via POST /sandbox/dispute. The API asks PayPal's
+ * Disputes API first; if the sandbox app cannot create disputes it builds an
+ * `internal_test_event` locally. Callers can read `origin` to tell which.
+ */
 export async function fileDispute(
-  _request: APIRequestContext,
-  _order: Checkout,
-  _overrides: Json = {},
+  request: APIRequestContext,
+  order: Checkout,
+  overrides: Json = {},
 ): Promise<Json> {
-  throw new Error(
-    "POST /sandbox/dispute removed for real-PayPal-only: create dispute as sandbox buyer, webhook creates the case",
-  );
+  const { status, body } = await postJson(request, "/sandbox/dispute", {
+    payer_id: order.payer_id,
+    order_id: order.order_id,
+    run_id: order.run_id,
+    reason_code: "MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
+    stage: "INQUIRY",
+    channel: "INTERNAL",
+    amount_usd: "99.00",
+    ...overrides,
+  });
+  if (status !== 200) {
+    throw new Error(`POST /sandbox/dispute -> HTTP ${status}: ${JSON.stringify(body).slice(0, 800)}`);
+  }
+  return body;
 }
 
 /**
@@ -170,19 +185,17 @@ export type JudgeRun = {
 export async function runJudgeFlow(request: APIRequestContext): Promise<JudgeRun> {
   const order = await createOrder(request);
   const usage = await ingestUsage(request, order);
-  // Real-PayPal-only: approval (PayPal UI) -> capture -> buyer-created dispute webhook are manual.
-  return {
-    order,
-    captureId: "",
-    disputeId: "",
-    webhookEventId: "",
-    usage,
+  // Buyer approval and capture need a human in the PayPal UI, so they are not
+  // scripted here; the dispute is opened directly on the uncaptured order.
+  const dispute = (await fileDispute(request, order)) as {
+    dispute: { dispute_id: string };
+    webhook_event_id: string;
   };
   return {
     order,
     captureId: "",
-    disputeId: "",
-    webhookEventId: "",
+    disputeId: dispute.dispute.dispute_id,
+    webhookEventId: dispute.webhook_event_id,
     usage,
   };
 }

@@ -1,13 +1,16 @@
 # PayPal gateway modes
 
-VerdictPay ships three gateway modes behind one `PayPalGateway` protocol. The mode is chosen by
+VerdictPay ships two gateway modes behind one `PayPalGateway` protocol. The mode is chosen by
 `PAYPAL_MODE` and resolved in [`backend/app/config.py`](../backend/app/config.py).
 
 | `PAYPAL_MODE` | Gateway | Network | Use |
 |---|---|---|---|
-| `PAYPAL_SANDBOX` (default) | `LivePayPalGateway` | `api-m.sandbox.paypal.com` | demo, tests, order lifecycle (sandbox credentials required) |
-| `PAYPAL_SANDBOX` | `LivePayPalGateway` | `api-m.sandbox.paypal.com` | proving the real REST integration and the order lifecycle |
+| `PAYPAL_SANDBOX` (default) | `LivePayPalGateway` | `api-m.sandbox.paypal.com` | demo, `make demo` / `make verify`, the real REST integration and order lifecycle (sandbox credentials required) |
 | `PAYPAL_LIVE` | `LivePayPalGateway` | `api-m.paypal.com` | real money — also needs `ALLOW_PAYPAL_LIVE=true` |
+
+Any other value, including the removed `LOCAL_SIMULATOR` or `simulator`, fails config validation at
+boot. Credentials come from `PAYPAL_SANDBOX_CLIENT_ID` / `PAYPAL_SANDBOX_CLIENT_SECRET`, falling back
+to `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET`. There is no mode that runs without them.
 
 `PAYPAL_SANDBOX` and `PAYPAL_LIVE` share one implementation; only the API base differs. The
 domain layer never imports `httpx`. The network path lives entirely at
@@ -17,10 +20,12 @@ Disputes v1, Orders v2, Subscriptions v1, Reporting v1 and Notifications v1 shap
 
 Two safety properties are enforced rather than documented:
 
-- A network mode with missing credentials yields an `UnconfiguredGateway`. The app still boots and
-  `GET /health` returns `gateway_status.blockers` naming exactly what is missing, but every payment
-  call fails loudly. It never degrades to the simulator, because a judge must not believe they are
-  watching a real PayPal call when they are not.
+- Missing credentials yield an `UnconfiguredGateway`. The app still boots and `GET /health`
+  returns `gateway_status.readiness=unconfigured` with `gateway_status.blockers` naming exactly what
+  is missing, but every payment call returns 502. It never degrades to a local fake, because a judge
+  must not believe they are watching a real PayPal call when they are not. The only fake gateway is
+  `FakePayPalGateway` in [`backend/tests/fakes/paypal_gateway.py`](../backend/tests/fakes/paypal_gateway.py),
+  installed by pytest fixtures and never by the app.
 - `PAYPAL_LIVE` refuses to start unless `ALLOW_PAYPAL_LIVE` is literally `true`.
 
 Legacy values are still accepted and mapped: `sandbox` →
@@ -28,7 +33,7 @@ Legacy values are still accepted and mapped: `sandbox` →
 
 ## The order lifecycle
 
-All three modes traverse the same three stages:
+Both modes traverse the same three stages:
 
 ```
 POST /api/v1/sandbox/checkout    →  CREATED
@@ -36,10 +41,38 @@ POST /api/v1/sandbox/checkout    →  CREATED
 POST /api/v1/sandbox/orders/{id}/capture →  CAPTURED
 ```
 
-`POST /v2/checkout/orders` returns `status=CREATED`; creating an order is not a payment. Capturing
-before approval returns `409 order_not_approved`, mirroring PayPal's 422 `ORDER_NOT_APPROVED`.
-`POST /api/v1/sandbox/orders/{id}/approve` is a simulator-only test affordance and returns `409
-approve_not_supported` in a network mode.
+`POST /v2/checkout/orders` returns `status=CREATED` and a `https://www.sandbox.paypal.com` approval
+URL; creating an order is not a payment. The buyer approves in PayPal's UI. There is no approve
+endpoint: `POST /api/v1/sandbox/orders/{id}/approve` has been removed and returns 404.
+`GET /api/v1/sandbox/orders/{id}` mirrors PayPal's state and marks the run's approval step done once
+PayPal reports `APPROVED`. Capturing before approval returns `409 order_not_approved`, mirroring
+PayPal's 422 `ORDER_NOT_APPROVED`.
+
+## Disputes in the sandbox
+
+`POST /api/v1/sandbox/dispute` first calls PayPal's Disputes API (`POST /v1/customer/disputes`). If
+PayPal creates the dispute, the case has origin `paypal_sandbox` and seller actions call PayPal.
+Standard sandbox apps get a 401 there, so in demo mode the API builds the dispute locally with an id
+like `PP-D-TEST-XXXXXXXXXX` and origin `internal_test_event`. Both kinds go through the same dedup,
+triage, EV, containment, AI and dossier code. For `internal_test_event` cases, `SEND_MESSAGE`,
+`MAKE_OFFER`, `ACCEPT_CLAIM` and the `PROVIDE_EVIDENCE` upload are recorded with status `SKIPPED` and
+the reason "internal_test_event: this dispute exists only in VerdictPay, so nothing was sent to
+PayPal". The dossier PDF, manifest and verify endpoints still work.
+
+Containment: a real PayPal checkout returns no subscription, and the demo payer's fallback
+subscription `I-BW452GLLEP1G` does not exist in a sandbox, so containment reports `suspended=false`
+with PayPal's error instead of claiming a suspension.
+
+## Real dispute webhooks
+
+`POST /api/v1/webhooks/paypal` is verified only through PayPal's
+`/v1/notifications/verify-webhook-signature`, using `PAYPAL_SANDBOX_WEBHOOK_ID` (or
+`PAYPAL_WEBHOOK_ID`), then de-duplicated on the event id. There is no HMAC webhook path, and
+`ALLOW_UNSIGNED_WEBHOOKS` does not bypass this check. PayPal must be able to reach the URL, so use a
+public deploy (`https://verdictpay-api.onrender.com/api/v1/webhooks/paypal`) or a tunnel such as
+`ngrok http 8000`, register that URL as a sandbox webhook for the `CUSTOMER.DISPUTE.*` events, and set
+the resulting webhook id. When a webhook dispute exists for an order, the `/demo` dispute step uses
+it instead of calling `POST /sandbox/dispute`.
 
 ## Run it
 
@@ -50,8 +83,9 @@ approve_not_supported` in a network mode.
 
    ```dotenv
    PAYPAL_MODE=PAYPAL_SANDBOX
-   PAYPAL_CLIENT_ID=<sandbox app client id>
-   PAYPAL_CLIENT_SECRET=<sandbox app secret>
+   PAYPAL_SANDBOX_CLIENT_ID=<sandbox app client id>      # or PAYPAL_CLIENT_ID
+   PAYPAL_SANDBOX_CLIENT_SECRET=<sandbox app secret>     # or PAYPAL_CLIENT_SECRET
+   PAYPAL_SANDBOX_WEBHOOK_ID=<sandbox webhook id>        # optional; only for real dispute webhooks
    PAYPAL_RETURN_URL=http://localhost:3000/demo
    PAYPAL_CANCEL_URL=http://localhost:3000/demo
    ```
@@ -73,8 +107,7 @@ approve_not_supported` in a network mode.
 
    Exit codes: `0` verified (capture may be blocked), `1` network or upstream failure,
    `2` configuration failure.
-4. Run the broader gate (it forces network mode for that command only, so `make stack` stays
-   deterministic):
+4. Run the broader gate:
 
    ```bash
    make verify-live
@@ -89,8 +122,10 @@ approve_not_supported` in a network mode.
 
    Expected tail: `LIVE PAYPAL CHECK PASSED`.
 
-The offline gate is unchanged: `cd backend && uv run pytest -q` replays every live-mode call with
-`respx` and never touches the network. The live-specific contract tests are in
+The offline gate: `cd backend && uv run pytest -q` replays every live-gateway call with `respx`,
+uses `FakePayPalGateway` for the API tests, and never touches the network. `make demo` and
+`make verify` run the end-to-end script against PayPal Sandbox with the credentials from `.env`
+(26 assertions). The live-specific contract tests are in
 [`backend/tests/unit/test_paypal_live.py`](../backend/tests/unit/test_paypal_live.py).
 
 ## Reporting v1 constraints (and the fixes)

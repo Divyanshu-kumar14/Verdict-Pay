@@ -104,14 +104,24 @@ function gatewayMeta(health: PolledQuery<HealthResponse>): {
   tone: Tone;
   title: string;
 } {
-  const gateway = health.data?.gateway ?? health.data?.mode;
-  if (gateway === "live") {
-    return { label: "Live PayPal", tone: "negative", title: "Real PayPal credentials are in use." };
+  const status = health.data?.gateway_status;
+  if (!status) {
+    return { label: "Gateway", tone: "accent", title: "Waiting for /health" };
+  }
+  if (status.readiness !== "ready") {
+    return {
+      label: "PayPal unconfigured",
+      tone: "negative",
+      title: status.blockers.join("; ") || "PayPal credentials are missing.",
+    };
+  }
+  if (status.live) {
+    return { label: "Live PayPal", tone: "negative", title: "PAYPAL_LIVE: real money moves." };
   }
   return {
-    label: "Simulator",
+    label: "PayPal Sandbox",
     tone: "accent",
-    title: "Deterministic simulator. No PayPal credentials required.",
+    title: "PAYPAL_SANDBOX at " + status.api_base + ". Test funds only.",
   };
 }
 

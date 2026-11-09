@@ -58,6 +58,7 @@ TRANSACTION_WINDOW_DAYS = 31
 # value from turning one window into an unbounded number of requests.
 REPORTING_PAGE_SIZE_MAX = 500
 REPORTING_MAX_PAGES = 10
+REPORTING_MAX_CONCURRENCY = 4
 # PayPal rejects datetime.isoformat() ("+00:00") with HTTP 400. It accepts this
 # compact, second-precision UTC form (and the equivalent "...Z" suffix).
 REPORTING_DATE_FORMAT = "%Y-%m-%dT%H:%M:%S+0000"
@@ -95,6 +96,22 @@ class LivePayPalGateway:
             now = time.monotonic()
             if self._token and now < self._token_expires_at - TOKEN_REFRESH_MARGIN_SECONDS:
                 return self._token
+            token, expires_in = await self._fetch_token()
+            self._token = token
+            self._token_expires_at = time.monotonic() + expires_in
+            return token
+
+    async def _refresh_token(self, rejected: str) -> str:
+        """Replace a token PayPal rejected with 401.
+
+        Concurrent requests can all hit 401 with the same stale token; only the
+        first one fetches, the rest reuse the token it stored.
+        """
+        async with self._token_lock:
+            if self._token and self._token != rejected:
+                return self._token
+            self._token = None
+            self._token_expires_at = 0.0
             token, expires_in = await self._fetch_token()
             self._token = token
             self._token_expires_at = time.monotonic() + expires_in
@@ -185,13 +202,17 @@ class LivePayPalGateway:
         if headers:
             request_headers.update(headers)
         if method.upper() in {"POST", "PUT", "PATCH"}:
+            # Fixed for every attempt, including the post-401 retry below, so
+            # PayPal de-duplicates a POST that reached it more than once.
             request_headers["PayPal-Request-Id"] = idempotency_key or uuid.uuid4().hex
 
         attempts = MAX_ATTEMPTS if retry else 1
         started = time.perf_counter()
         response: httpx.Response | None = None
         body: dict[str, Any] = {}
-        for attempt in range(attempts):
+        token_refreshed = False
+        attempt = 0
+        while attempt < attempts:
             response = await self._client.request(
                 method,
                 path,
@@ -201,9 +222,17 @@ class LivePayPalGateway:
                 content=content,
             )
             body = self._decode(response)
+            if response.status_code == 401 and not token_refreshed:
+                # The cached token was revoked or expired early. Fetch a new one
+                # and retry once; a second 401 is a real credential failure.
+                token_refreshed = True
+                token = await self._refresh_token(token)
+                request_headers["Authorization"] = f"Bearer {token}"
+                continue
             if response.status_code not in RETRYABLE_STATUS or attempt == attempts - 1:
                 break
             await asyncio.sleep(self._retry_delay(response, attempt))
+            attempt += 1
 
         if response is None:
             raise UpstreamError(f"PayPal {method.upper()} {path} was never attempted.")
@@ -416,13 +445,32 @@ class LivePayPalGateway:
             raise UpstreamError("invalid_transaction_window")
 
         window = timedelta(days=TRANSACTION_WINDOW_DAYS)
-        expected_payer = payer.strip()
-        records: list[PayPalTransactionRecord] = []
-        seen: set[str] = set()
+        windows: list[tuple[datetime, datetime]] = []
         chunk_start = begin
         while chunk_start <= finish:
             chunk_end = min(chunk_start + window, finish)
-            for record in await self._search_transaction_window(chunk_start, chunk_end):
+            windows.append((chunk_start, chunk_end))
+            if chunk_end >= finish:
+                break
+            chunk_start = chunk_end + timedelta(seconds=1)
+
+        # A 245-day CE 3.0 lookback is 8 windows. Fetched one after another
+        # they took ~20s per dossier, so fetch them concurrently (bounded, to
+        # stay clear of PayPal's rate limit). gather keeps window order, so the
+        # merge and de-duplication below are unchanged.
+        limit = asyncio.Semaphore(REPORTING_MAX_CONCURRENCY)
+
+        async def fetch(span: tuple[datetime, datetime]) -> list[PayPalTransactionRecord]:
+            async with limit:
+                return await self._search_transaction_window(*span)
+
+        batches = await asyncio.gather(*(fetch(span) for span in windows))
+
+        expected_payer = payer.strip()
+        records: list[PayPalTransactionRecord] = []
+        seen: set[str] = set()
+        for batch in batches:
+            for record in batch:
                 if record.payer_id.strip() != expected_payer:
                     continue
                 transaction_id = record.transaction_id.strip()
@@ -431,9 +479,6 @@ class LivePayPalGateway:
                         continue
                     seen.add(transaction_id)
                 records.append(record)
-            if chunk_end >= finish:
-                break
-            chunk_start = chunk_end + timedelta(seconds=1)
         return records
 
     # ----------------------------------------------------------------- webhooks

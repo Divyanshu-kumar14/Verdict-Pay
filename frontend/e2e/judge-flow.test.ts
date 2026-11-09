@@ -12,6 +12,7 @@ import type { DisputeAction, RecommendedAction } from "../lib/types";
 import {
   CheckoutResponseSchema,
   DisputeDetailSchema,
+  DisputeSimulationResponseSchema,
   UsageResponseSchema,
 } from "../lib/types";
 import { callJson } from "./support";
@@ -41,13 +42,11 @@ describe("judge-flow", () => {
     const checkout = CheckoutResponseSchema.parse(res.payload);
     expect(Number(checkout.amount_usd)).toBe(99);
     expect(checkout.order_id.length).toBeGreaterThan(0);
-    const subscription = checkout.subscription_id;
-    if (subscription === null || subscription.length === 0) {
-      throw new Error("Checkout returned no subscription id.");
-    }
+    // A real PayPal order is created, not paid, and carries no subscription.
+    expect(checkout.approval_url).toMatch(/^https:\/\/www\.sandbox\.paypal\.com\//);
     payerId = checkout.payer_id;
     orderId = checkout.order_id;
-    subscriptionId = subscription;
+    subscriptionId = checkout.subscription_id ?? "";
   });
 
   it("2 - records four chained telemetry events", async () => {
@@ -56,7 +55,7 @@ describe("judge-flow", () => {
       body: {
         payer_id: payerId,
         order_id: orderId,
-        subscription_id: subscriptionId,
+        ...(subscriptionId ? { subscription_id: subscriptionId } : {}),
         logins: 15,
         tokens: 42000,
         export_name: "q3_financial_model.xlsx",
@@ -71,7 +70,7 @@ describe("judge-flow", () => {
     expect(usage.totals["logins"]).toBe(15);
   });
 
-  it("3 - dispute simulation removed: real PayPal webhook required", async () => {
+  it("3 - opens a dispute on the order", async () => {
     const res = await callJson("/api/v1/sandbox/dispute", {
       method: "POST",
       body: {
@@ -84,21 +83,16 @@ describe("judge-flow", () => {
       },
     });
 
-    // Simulation endpoint deleted for real-PayPal-only. Disputes arrive via
-    // POST /api/v1/webhooks/paypal from PayPal (buyer creates dispute in sandbox UI).
-    expect([404, 405]).toContain(res.status);
-    const list = await callJson("/api/v1/disputes?page=1&per_page=1");
-    expect(list.status).toBe(200);
-    disputeId = "";
+    expect(res.status).toBe(200);
+    const opened = DisputeSimulationResponseSchema.parse(res.payload);
+    // PayPal created it, or the demo built it locally and says so.
+    expect(["paypal_sandbox", "internal_test_event"]).toContain(opened.origin);
+    expect(opened.dispute.order_id).toBe(orderId);
+    expect(opened.dispute.stage).toBe("INQUIRY");
+    disputeId = opened.dispute.dispute_id;
   });
 
   it("4 - exposes the recommended action on the rail", async () => {
-    if (disputeId.length === 0) {
-      // Real-PayPal-only: no simulated dispute exists. Pass if disputes list is reachable.
-      const list = await callJson("/api/v1/disputes?page=1&per_page=1");
-      expect(list.status).toBe(200);
-      return;
-    }
     const res = await callJson(`/api/v1/disputes/${encodeURIComponent(disputeId)}`);
 
     expect(res.status).toBe(200);

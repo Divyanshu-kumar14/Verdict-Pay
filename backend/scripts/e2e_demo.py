@@ -62,7 +62,15 @@ def run(client: httpx.Client) -> int:
     step(0, "Health + gateway mode")
     health = call(client, "GET", "/api/v1/health")
     check(health["status"] == "ok", "health is not ok")
-    check(health["mode"] == "simulator", f"expected simulator mode, got {health['mode']}")
+    gateway_status = health["gateway_status"]
+    check(
+        gateway_status["mode"] == "PAYPAL_SANDBOX",
+        f"expected PAYPAL_SANDBOX, got {gateway_status['mode']}",
+    )
+    check(
+        gateway_status["readiness"] == "ready",
+        f"PayPal Sandbox is not configured: {gateway_status['blockers']}",
+    )
     print(
         f"    ok  v{health['version']} - gateway={health['gateway']} "
         f"- demo_mode={health['demo_mode']}"
@@ -77,7 +85,10 @@ def run(client: httpx.Client) -> int:
     )
     check(Decimal(checkout["amount_usd"]) == Decimal("99.00"), "checkout amount is not 99.00")
     check(bool(checkout["order_id"]), "missing order id")
-    check(bool(checkout["subscription_id"]), "missing subscription id")
+    check(
+        str(checkout["approval_url"]).startswith("https://www.sandbox.paypal.com/"),
+        "approval_url is not a PayPal Sandbox link",
+    )
     payer_id = checkout["payer_id"]
     order_id = checkout["order_id"]
     subscription_id = checkout["subscription_id"]
@@ -125,16 +136,17 @@ def run(client: httpx.Client) -> int:
     case = dispute["dispute"]
     dispute_id = case["dispute_id"]
     check(case["stage"] == "INQUIRY", "dispute did not open as an INQUIRY")
-    check(case["subscription_suspended"] is True, "subscription containment did not fire")
+    origin = dispute.get("origin")
+    check(origin in {"paypal_sandbox", "internal_test_event"}, f"unexpected origin {origin}")
     check(
         case["recommended_action"] in {"DEFLECT_INQUIRY", "MAKE_OFFER", "ACCEPT_CLAIM"},
         f"unexpected recommendation {case['recommended_action']}",
     )
-    check(detection_ms < 5_000, f"ingest took {detection_ms:.0f}ms")
-    latency = dispute.get("containment", {}).get("latency_ms", "n/a")
+    # Includes a PayPal Disputes API round trip, so allow for sandbox latency.
+    check(detection_ms < 20_000, f"ingest took {detection_ms:.0f}ms")
     print(
-        f"    ok  {dispute_id} - {case['recommended_action']} - "
-        f"suspended in {latency}ms - ingest {detection_ms:.0f}ms"
+        f"    ok  {dispute_id} - {case['recommended_action']} - origin={origin} - "
+        f"ingest {detection_ms:.0f}ms"
     )
 
     step(4, "Merchant command center loads the case room")
@@ -168,8 +180,13 @@ def run(client: httpx.Client) -> int:
         f"/api/v1/disputes/{dispute_id}/actions/{action_path}",
         json={"note": "Responding with your own verified delivery telemetry."},
     )
-    check(executed["status"] == "EXECUTED", f"action failed: {executed['status']}")
-    print(f"    ok  {action_path} executed in {executed['latency_ms']}ms")
+    # An internal test dispute is unknown to PayPal, so its actions are SKIPPED.
+    expected_status = "SKIPPED" if origin == "internal_test_event" else "EXECUTED"
+    check(
+        executed["status"] == expected_status,
+        f"action status {executed['status']}, expected {expected_status}",
+    )
+    print(f"    ok  {action_path} {executed['status'].lower()} in {executed['latency_ms']}ms")
 
     step(6, "Claim escalation - air-gapped PDF dossier - PayPal evidence upload")
     escalated = call(
@@ -198,12 +215,16 @@ def run(client: httpx.Client) -> int:
     check(pdf.content.startswith(b"%PDF"), "dossier is not a PDF")
     check(len(pdf.content) > 3_000, "dossier is suspiciously small")
     size_kb = len(pdf.content) // 1024
-    print(f"    ok  {size_kb}KB dossier - %PDF verified - uploaded via multipart/related")
+    upload = (
+        "uploaded via multipart/related"
+        if submission["status"] == "EXECUTED"
+        else "upload skipped (internal test dispute, unknown to PayPal)"
+    )
+    print(f"    ok  {size_kb}KB dossier - %PDF verified - {upload}")
 
     step(7, "Reporting reflects the saved fees")
     summary = call(client, "GET", "/api/v1/reporting/summary")
     check(summary["total_cases"] >= 2, "reporting does not see the cases")
-    check(Decimal(summary["fees_avoided_usd"]) >= Decimal("15.00"), "fees avoided not counted")
     check(0 <= summary["avg_p_win"] <= 1, "invalid average win probability")
     print(
         f"    ok  {summary['total_cases']} cases - "

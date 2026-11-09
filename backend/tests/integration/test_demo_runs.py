@@ -32,6 +32,7 @@ from app.db.models import (
     PaypalTransaction,
 )
 from app.main import create_app
+from tests.conftest import approve_order
 
 CHECKOUT = "/api/v1/sandbox/checkout"
 RUNS = "/api/v1/sandbox/runs"
@@ -70,8 +71,15 @@ async def _open_dispute(client: AsyncClient, run_id: str | None, claim: str) -> 
     return response.json()
 
 
-async def _approve(client: AsyncClient, order_id: str):
+async def _post_approve(client: AsyncClient, order_id: str):
+    """Call the removed approve endpoint; it must stay a 404."""
     return await client.post(f"/api/v1/sandbox/orders/{order_id}/approve")
+
+
+async def _approve(client: AsyncClient, order_id: str):
+    """Approve as the sandbox buyer would, then read the mirrored order."""
+    await approve_order(client, order_id)
+    return await client.get(f"/api/v1/sandbox/orders/{order_id}")
 
 
 async def _capture(client: AsyncClient, order_id: str, **payload):
@@ -262,7 +270,7 @@ async def test_unknown_order_status_is_404(demo_client: AsyncClient) -> None:
 
 
 async def test_approve_unknown_order_is_404(demo_client: AsyncClient) -> None:
-    response = await _approve(demo_client, "5O1DOESNOTEXIST")
+    response = await _post_approve(demo_client, "5O1DOESNOTEXIST")
     assert response.status_code == 404, response.text
 
 
@@ -337,7 +345,7 @@ async def test_approve_in_network_mode_is_409_without_touching_the_gateway(
         )
         await session.commit()
 
-    response = await _approve(sandbox_client, order_id)
+    response = await _post_approve(sandbox_client, order_id)
     # The approve endpoint was deleted: approval happens in the PayPal UI, so
     # any simulated approve is a 404, still without touching the gateway.
     assert response.status_code == 404, response.text

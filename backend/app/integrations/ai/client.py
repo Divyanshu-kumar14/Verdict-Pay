@@ -100,6 +100,12 @@ class GeminiClient:
         }
         if schema is not None:
             config_kwargs["response_schema"] = schema
+        if "flash" in self._model.lower():
+            # Classification and grounded drafting need no reasoning pass. With
+            # thinking on, a long fact pack ran past the 12s timeout twice and
+            # every dossier fell back to the template after ~24s. Flash models
+            # accept a zero budget; Pro models do not, so they keep the default.
+            config_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=0)
         response = self._client.models.generate_content(
             model=self._model,
             contents=[

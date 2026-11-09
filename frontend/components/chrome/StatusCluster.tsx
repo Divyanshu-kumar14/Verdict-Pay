@@ -34,18 +34,24 @@ function connectionMeta(health: PolledQuery<HealthResponse>): {
 }
 
 function gatewayMeta(health: PolledQuery<HealthResponse>): { value: string; tone: Tone; title: string } {
-  const gateway = health.data?.gateway ?? health.data?.mode;
-  if (gateway === "live") {
+  const status = health.data?.gateway_status;
+  if (!status) {
+    return { value: "Gateway", tone: "accent", title: "Waiting for /health" };
+  }
+  if (status.readiness !== "ready") {
     return {
-      value: "Live",
+      value: "Unconfigured",
       tone: "negative",
-      title: "Live gateway selected. Real PayPal credentials are in use.",
+      title: status.blockers.join("; ") || "PayPal credentials are missing.",
     };
   }
+  if (status.live) {
+    return { value: "Live", tone: "negative", title: "PAYPAL_LIVE: real money moves." };
+  }
   return {
-    value: "Simulator",
+    value: "Sandbox",
     tone: "accent",
-    title: "Simulator gateway. No PayPal credentials required.",
+    title: "PAYPAL_SANDBOX at " + status.api_base + ". Test funds only.",
   };
 }
 

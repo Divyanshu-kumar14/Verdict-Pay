@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 """Seed a demo merchant with telemetry, CE 3.0 history and five dispute scenarios.
 
-Runs entirely in-process against the real API (ASGI transport) and the simulator
-gateway, so the seeded state is produced by exactly the same code path the judge
-demo uses. Idempotent: a second run is a no-op unless --reset is passed.
+Runs entirely in-process against the real API (ASGI transport) and the configured
+PayPal Sandbox gateway, so checkouts are real sandbox orders. The prior-sales and
+CE 3.0 history rows are synthetic and labelled source="seed".
+Idempotent: a second run is a no-op unless --reset is passed.
 
     uv run python scripts/seed_demo.py [--reset]
 """
@@ -12,6 +13,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import logging
 import sys
 from datetime import UTC, datetime, timedelta
@@ -26,11 +28,47 @@ from sqlalchemy import func, select
 
 from app.config import get_settings
 from app.db.models import DisputeCase, PaypalTransaction
-from app.integrations.paypal.simulator import synthetic_transactions
+from app.domain.protocols import PayPalTransactionRecord
 from app.main import create_app
 from app.services.bootstrap import ensure_demo_merchant
 
 logger = logging.getLogger("verdictpay.seed")
+
+# Synthetic Visa CE 3.0 history: three prior COMPLETED transactions per payer at
+# now-150d, now-240d and now-330d, sharing one IP and device fingerprint.
+_HISTORY: tuple[tuple[int, Decimal], ...] = (
+    (150, Decimal("99.00")),
+    (240, Decimal("99.00")),
+    (330, Decimal("49.00")),
+)
+HISTORY_CLIENT_IP = "203.0.113.42"
+HISTORY_DEVICE_FINGERPRINT = "fp_89a7c6d5e4f3"
+
+
+def synthetic_transaction_id(payer_id: str, days: int) -> str:
+    """Stable PayPal-style transaction id derived from sha256(payer_id + days)."""
+    digest = hashlib.sha256(f"{payer_id}{days}".encode()).hexdigest().upper()
+    return f"TXN{digest[:16]}"
+
+
+def synthetic_transactions(
+    payer_id: str, *, now: datetime | None = None
+) -> list[PayPalTransactionRecord]:
+    reference = now if now is not None else datetime.now(UTC)
+    return [
+        PayPalTransactionRecord(
+            transaction_id=synthetic_transaction_id(payer_id, days),
+            payer_id=payer_id,
+            amount=amount,
+            currency="USD",
+            status="COMPLETED",
+            client_ip=HISTORY_CLIENT_IP,
+            device_fingerprint=HISTORY_DEVICE_FINGERPRINT,
+            created_at=reference - timedelta(days=days),
+        )
+        for days, amount in _HISTORY
+    ]
+
 
 SCENARIOS: list[dict[str, Any]] = [
     {
@@ -169,7 +207,7 @@ async def _seed_sales(session: Any, merchant_id: str) -> int:
                 status="COMPLETED",
                 client_ip=SALES_IPS[index % len(SALES_IPS)],
                 device_fingerprint=SALES_DEVICES[index % len(SALES_DEVICES)],
-                source="simulator",
+                source="seed",
                 created_at=now - timedelta(days=index % 88, hours=index % 24),
             )
         )
@@ -201,7 +239,7 @@ async def _seed_history(session: Any, merchant_id: str, scenarios: list[dict[str
                     status=record.status,
                     client_ip=record.client_ip,
                     device_fingerprint=record.device_fingerprint,
-                    source="simulator",
+                    source="seed",
                     created_at=record.created_at,
                 )
             )

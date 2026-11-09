@@ -46,9 +46,11 @@ from app.errors import ConflictError
 from app.logging_setup import get_logger, log_context
 from app.services.dispute_service import (
     ACTION_STATUS_IN_PROGRESS,
+    INTERNAL_TEST_SKIP_REASON,
     as_decimal,
     assemble_case_facts,
     claim_action,
+    is_internal_test_case,
     load_case,
     quantize_money,
 )
@@ -388,6 +390,16 @@ class EvidenceService:
             await self.session.refresh(case)
             return self._replayed(replay, dispute_id), case
 
+        if is_internal_test_case(case):
+            # The dossier is real and downloadable, but PayPal has no such
+            # dispute to attach it to, so the upload is recorded as skipped.
+            record_row.status = ActionStatus.SKIPPED.value
+            record_row.error = INTERNAL_TEST_SKIP_REASON
+            record_row.latency_ms = 0
+            record_row.response_payload = {"skipped": True, "reason": INTERNAL_TEST_SKIP_REASON}
+            case.dossier_pdf_url = DOSSIER_URL_TEMPLATE.format(dispute_id=dispute_id)
+            await self.session.commit()
+            return record_row, case
         submission = EvidenceSubmission(
             dispute_id=dispute_id,
             evidence_type=evidence_type,

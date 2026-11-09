@@ -42,11 +42,11 @@ Judging: Technological Implementation · Design · Potential Impact · Innovatio
 
 | # | Requirement | Status | Evidence | Action |
 |---|---|---|---|---|
-| 1 | PayPal integration is central | **PASS** | Real clients for Disputes v1 (get/list/send-message/make-offer/accept-claim/provide-evidence/require-evidence), Orders v2 create/get/capture, Subscriptions v1 suspend, Reporting v1 transaction search, webhook signature verification — `backend/app/integrations/paypal/live.py`. `LOCAL_SIMULATOR` satisfies the same `PayPalGateway` protocol. A live sandbox OAuth2 token and a real order (`0BN11980TR384063M`) are proven in `artifacts/paypal-sandbox-proof.json`. | Run `backend/scripts/verify_paypal_sandbox.py --wait-for-approval 120` before recording to complete the capture by hand. |
+| 1 | PayPal integration is central | **PASS** | Real clients for Disputes v1 (get/list/send-message/make-offer/accept-claim/provide-evidence/require-evidence), Orders v2 create/get/capture, Subscriptions v1 suspend, Reporting v1 transaction search, webhook signature verification — `backend/app/integrations/paypal/live.py`, the only gateway the app uses (`PAYPAL_SANDBOX` by default, `PAYPAL_LIVE` opt-in). `make demo` runs the judge flow against PayPal Sandbox (26 assertions); the test suite alone uses `FakePayPalGateway` (`backend/tests/fakes/paypal_gateway.py`) to stay offline. A live sandbox OAuth2 token and a real order (`0BN11980TR384063M`) are proven in `artifacts/paypal-sandbox-proof.json`. | Run `backend/scripts/verify_paypal_sandbox.py --wait-for-approval 120` before recording to complete the capture by hand. |
 | 2 | AI is meaningful | **PASS** | Gemini (`GEMINI_MODEL`, default `gemini-2.5-flash`) classifies the buyer claim and drafts the rebuttal from a locked fact pack; a deterministic validator rejects any invented number or date; failures degrade to a keyword classifier and template with `degraded=true` plus a reason. Dossier footer stamps `Narrative source: ai:<model>` or `template`. See [ai-disclosure.md](ai-disclosure.md). | **Record the video with `GEMINI_API_KEY` set** so step 6 shows the live model path. |
 | 3 | Working prototype | **PASS** | `make test` runs the backend pytest, frontend vitest and SDK suites; `make demo` asserts the full judge flow end to end; every UI route renders real API data. Run them for current counts rather than quoting a fixed number. | — |
 | 4 | Documented | **PASS** | README, architecture, ADRs, API surface, demo script. | — |
-| 5 | Judges can run it | **PASS** | `make stack` (no keys) or `docker compose up --build`; both verified in this repo. | — |
+| 5 | Judges can run it | **PASS** | `make stack` or `docker compose up --build`, both with PayPal sandbox credentials (`PAYPAL_SANDBOX_CLIENT_ID` / `PAYPAL_SANDBOX_CLIENT_SECRET`) in `.env`; both verified in this repo. Without credentials the API boots but `/health` reports `unconfigured` and payment calls return 502. `GEMINI_API_KEY` is optional. | Judges need their own free PayPal sandbox app, or use the hosted demo. |
 | 6 | Public repo + license in About | **PASS** | GitHub API reports `visibility: public`, `license: MIT`; `LICENSE` at the root. | Repository description/topics set for clarity. |
 | 7 | Text description | **READY** | `docs/submission.md` (copy-paste). | Paste into the Devpost form. |
 | 8 | Tools field | **READY** | `docs/submission.md` lists runtime AI tools and development tools. | Paste; keep the AI-assistance disclosure line. |
@@ -77,7 +77,8 @@ Judging: Technological Implementation · Design · Potential Impact · Innovatio
 - [ ] **Read the Official Rules in a browser** and confirm age, country/region eligibility, team
       size, and IP/publicity terms. Devpost's standard rules exclude some regions and require 18+.
 - [ ] **Run `make verify-live`** with real PayPal sandbox credentials and keep the output as
-      evidence that the live integration works (the repo ships a simulator by default).
+      evidence that the live integration works (the default mode is `PAYPAL_SANDBOX`; there is no
+      offline mode).
 - [ ] **Paste `docs/submission.md`** into the Devpost form (project name, tagline, built-with,
       description, tools, video link, repo link).
 - [ ] Confirm the video contains **no third-party logos or music**. The repo itself ships no PayPal
@@ -86,9 +87,9 @@ Judging: Technological Implementation · Design · Potential Impact · Innovatio
 ## 5. Evidence commands
 
 ```bash
-make verify        # ruff + pytest + eslint + tsc + next build + vitest + SDK build + scripted demo
-make demo          # the judge flow alone, green/red
-make stack         # seed + API + UI, zero keys
+make verify        # ruff + pytest + eslint + tsc + next build + vitest + SDK build + scripted demo (PayPal Sandbox)
+make demo          # the judge flow alone against PayPal Sandbox, green/red (26 assertions)
+make stack         # seed + API + UI; needs PayPal sandbox credentials in .env
 make verify-live   # real PayPal sandbox check (requires PAYPAL_MODE=PAYPAL_SANDBOX + credentials)
 docker compose up --build   # full stack, verified in this repo
 ```

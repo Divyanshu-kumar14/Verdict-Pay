@@ -463,8 +463,9 @@ class DisputeSimulationResponse(ApiModel):
     webhook_event_id: str
     triage_triggered: bool
     containment: dict[str, Any] = Field(default_factory=dict)
-    # Every dispute originates from the PayPal Sandbox API surface.
-    origin: Literal["paypal_sandbox"] = "paypal_sandbox"
+    # "paypal_sandbox": PayPal's Disputes API created it. "internal_test_event":
+    # the demo built it locally because the sandbox app cannot create disputes.
+    origin: Literal["paypal_sandbox", "internal_test_event"] = "paypal_sandbox"
 
 
 # --------------------------------------------------------------------------- demo runs

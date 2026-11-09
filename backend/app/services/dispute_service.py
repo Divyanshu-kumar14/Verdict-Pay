@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
@@ -58,9 +59,15 @@ from app.domain.protocols import (
 )
 from app.domain.subscriptions.containment import ContainmentResult, contain_subscription
 from app.domain.telemetry.service import TelemetryService
-from app.errors import ConflictError, NotFoundError, ValidationFailedError, WebhookVerificationError
+from app.errors import (
+    ConflictError,
+    NotFoundError,
+    UpstreamError,
+    ValidationFailedError,
+    WebhookVerificationError,
+)
+from app.integrations.paypal import wire
 from app.logging_setup import get_logger, log_context
-from app.security import compute_signature
 
 logger = get_logger("verdictpay.disputes")
 
@@ -71,6 +78,9 @@ CENT = Decimal("0.01")
 ACTION_STATUS_IN_PROGRESS = "IN_PROGRESS"
 TRIAGE_SNAPSHOT_KEY = "_triage"
 CONTAINMENT_SNAPSHOT_KEY = "_containment"
+# "paypal_sandbox" when PayPal created the dispute, "internal_test_event" when
+# the demo built it locally. Absent for cases that arrived by webhook.
+DISPUTE_ORIGIN_KEY = "_origin"
 CE3_WINDOW_START_DAYS = 365
 CE3_WINDOW_END_DAYS = 120
 VOLUME_WINDOW_DAYS = 90
@@ -226,6 +236,16 @@ async def claim_action(
                 "This action is already being executed.", code="action_in_progress"
             ) from None
         return record, existing
+
+
+INTERNAL_TEST_SKIP_REASON = (
+    "internal_test_event: this dispute exists only in VerdictPay, so nothing was sent to PayPal"
+)
+
+
+def is_internal_test_case(case: DisputeCase) -> bool:
+    """True for a dispute the demo built locally because PayPal could not."""
+    return (case.facts_snapshot or {}).get(DISPUTE_ORIGIN_KEY) == "internal_test_event"
 
 
 def containment_snapshot(case: DisputeCase) -> dict[str, Any]:
@@ -438,8 +458,103 @@ class DisputeService:
         if not verification.verified or verification.event is None:
             logger.warning("webhook_rejected", extra=log_context(reason=verification.reason))
             raise WebhookVerificationError(verification.reason or None)
-        event = verification.event
+        return await self._ingest_event(verification.event)
 
+    async def open_sandbox_dispute(
+        self,
+        *,
+        payer_id: str,
+        order_id: str,
+        reason_code: str,
+        stage: DisputeStage,
+        channel: DisputeChannel,
+        amount: Decimal,
+        buyer_claim_text: str | None = None,
+    ) -> tuple[WebhookEventRecord, DisputeCase, str]:
+        """Open a dispute for a demo order and run it through the case pipeline.
+
+        PayPal is asked first (POST /v1/customer/disputes). Sandbox apps
+        without dispute-creation rights get a 401; in demo mode the dispute is
+        then built locally and returned with ``origin="internal_test_event"``,
+        so nobody mistakes it for one PayPal filed. Returns the event record,
+        the case and the origin label.
+        """
+        amount = quantize_money(amount)
+        origin = "paypal_sandbox"
+        try:
+            dispute = await self.gateway.create_sandbox_dispute(
+                payer_id=payer_id,
+                order_id=order_id,
+                reason_code=reason_code,
+                amount=amount,
+                currency="USD",
+                stage=stage,
+                channel=channel,
+            )
+        except UpstreamError as exc:
+            if not self.settings.demo_mode:
+                raise
+            logger.info(
+                "sandbox_dispute_internal_fallback",
+                extra=log_context(order_id=order_id, reason=str(exc)[:200]),
+            )
+            origin = "internal_test_event"
+            dispute = self._internal_test_dispute(
+                payer_id=payer_id,
+                order_id=order_id,
+                reason_code=reason_code,
+                stage=stage,
+                channel=channel,
+                amount=amount,
+            )
+        # Trust comes from the authenticated call (or from building it here),
+        # not from a webhook signature, so no signature check is needed.
+        event = wire.parse_webhook_event(self._webhook_envelope(dispute))
+        record, case = await self._ingest_event(event)
+        if case is None:
+            raise ValidationFailedError("Sandbox dispute did not produce a case.")
+        snapshot = {**(case.facts_snapshot or {}), DISPUTE_ORIGIN_KEY: origin}
+        claim = (buyer_claim_text or "").strip()[:4000]
+        if claim:
+            # _apply_triage preserves top-level keys and _facts_from_snapshot
+            # restores this one onto CaseFacts.buyer_claim_text.
+            snapshot["buyer_claim_text"] = claim
+        case.facts_snapshot = snapshot
+        await self.session.commit()
+        return record, case, origin
+
+    @staticmethod
+    def _internal_test_dispute(
+        *,
+        payer_id: str,
+        order_id: str,
+        reason_code: str,
+        stage: DisputeStage,
+        channel: DisputeChannel,
+        amount: Decimal,
+    ) -> PayPalDisputeRecord:
+        now = datetime.now(UTC)
+        return PayPalDisputeRecord(
+            dispute_id=f"PP-D-TEST-{uuid.uuid4().hex[:10].upper()}",
+            reason_code=wire.normalise_reason(reason_code),
+            stage=stage,
+            channel=channel,
+            status=DisputeStatus.OPEN,
+            amount=amount,
+            currency="USD",
+            payer_id=payer_id,
+            order_id=order_id,
+            subscription_id=None,
+            seller_response_due_date=now + timedelta(days=20),
+            links={},
+            created_at=now,
+            raw={"source": "internal_test_event"},
+        )
+
+    async def _ingest_event(
+        self, event: WebhookEvent
+    ) -> tuple[WebhookEventRecord, DisputeCase | None]:
+        """De-duplicate on event_id, then upsert and triage the case."""
         existing = await self._find_event(event.event_id)
         if existing is not None:
             return await self._replay(existing)
@@ -640,6 +755,15 @@ class DisputeService:
         if replay is not None:
             await self.session.refresh(case)
             return self._replay_action(replay, case)
+
+        if is_internal_test_case(case):
+            # PayPal has never seen this dispute, so any call would 404.
+            record.status = ActionStatus.SKIPPED.value
+            record.error = INTERNAL_TEST_SKIP_REASON
+            record.latency_ms = 0
+            record.response_payload = {"skipped": True, "reason": INTERNAL_TEST_SKIP_REASON}
+            await self.session.commit()
+            return record, case
 
         started = time.perf_counter()
         try:
@@ -930,6 +1054,9 @@ class DisputeService:
         containment = (case.facts_snapshot or {}).get(CONTAINMENT_SNAPSHOT_KEY)
         if containment is not None:
             snapshot[CONTAINMENT_SNAPSHOT_KEY] = containment
+        origin = (case.facts_snapshot or {}).get(DISPUTE_ORIGIN_KEY)
+        if origin is not None:
+            snapshot[DISPUTE_ORIGIN_KEY] = origin
         case.facts_snapshot = snapshot
         return decision
 
@@ -969,6 +1096,9 @@ class DisputeService:
 
     async def _refresh_from_gateway(self, case: DisputeCase) -> None:
         """Best-effort resync of stage/status/links; never fails the caller."""
+        if is_internal_test_case(case):
+            # PayPal has no record of it: asking only costs a 404 round trip.
+            return
         try:
             dispute = await self.gateway.get_dispute(case.dispute_id)
         except Exception as exc:
@@ -1062,7 +1192,7 @@ class DisputeService:
         payload = {
             key: value
             for key, value in snapshot.items()
-            if key not in (TRIAGE_SNAPSHOT_KEY, CONTAINMENT_SNAPSHOT_KEY)
+            if key not in (TRIAGE_SNAPSHOT_KEY, CONTAINMENT_SNAPSHOT_KEY, DISPUTE_ORIGIN_KEY)
         }
         if payload:
             return schemas.CaseFacts.model_validate(payload)
@@ -1073,21 +1203,6 @@ class DisputeService:
             event_count=0,
             completeness=0.0,
         )
-
-    def _signed_webhook(
-        self, dispute: PayPalDisputeRecord
-    ) -> tuple[bytes, dict[str, str]]:
-        """Sign a CUSTOMER.DISPUTE.CREATED envelope exactly like PayPal traffic."""
-        payload = self._webhook_envelope(dispute)
-        raw_body = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
-        timestamp = str(int(datetime.now(UTC).timestamp()))
-        signature = compute_signature(
-            self.settings.verdictpay_webhook_secret, timestamp, raw_body
-        )
-        return raw_body, {
-            "X-VerdictPay-Timestamp": timestamp,
-            "X-VerdictPay-Signature": signature,
-        }
 
     def _webhook_envelope(self, dispute: PayPalDisputeRecord) -> dict[str, Any]:
         """Render a PayPal-shaped CUSTOMER.DISPUTE.CREATED body for the sandbox."""

@@ -3,7 +3,8 @@
 
     uv run python scripts/run_demo.py [--port 8000] [--keep]
 
-Everything runs locally with the simulator gateway - no PayPal credentials needed.
+Uses the PayPal Sandbox credentials from .env (PAYPAL_SANDBOX_CLIENT_ID/SECRET or
+PAYPAL_CLIENT_ID/SECRET). Checkouts are real sandbox orders; no real money moves.
 """
 
 from __future__ import annotations
@@ -58,7 +59,7 @@ def main() -> None:
     env = {
         **os.environ,
         "DATABASE_URL": f"sqlite+aiosqlite:///./{relative_db}",
-        "PAYPAL_MODE": "simulator",
+        "PAYPAL_MODE": "PAYPAL_SANDBOX",
         "APP_ENV": "local",
         "PYTHONUNBUFFERED": "1",
         "LOG_LEVEL": "WARNING",

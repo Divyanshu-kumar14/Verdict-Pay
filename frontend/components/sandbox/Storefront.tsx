@@ -233,12 +233,12 @@ function buildSteps(
     {
       key: "dispute",
       index: 3,
-      title: "Await PayPal dispute",
-      subtitle: "Create dispute as sandbox buyer → webhook creates case",
+      title: "Open dispute",
+      subtitle: "Uses a PayPal webhook dispute if one arrived, otherwise opens one for this order",
       successDetail: state.dispute
-        ? STAGE_META.INQUIRY.short + " " + shortHash(state.dispute.dispute.dispute_id, 10, 4) + " · p(win) " + formatPercent(state.dispute.dispute.p_win)
+        ? STAGE_META.INQUIRY.short + " " + shortHash(state.dispute.dispute.dispute_id, 10, 4) + " · p(win) " + formatPercent(state.dispute.dispute.p_win) + (state.dispute.origin === "internal_test_event" ? " · internal test event" : " · from PayPal")
         : null,
-      action: "Check for dispute",
+      action: "Open dispute",
       status: state.disputeStatus,
       canRun: canDispute || state.disputeStatus === "error",
       run: onDispute,
@@ -356,15 +356,16 @@ export function DemoStepper({ state, onCheckout, onUsage, onDispute, onEvidence,
 
 const LEGEND_ROWS = [
   { dot: "bg-accent", label: "Gemini", detail: "claim classification and evidence drafting call the live Google API." },
-  { dot: "bg-control", label: "PayPal Sandbox", detail: "checkout, usage and the dispute webhook via the PayPal sandbox API. Test funds only." },
+  { dot: "bg-control", label: "PayPal Sandbox", detail: "orders, capture and the Disputes API call the real PayPal sandbox. Test funds only." },
+  { dot: "bg-warning", label: "Internal test dispute", detail: "when PayPal will not create the dispute, the demo builds one labelled internal_test_event; its seller actions are skipped, not sent." },
   { dot: "bg-muted/50", label: "Deterministic engine", detail: "EV, win probability and the verdict are local rules, never a model." },
 ];
 
-/** A small "Real vs simulated" legend listing which calls leave the sandbox. */
+/** A small legend listing which calls reach a real service and which stay local. */
 export function RealVsSim() {
   return (
     <div className="panel px-4 py-3 sm:px-5">
-      <p className="label">Real vs simulated</p>
+      <p className="label">What is real</p>
       <ul className="mt-2 space-y-2">
         {LEGEND_ROWS.map((row) => (
           <li key={row.label} className="flex items-start gap-2 text-xs">

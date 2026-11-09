@@ -71,6 +71,8 @@ def _settings(tmp_path, **overrides: Any) -> Settings:
         "app_env": "test",
         "database_url": f"sqlite+aiosqlite:///{tmp_path / 'aianalyze.db'}",
         "paypal_mode": "PAYPAL_SANDBOX",
+        "paypal_client_id": "test-client-abc",
+        "paypal_client_secret": "test-secret-xyz",
         "llm_mode": "gemini",
         "gemini_api_key": "test-gemini-key",
         "verdictpay_api_key": API_KEY,

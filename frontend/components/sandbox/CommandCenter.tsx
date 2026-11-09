@@ -188,8 +188,8 @@ function VerdictCard({
 
   const actionSentence = primaryAction
     ? ACTION_META[primaryAction].description +
-      " " +
-      (allowedAction ? "PayPal fee " + formatUsd(allowedAction.fee_usd) + "." : "")
+    " " +
+    (allowedAction ? "PayPal fee " + formatUsd(allowedAction.fee_usd) + "." : "")
     : blockedReason;
 
   return (
@@ -591,9 +591,9 @@ export function CommandCenter({
       const result = await api.triageDispute(detail.dispute_id);
       setTriageNote(
         "EV recomputed. " +
-          RECOMMENDATION_META[result.recommended_action].label +
-          ", p(win) " +
-          formatPercent(result.win_probability.score),
+        RECOMMENDATION_META[result.recommended_action].label +
+        ", p(win) " +
+        formatPercent(result.win_probability.score),
       );
       refreshCase();
       onCaseChanged();
@@ -637,10 +637,10 @@ export function CommandCenter({
     : null;
   const evValues = detail
     ? [
-        detail.breakdown.ev_fight_usd,
-        detail.breakdown.ev_settle_usd,
-        detail.breakdown.ev_offer_usd,
-      ]
+      detail.breakdown.ev_fight_usd,
+      detail.breakdown.ev_settle_usd,
+      detail.breakdown.ev_offer_usd,
+    ]
     : [];
   const maxAbs =
     evValues.length > 0
@@ -685,7 +685,7 @@ export function CommandCenter({
           <EmptyState
             icon={<ShieldCheck size={14} aria-hidden />}
             title="No dispute on file"
-            description="Run the steps on the left to open an inquiry through the PayPal webhook path. Simulator mode: no funds move."
+            description="Run the steps on the left to open an inquiry for this order. PayPal Sandbox: test funds only."
             action={
               <Button size="sm" variant="primary" onClick={onRunStep1}>
                 Run step 1
@@ -752,7 +752,7 @@ export function CommandCenter({
                   USD, net of non-refundable fees, p(win) {formatPercent(detail.p_win)}
                 </span>
               </div>
-                            <EvComparison
+              <EvComparison
                 breakdown={detail.breakdown}
                 stage={detail.stage}
                 bestKey={bestKey}

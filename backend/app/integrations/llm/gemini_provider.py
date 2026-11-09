@@ -55,8 +55,13 @@ class GeminiNarrativeProvider:
         try:
             if self._client is None or not self._client.available:
                 raise RuntimeError("gemini unavailable")
+            # The provider contract passes facts as a plain mapping; the prompt
+            # builder and the validator both need the typed model.
+            facts = self._hydrate_facts(request)
+            if facts is None:
+                raise RuntimeError("fact pack could not be rehydrated")
             user = DRAFT_USER_TEMPLATE.format(
-                fact_pack=facts_as_prompt(request.facts),
+                fact_pack=facts_as_prompt(facts),
                 reason_code=request.reason_code,
                 stage=request.stage,
                 merchant=request.merchant_name,
@@ -68,7 +73,7 @@ class GeminiNarrativeProvider:
             if not payload:
                 raise RuntimeError("gemini returned no payload")
             narrative = str(payload.get("narrative", "") or "")
-            ok, _ = validate_narrative(narrative, request.facts)
+            ok, _ = validate_narrative(narrative, facts)
             if not ok:
                 raise RuntimeError("model narrative failed validation")
             return truncate_narrative(narrative, request.max_chars)

@@ -30,6 +30,8 @@ from app.api import schemas
 from app.api.deps import (
     GatewayDep,
     MerchantDep,
+    NarrativeDep,
+    SearchDep,
     SessionDep,
     SettingsDep,
 )
@@ -44,15 +46,21 @@ from app.services.demo_run_service import (
     STEP_APPROVAL,
     STEP_CAPTURE,
     STEP_CHECKOUT,
+    STEP_DISPUTE,
     STEP_DONE,
     STEP_EVIDENCE,
     STEP_FAILED,
     STEP_TELEMETRY,
+    STEP_TRIAGE,
     DemoRunService,
     validated_run_id,
 )
 from app.services.dispute_service import (
+    TRIAGE_SNAPSHOT_KEY,
+    DisputeService,
+    containment_snapshot,
     quantize_money,
+    to_dispute_summary,
     to_transaction_out,
     utc_aware,
 )
@@ -457,6 +465,7 @@ async def get_order(
             )
         raise
 
+    previous_stage = _stage(row.lifecycle_stage)
     stage = _order_stage(order)
     row.status = order.status or stage
     row.lifecycle_stage = stage
@@ -467,6 +476,20 @@ async def get_order(
         row.paypal_debug_id = order.paypal_debug_id
     row.raw_response = dict(order.raw or {})
     await session.commit()
+
+    if stage == "APPROVED" and previous_stage == "CREATED":
+        # The buyer approved in the PayPal UI. This read is where the API first
+        # learns it, so the run's approval step is recorded here.
+        run = await _run_record(session, merchant_id=merchant.id, run_id=row.run_id)
+        if run is not None:
+            await runs.touch(
+                run,
+                step=STEP_APPROVAL,
+                order_stage=stage,
+                payer_id=row.payer_id,
+                amount=row.amount_usd,
+                currency=row.currency,
+            )
 
     return _order_status(row, settings=settings)
 
@@ -707,6 +730,81 @@ async def simulate_usage(
         events=[to_event_out(result.row) for result in results],
         totals={"logins": payload.logins, "tokens": payload.tokens, "assets": 1},
         run_id=run_id,
+    )
+
+
+# --------------------------------------------------------------------------- dispute
+@router.post("/sandbox/dispute", response_model=schemas.DisputeSimulationResponse)
+async def open_dispute(
+    payload: schemas.DisputeSimulationRequest,
+    merchant: MerchantDep,
+    session: SessionDep,
+    settings: SettingsDep,
+    gateway: GatewayDep,
+    narrative: NarrativeDep,
+    search: SearchDep,
+) -> schemas.DisputeSimulationResponse:
+    """Open a dispute on a demo order without waiting for a PayPal webhook.
+
+    PayPal cannot deliver webhooks to a judge's localhost, so this is how the
+    dispute, AI and dossier steps stay reachable. The response's ``origin``
+    says whether PayPal created the dispute or the demo built it locally.
+    """
+    payer_id = _validated_payer_id(payload.payer_id) or settings.demo_payer_id
+    order_id = _validated_order_id(payload.order_id, default=settings.demo_order_id)
+    amount = (
+        quantize_money(payload.amount_usd)
+        if payload.amount_usd is not None
+        else DEFAULT_DISPUTE_AMOUNT
+    )
+    run_id = validated_run_id(payload.run_id)
+    runs = _runs(session, settings, merchant)
+    run = await _run_record(session, merchant_id=merchant.id, run_id=run_id)
+    if run_id is not None and run is None:
+        raise NotFoundError(f"Demo run {run_id} was not found.")
+    service = DisputeService(
+        session,
+        settings=settings,
+        gateway=gateway,
+        narrative=narrative,
+        search=search,
+        merchant_id=merchant.id,
+    )
+    record, case, origin = await service.open_sandbox_dispute(
+        payer_id=payer_id,
+        order_id=order_id,
+        reason_code=payload.reason_code.value,
+        stage=payload.stage,
+        channel=payload.channel,
+        amount=amount,
+        buyer_claim_text=payload.claim_text,
+    )
+    if run_id is not None:
+        # The tag that makes this case invisible to every other run.
+        case.run_id = run_id
+        await session.commit()
+        await session.refresh(case)
+        if run is not None:
+            await runs.touch(
+                run,
+                payer_id=payer_id,
+                order_id=order_id,
+                amount=case.amount_usd,
+                currency=case.currency,
+                steps={STEP_DISPUTE: STEP_DONE, STEP_TRIAGE: STEP_DONE},
+            )
+    logger.info(
+        "sandbox_dispute",
+        extra=log_context(
+            merchant_id=merchant.id, run_id=run_id, dispute_id=case.dispute_id, origin=origin
+        ),
+    )
+    return schemas.DisputeSimulationResponse(
+        dispute=to_dispute_summary(case),
+        webhook_event_id=record.event_id,
+        triage_triggered=bool(case.facts_snapshot.get(TRIAGE_SNAPSHOT_KEY)),
+        containment=containment_snapshot(case),
+        origin=origin,
     )
 
 
