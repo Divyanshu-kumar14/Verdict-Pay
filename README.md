@@ -77,8 +77,9 @@ Three processes, no broker, no cloud dependency on the demo path.
 - **Backend** — FastAPI on Python 3.12, SQLAlchemy 2 async, SQLite by default (Postgres optional via
   `DATABASE_URL`). Pydantic v2 schemas, a single error envelope `{"error": {code, message, details,
   request_id}}`, request-id middleware, a body-size cap and an in-process rate limiter.
-- **SDK** — `@verdictpay/sdk`, a typed client that canonicalises payloads, signs them, and submits
-  telemetry batches.
+- **SDK** — [`@verdictpay/sdk`](https://www.npmjs.com/package/@verdictpay/sdk) on npm
+  (`npm install @verdictpay/sdk`), a typed server-side client that signs and submits telemetry
+  batches. Source and docs: [packages/verdictpay-sdk](packages/verdictpay-sdk).
 
 ### Gateway modes
 
