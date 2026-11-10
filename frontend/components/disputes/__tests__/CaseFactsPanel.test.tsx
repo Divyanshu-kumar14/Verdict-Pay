@@ -81,8 +81,12 @@ describe("CaseFactsPanel CE 3.0 badge states", () => {
     expect(screen.getByText("CE 3.0 not eligible")).toBeInTheDocument();
   });
 
-  it("shows no CE 3.0 badge when ce3_proof is null", () => {
+  it("shows no CE 3.0 status badge when ce3_proof is null", () => {
     render(<CaseFactsPanel facts={makeFacts(null)} />);
-    expect(screen.queryByText(/CE 3.0/)).not.toBeInTheDocument();
+    // The panel always renders "CE 3.0 window/matches" labels; assert specifically
+    // that none of the three status badge texts appear.
+    expect(screen.queryByText("CE 3.0 verified")).not.toBeInTheDocument();
+    expect(screen.queryByText("CE 3.0 check failed")).not.toBeInTheDocument();
+    expect(screen.queryByText("CE 3.0 not eligible")).not.toBeInTheDocument();
   });
 });

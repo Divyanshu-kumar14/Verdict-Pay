@@ -19,7 +19,7 @@ const baseDetail: DisputeDetail = {
   ev_settle_usd: -99.0,
   ev_offer_usd: -29.7,
   telemetry_completeness: 1,
-  recommended_action: "DEFLECT_INQUIRY",
+  recommended_action: "MAKE_OFFER",
   subscription_suspended: false,
   dossier_available: false,
   seller_response_due_date: "2026-11-16T00:00:00Z",

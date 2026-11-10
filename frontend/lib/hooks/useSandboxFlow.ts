@@ -456,7 +456,9 @@ export function useSandboxFlow(): SandboxFlow {
     try {
       const manifest = await api.getDossierManifest(dispute.dispute.dispute_id, signal);
       if (attempt !== attemptRef.current) return;
-      setState((prev) => ({ ...prev, dossierManifest: manifest, dossierStatus: "success" }));
+      // Manifest is ready but verification is still in flight — stay "running"
+      // so the stepper never flashes "Verification failed" for a pending check.
+      setState((prev) => ({ ...prev, dossierManifest: manifest }));
       appendLog(
         "ok",
         `dossier manifest ready · sha256: ${manifest.sha256.slice(0, 16)}… · ${manifest.size_bytes} bytes · chain_valid: ${manifest.chain_valid} · events: ${manifest.event_count}`,
@@ -466,13 +468,22 @@ export function useSandboxFlow(): SandboxFlow {
       appendLog("info", "GET /api/v1/disputes/{id}/dossier/verify · re-render from frozen snapshot");
       const verification = await api.verifyDossier(dispute.dispute.dispute_id, signal);
       if (attempt !== attemptRef.current) return;
-      setState((prev) => ({ ...prev, dossierVerify: verification }));
       if (verification.verified) {
+        setState((prev) => ({ ...prev, dossierVerify: verification, dossierStatus: "success" }));
         appendLog("ok", "Dossier verified: re-rendered bytes match frozen snapshot SHA-256");
         Object.entries(verification.checks).forEach(([check, passed]) => {
           appendLog(passed ? "ok" : "warn", `  check ${check}: ${passed ? "pass" : "fail"}`);
         });
       } else {
+        setState((prev) => ({
+          ...prev,
+          dossierVerify: verification,
+          dossierStatus: "error",
+          error: toApiError({
+            code: "dossier_verification_failed",
+            message: "Dossier verification FAILED: re-rendered bytes differ from the frozen snapshot.",
+          }),
+        }));
         appendLog("error", `Dossier verification FAILED: expected ${verification.expected_sha256?.slice(0, 16)}…, actual ${verification.actual_sha256?.slice(0, 16)}…`);
       }
     } catch (caught) {

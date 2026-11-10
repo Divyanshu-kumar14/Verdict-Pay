@@ -223,9 +223,10 @@ curl -s localhost:8000/api/v1/health
 | Seller action | `SKIPPED` for `internal_test_event` (nothing sent to PayPal); `EXECUTED` for `paypal_sandbox` | same |
 | Telemetry | 4 new events, `logins=15 · tokens=42,000 · assets=1`, chain verified | same, 42,000 tokens |
 | Dossier | case room → `/dossier.pdf`, `%PDF`, 3 pages | 7 KB, `%PDF` verified; uploaded via `multipart/related` for a `paypal_sandbox` case, upload `SKIPPED` for `internal_test_event` |
-| Reporting | queue 6 · exposure `$497.00` · fees avoided `$15.00` · ratio `1.37%` vs `1.50%` | queue 6 · exposure `$497.00` · fees avoided `$15.00` · ratio `1.37%` vs `1.50%` |
+| Reporting | queue 6 · exposure `$497.00` · fees avoided `$15.00` · ratio `1.37%` vs `1.50%` | queue 8 · exposure `$695.00` · fees avoided `$15.00` |
 
-The CLI files a second $99 claim and uploads a dossier for it; exposure and fees-avoided match the UI path because the extra claim escalates rather than deflecting.
+The CLI adds 2 E2E $99 cases on top of the 6 seeded cases (its escalated claim + its own dispute):
+8 cases / $695 exposure. Fees avoided stays $15.00 — the one seeded historical inquiry.
 Latency and timestamps are the only moving values; EV and p(win) are deterministic.
 
 ## 6. Compliance checklist

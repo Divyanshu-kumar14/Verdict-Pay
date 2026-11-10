@@ -87,7 +87,7 @@ export function ActionRail({
       case "MAKE_OFFER":
         return (
           "Settle at " +
-          formatUsd(detail.breakdown.ev_offer_usd > 0 ? -detail.breakdown.ev_offer_usd : 0) +
+          formatUsd(Math.abs(detail.breakdown.ev_offer_usd)) +
           " — a " +
           formatPercent(detail.breakdown.offer_ratio ?? 0, 0) +
           " goodwill offer costing " +

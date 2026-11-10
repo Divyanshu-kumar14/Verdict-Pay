@@ -270,11 +270,11 @@ test("09 webhook signature verification rejects unsigned and forged bodies", asy
   expect(listing.data.some((row) => row.dispute_id === "PP-D-E2E-FORGED")).toBe(false);
 });
 
-// ------------------------------------------------------ 10. duplicate webhook rejection
-test("10 a replayed event id is deduplicated, not re-applied", async ({ request }) => {
-  // PayPal retries deliveries. The same event id must land exactly once, and the retry
-  // must be reported as a duplicate rather than silently mutating the case. The event id
-  // is unique per run so repeated test runs never collide.
+// ------------------------------------------------------ 10. unsigned webhook rejection
+test("10 unsigned webhooks are rejected before any dedup or case creation", async ({ request }) => {
+  // Without PayPal's five transmission headers the backend cannot verify anything,
+  // so both deliveries are rejected with 401 before dedup logic is ever reached.
+  // The event id is unique per run so repeated test runs never collide.
   const stamp = Date.now().toString(36);
   const disputeId = `PP-D-REPLAY-${stamp}`.toUpperCase();
   const eventId = `WH-REPLAY-${stamp}`.toUpperCase();

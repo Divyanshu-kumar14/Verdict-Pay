@@ -100,7 +100,7 @@ which recomputes every link and reports each break by sequence number.
 | Field | Expected |
 |---|---|
 | Case id | a `PP-D-TEST-…` id (`internal_test_event`), or PayPal's id (`paypal_sandbox`) |
-| Reason / stage / channel | SNAD · INQUIRY · INTERNAL |
+| Reason / stage / channel | INR · INQUIRY · INTERNAL (the UI omits `reason_code`, so the API default `MERCHANDISE_OR_SERVICE_NOT_RECEIVED` applies) |
 | Claim amount | `$99.00` |
 | Completeness | `100%` |
 | `origin` | `internal_test_event` with a standard sandbox app |
@@ -123,8 +123,8 @@ the Disputes API is labelled `paypal_sandbox` instead, and its actions call PayP
 | EV · Fight | `-$58.80` |
 | EV · Settle | `-$99.00` |
 | EV · Offer | `-$29.70` |
-| Ratio | `1.3728% < 1.5000%`, `ratio_relation=below`, `threshold_crossed_now=false` |
-| Penalty | `$45.00` — an INQUIRY that crosses the 1.5% cliff pays the ($30 − $15) × 3 penalty; a seeded inquiry below the line has `$0.00` |
+| Ratio | `1.3728% → 1.7923%`, `ratio_relation=below`, `threshold_crossed_now=true` |
+| Penalty | `$45.00` — this $99 INQUIRY crosses the 1.5% line, so fighting prices the ($30 − $15) × 3 inquiry penalty |
 | Policy | `DEFLECT_INQUIRY` |
 | Decision comparison | policy choice `Deflect inquiry`; cheapest modelled loss `Make offer` |
 
@@ -180,14 +180,14 @@ confused on screen.
 ## CLI variant: `make demo`
 
 ```
-[0] Health + gateway mode              ok v0.1.1 - gateway=PAYPAL_SANDBOX - demo_mode=True
+[0] Health + gateway mode              ok v0.1.0 - gateway=PAYPAL_SANDBOX - demo_mode=True
 [1] Buyer checks out the Pro plan      ok order=<paypal-assigned> sub=None payer=YRZ829104KLA
 [2] Buyer burns 42k tokens…            ok 4 events - chain … - 42000 tokens
 [3] Buyer files an INR dispute         ok <dispute_id> - DEFLECT_INQUIRY - origin=internal_test_event - ingest …ms
 [4] Command center loads the case room ok p(win)=0.80 - EV_fight=$-58.80 - EV_offer=$-29.70 - 5/6 signals
 [5] Zero-fee action                    ok SEND_MESSAGE skipped in 0ms
 [6] Claim + dossier + upload           ok 7KB dossier - %PDF verified - upload skipped (internal test dispute, unknown to PayPal)
-[7] Reporting                          ok 6 cases - $497.00 exposure - $15.00 fees avoided - ratio 1.3728% vs 1.5000%
+[7] Reporting                          ok 8 cases - $695.00 exposure - $15.00 fees avoided
 
 ALL 26 ASSERTIONS PASSED - the 60-second demo is real.
 ```
@@ -196,10 +196,11 @@ ALL 26 ASSERTIONS PASSED - the 60-second demo is real.
 `.env`, runs `backend/scripts/e2e_demo.py` and exits. With a `paypal_sandbox` origin, steps 5 and 6
 print `executed` and `uploaded via multipart/related` instead. The
 CLI files **INR** (multiplier 1.00 → p(win) 0.80, EV_fight -$58.80 on a $99 claim that crosses the
-1.5% cliff with the $45.00 inquiry penalty); the UI button files **SNAD**
-(multiplier 0.90 → p(win) 0.90, EV_fight -$41.40 when below the cliff). Both are computed live from the frozen model and
-neither is hard-coded. The CLI also escalates a second $99 claim to CHARGEBACK and submits the
-dossier, which is why it ends at 6 cases / $497 instead of the bare seed queue.
+1.5% cliff with the $45.00 inquiry penalty, 5/6 signals — Visa CE 3.0 is card-only); the UI button
+files **SNAD** (multiplier 0.90 → p(win) 0.90). Both are computed live from the frozen model and
+neither is hard-coded. The CLI run adds 2 E2E $99 cases on top of the 6 seeded cases (its escalated
+claim + its own dispute), which is why it ends at 8 cases / $695 exposure instead of the bare
+6 / $497 seed queue. Fees avoided stays $15.00 — the one seeded historical inquiry.
 
 ## If something looks wrong
 

@@ -64,7 +64,7 @@ const WEBHOOK_STEPS: SignalStep[] = [
   { id: "event", label: "PayPal Event", state: "active", meta: "inbound payload + transmission headers" },
   { id: "signature", label: "Signature Verification", state: "pending", meta: "verify-webhook-signature endpoint" },
   { id: "webhook_id", label: "Webhook ID", state: "pending", meta: "PAYPAL_SANDBOX_WEBHOOK_ID / PAYPAL_WEBHOOK_ID" },
-  { id: "replay", label: "Replay Protection", state: "pending", meta: "transmission_id must be unseen" },
+  { id: "replay", label: "Replay Protection", state: "pending", meta: "event_id must be unseen" },
   { id: "terminal", label: "Accepted / Rejected", state: "failed", meta: "unsigned or invalid traffic → rejected" },
 ];
 
@@ -778,7 +778,7 @@ export function SettingsPanel() {
               <div className="grid gap-4 sm:grid-cols-2">
                 <Field label="Algorithm" value="PayPal verify-webhook-signature" mono />
                 <Field label="Webhook id" value="PAYPAL_SANDBOX_WEBHOOK_ID / PAYPAL_WEBHOOK_ID" mono />
-                <Field label="Replay cache" value="transmission_id unique" mono />
+                <Field label="Replay cache" value="event_id unique" mono />
                 <Field label="Unsigned traffic" value="rejected" tone="negative" />
               </div>
 
