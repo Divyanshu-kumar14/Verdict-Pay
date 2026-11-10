@@ -2,6 +2,7 @@
 
 import { CommandCenter } from "@/components/sandbox/CommandCenter";
 import { DemoPipeline } from "@/components/sandbox/DemoPipeline";
+import { DossierVerificationCard } from "@/components/sandbox/DossierVerificationCard";
 import { DemoStepper, MerchantCheckout, RealVsSim } from "@/components/sandbox/Storefront";
 import { StepLog } from "@/components/sandbox/StepLog";
 import { PageHeader } from "@/components/PageHeader";
@@ -207,6 +208,12 @@ export function SandboxWorkspace() {
       />
 
       <DemoPipeline steps={pipelineSteps} />
+
+      <DossierVerificationCard
+        verification={flow.state.dossierVerify}
+        onReverify={flow.runDossier}
+        disabled={flow.state.dossierStatus === "running"}
+      />
 
       <div className="grid items-start gap-6 lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]">
         <div className="min-w-0 space-y-4 lg:sticky lg:top-[72px] lg:self-start">

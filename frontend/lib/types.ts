@@ -34,11 +34,24 @@ export const DISPUTE_STAGES = [
   "INQUIRY",
   "CHARGEBACK",
   "PRE_ARBITRATION",
+  "ARBITRATION",
   "RESOLVED",
   "CLOSED",
 ] as const;
 export type DisputeStage = (typeof DISPUTE_STAGES)[number];
 export const DisputeStageSchema = z.enum(DISPUTE_STAGES);
+
+export const PAYMENT_RAILS = ["PAYPAL_WALLET", "UNBRANDED_CARD"] as const;
+export type PaymentRail = (typeof PAYMENT_RAILS)[number];
+export const PaymentRailSchema = z.enum(PAYMENT_RAILS);
+/** Where a number came from: live PayPal sandbox vs the simulated card-network feed. */
+export const SOURCE_PLANES = [
+  "LIVE_PAYPAL_SANDBOX",
+  "SIMULATED_CARD_NETWORK_FEED",
+  "INTERNAL_TEST_EVENT",
+] as const;
+export type SourcePlane = (typeof SOURCE_PLANES)[number];
+export const SourcePlaneSchema = z.enum(SOURCE_PLANES);
 
 export const DISPUTE_CHANNELS = ["INTERNAL", "EXTERNAL"] as const;
 export type DisputeChannel = (typeof DISPUTE_CHANNELS)[number];
@@ -78,6 +91,8 @@ export const DISPUTE_ACTIONS = [
   "MAKE_OFFER",
   "ACCEPT_CLAIM",
   "PROVIDE_EVIDENCE",
+  "ESCALATE",
+  "APPEAL",
 ] as const;
 export type DisputeAction = (typeof DISPUTE_ACTIONS)[number];
 export const DisputeActionSchema = z.enum(DISPUTE_ACTIONS);
@@ -366,6 +381,7 @@ export type UsageRequestInput = {
   logins?: number;
   tokens?: number;
   export_name?: string;
+  plan?: "pro" | "scale";
   client_ip?: string;
   device_fingerprint?: string;
 };
@@ -430,8 +446,25 @@ export const EvBreakdownSchema = z.object({
   high_volume_fee_usd: moneySchema,
   standard_fee_usd: moneySchema,
   penalty_ratio_usd: moneySchema,
+  fee_tier_usd: moneySchema.default(15),
+  accept_fee_usd: moneySchema.default(0),
+  win_fee_usd: moneySchema.default(0),
+  fight_fee_usd: moneySchema.default(15),
+  fee_reimbursable_on_win: z.boolean().default(true),
+  sla_response_days: z.number().int().default(10),
   ratio_before: z.number(),
   ratio_after: z.number(),
+  /** Exact ratios: integer parts-per-million (15000 = 1.5%) plus six-place strings. */
+  ratio_before_ppm: z.number().int().default(0),
+  ratio_after_ppm: z.number().int().default(0),
+  ratio_threshold_ppm: z.number().int().default(15000),
+  ratio_before_str: z.string().default("0.000000"),
+  ratio_after_str: z.string().default("0.000000"),
+  net_sales_minor_3m: z.number().int().default(0),
+  disputed_amount_minor_3m: z.number().int().default(0),
+  payment_rail: PaymentRailSchema.default("PAYPAL_WALLET"),
+  hvd_countable: z.boolean().default(true),
+  source_plane: SourcePlaneSchema.default("LIVE_PAYPAL_SANDBOX"),
   /**
    * Threshold metadata: the policy line the backend actually scored against,
    * plus a machine-checkable verdict. ``ratio_relation`` is authoritative —
@@ -487,6 +520,19 @@ export const RationaleItemSchema = z.object({
 });
 export type RationaleItem = z.infer<typeof RationaleItemSchema>;
 
+/** Strict Visa CE 3.0 proof; only computed for UNBRANDED_CARD + reason 10.4. */
+export const Ce3ProofSchema = z.object({
+  eligible: z.boolean(),
+  verified: z.boolean(),
+  veto_code: z.string().nullable(),
+  matched_prior_orders: z.array(z.string()),
+  shared_anchors: z.array(z.string()),
+  window_seconds: z.array(z.number().int()),
+  sha256_manifest: z.string().nullable(),
+  claim_manifest: z.record(z.unknown()).nullable().optional(),
+});
+export type Ce3Proof = z.infer<typeof Ce3ProofSchema>;
+
 export const CaseFactsSchema = z.object({
   payer_id: z.string(),
   chain_valid: z.boolean(),
@@ -509,6 +555,9 @@ export const CaseFactsSchema = z.object({
   response_due_date: isoDateTimeSchema.nullable(),
   ce3_matches: z.array(z.record(z.unknown())),
   ce3_window_days: z.number().int(),
+  ce3_proof: Ce3ProofSchema.nullable().default(null),
+  payment_rail: z.string().default("PAYPAL_WALLET"),
+  external_reason_code: z.string().nullable().default(null),
   signals: z.record(z.boolean()),
 });
 export type CaseFacts = z.infer<typeof CaseFactsSchema>;
@@ -524,6 +573,12 @@ export const ActionRecordSchema = z.object({
 export type ActionRecord = z.infer<typeof ActionRecordSchema>;
 
 export const DisputeSummarySchema = z.object({
+  payment_rail: PaymentRailSchema.default("PAYPAL_WALLET"),
+  external_reason_code: z.string().nullable().default(null),
+  amount_minor: z.number().int().default(0),
+  source_plane: SourcePlaneSchema.default("LIVE_PAYPAL_SANDBOX"),
+  source_badge: z.string().default("[LIVE PAYPAL SANDBOX]"),
+  sla_response_days: z.number().int().default(10),
   dispute_id: z.string(),
   /** The isolated judge run this case belongs to; null for non-demo records. */
   run_id: z.string().nullable().default(null),
@@ -656,10 +711,51 @@ export const HighVolumeStatusSchema = z.object({
   threshold: z.number(),
   sales_3mo: z.number().int(),
   disputes_3mo: z.number().int(),
+  ratio_ppm: z.number().int().default(0),
+  threshold_ppm: z.number().int().default(15000),
+  ratio_str: z.string().default("0.000000"),
+  net_sales_minor_3m: z.number().int().default(0),
+  disputed_amount_minor_3m: z.number().int().default(0),
+  amount_until_cliff_minor: z.number().int().default(0),
+  active_fee_tier_usd_cents: z.number().int().default(1500),
+  fee_reimbursable_on_win: z.boolean().default(true),
+  sla_response_days: z.number().int().default(10),
+  window_start: isoDateTimeSchema.nullable().default(null),
+  window_end: isoDateTimeSchema.nullable().default(null),
 });
 export type HighVolumeStatus = z.infer<typeof HighVolumeStatusSchema>;
 
+/** Visa VAMP + Mastercard ECP from the simulated acquirer feed (never live data). */
+export const VampStatusSchema = z.object({
+  month: z.string().nullable(),
+  tc05_settled_cnp: z.number().int(),
+  tc40_fraud_count: z.number().int(),
+  tc15_dispute_count: z.number().int(),
+  ce3_remedied_tc15: z.number().int(),
+  dual_counted_events: z.number().int(),
+  combined_events: z.number().int(),
+  monthly_floor_events: z.number().int(),
+  ratio_ppm: z.number().int(),
+  ratio_str: z.string(),
+  threshold_ppm: z.number().int(),
+  excessive_enforcement_active: z.boolean(),
+  projected_vamp_fines_usd_cents: z.number().int(),
+  projected_vamp_fines_str: z.string(),
+  events_until_cliff: z.number().int(),
+  ecp_ratio_ppm: z.number().int(),
+  ecp_threshold_ppm: z.number().int(),
+  ecp_warning: z.boolean(),
+  ecp_breached: z.boolean(),
+  mc_chargebacks: z.number().int(),
+  mc_prior_month_settled: z.number().int(),
+  source_plane: z.literal("SIMULATED_CARD_NETWORK_FEED"),
+  badge: z.string(),
+});
+export type VampStatus = z.infer<typeof VampStatusSchema>;
+
 export const ReportingSummarySchema = z.object({
+  vamp: VampStatusSchema.nullable().default(null),
+  rules_manifest_sha256: z.string().nullable().default(null),
   total_cases: z.number().int(),
   open_cases: z.number().int(),
   in_inquiry: z.number().int(),
@@ -733,6 +829,7 @@ export const AnalyzeResponseSchema = z.object({
   provenance: AnalyzeProvenanceSchema,
   degraded: z.boolean(),
   degraded_reason: z.string().nullable(),
+  veto_codes: z.array(z.string()).default([]),
 });
 export type AnalyzeResponse = z.infer<typeof AnalyzeResponseSchema>;
 
@@ -777,3 +874,70 @@ export const DossierVerificationSchema = z.object({
   checks: z.record(z.boolean()).default({}),
 });
 export type DossierVerification = z.infer<typeof DossierVerificationSchema>;
+
+
+/* ----------------------------------------------------------------- Veto Lab */
+export const SentinelVerdictSchema = z
+  .object({
+    verdict: z.enum(["ALLOW", "VETO"]),
+    exit_code: z.union([z.literal(0), z.literal(2)]),
+    veto_codes: z.array(z.string()),
+    reasons: z.array(z.string()).default([]),
+    proposal_id: z.string().default(""),
+    dispute_id: z.string().default(""),
+    proposed_action: z.string().default(""),
+    candidate_mode: z.string().default("HARDENED"),
+    manifest_sha256: z.string(),
+    banner: z.string().default(""),
+    audit_id: z.string().optional(),
+    chain_hash: z.string().nullable().optional(),
+    portfolio_ev_analysis: z.record(z.unknown()).nullable().optional(),
+    ce3_proof: z.record(z.unknown()).nullable().optional(),
+    hmac_approval_token: z
+      .object({
+        proposal_id: z.string(),
+        action: z.string(),
+        dispute_id: z.string(),
+        expires_at_epoch: z.number().int(),
+        sig_hmac_sha256: z.string(),
+      })
+      .passthrough()
+      .nullable()
+      .default(null),
+  })
+  .passthrough();
+export type SentinelVerdict = z.infer<typeof SentinelVerdictSchema>;
+
+const VetoCaseSchema = z
+  .object({
+    id: z.string().optional(),
+    axis: z.string().optional(),
+    title: z.string().optional(),
+    source_plane: z.string().optional(),
+    unguarded: z.record(z.unknown()).nullable().optional(),
+    shield: z.record(z.unknown()).nullable().optional(),
+    sentinel: SentinelVerdictSchema,
+    hardened: SentinelVerdictSchema.optional(),
+  })
+  .passthrough();
+
+export const VetoLabResponseSchema = z.object({
+  generated_at: z.string(),
+  rules_manifest_sha256: z.string(),
+  paypal_probe: z.record(z.unknown()),
+  controls: z.array(
+    z
+      .object({
+        id: z.string(),
+        title: z.string(),
+        cases: z.array(VetoCaseSchema).optional(),
+        worker: z.record(z.unknown()).optional(),
+        thread: z.array(z.record(z.unknown())).nullable().optional(),
+        unguarded: z.record(z.unknown()).optional(),
+        sentinel: SentinelVerdictSchema.optional(),
+        hardened: SentinelVerdictSchema.optional(),
+      })
+      .passthrough(),
+  ),
+});
+export type VetoLabResponse = z.infer<typeof VetoLabResponseSchema>;

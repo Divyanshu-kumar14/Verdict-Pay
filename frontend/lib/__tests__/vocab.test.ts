@@ -103,8 +103,8 @@ describe("REASON_META", () => {
 
 // ------------------------------------------------ STAGE_META
 describe("STAGE_META", () => {
-  it("has all 5 stages", () => {
-    expect(Object.keys(STAGE_META)).toHaveLength(5);
+  it("has all 6 stages", () => {
+    expect(Object.keys(STAGE_META)).toHaveLength(6);
   });
 
   it("contains expected short/label/tone for each stage", () => {
@@ -220,8 +220,8 @@ describe("RECOMMENDATION_META", () => {
 
 // ------------------------------------------------ ACTION_META
 describe("ACTION_META", () => {
-  it("has all 4 actions", () => {
-    expect(Object.keys(ACTION_META)).toHaveLength(4);
+  it("has all 6 actions", () => {
+    expect(Object.keys(ACTION_META)).toHaveLength(6);
   });
 
   it("contains expected labels and descriptions", () => {

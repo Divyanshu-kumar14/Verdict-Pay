@@ -13,12 +13,15 @@ class TelemetryEventType(StrEnum):
     ASSET_DELIVERED = "ASSET_DELIVERED"
     USAGE_METERED = "USAGE_METERED"
     AI_GENERATION = "AI_GENERATION"
+    # Server-only: Sentinel ALLOW/VETO verdicts on the SENTINEL-AUDIT chain.
+    SENTINEL_VERDICT = "SENTINEL_VERDICT"
 
 
 class DisputeStage(StrEnum):
     INQUIRY = "INQUIRY"
     CHARGEBACK = "CHARGEBACK"
     PRE_ARBITRATION = "PRE_ARBITRATION"
+    ARBITRATION = "ARBITRATION"
     RESOLVED = "RESOLVED"
     CLOSED = "CLOSED"
 
@@ -56,6 +59,8 @@ class DisputeAction(StrEnum):
     MAKE_OFFER = "MAKE_OFFER"
     ACCEPT_CLAIM = "ACCEPT_CLAIM"
     PROVIDE_EVIDENCE = "PROVIDE_EVIDENCE"
+    ESCALATE = "ESCALATE"
+    APPEAL = "APPEAL"
 
 
 class ActionStatus(StrEnum):

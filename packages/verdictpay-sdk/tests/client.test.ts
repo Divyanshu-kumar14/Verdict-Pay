@@ -691,3 +691,53 @@ describe("hardening", () => {
     expect(headers["x-verdictpay-signature"]).toBe(expected);
   });
 });
+
+describe("typed helpers forward metadata and PayPal ids", () => {
+  it("carries run_id metadata and order/subscription ids on every helper", async () => {
+    const { client, calls } = createClient({ batchSize: 100 });
+    const metadata = { run_id: "demo-run-123" };
+    client.trackCheckout({
+      paypalPayerId: PAYER,
+      paypalOrderId: ORDER,
+      tosVersion: "v2.4",
+      tosContentSha256: SHA,
+      userEmail: "buyer@example.com",
+      metadata,
+    });
+    client.trackDelivery({
+      paypalPayerId: PAYER,
+      paypalOrderId: ORDER,
+      paypalSubscriptionId: SUBSCRIPTION,
+      resourceId: "export.xlsx",
+      resourceSha256: SHA,
+      metadata,
+    });
+    client.trackUsage({
+      paypalPayerId: PAYER,
+      paypalOrderId: ORDER,
+      paypalSubscriptionId: SUBSCRIPTION,
+      units: 10,
+      metadata,
+    });
+    await client.flush();
+    const body = JSON.parse(String(calls[0]?.init.body)) as {
+      events: Array<{ metadata: Record<string, unknown>; paypal_order_id?: string; paypal_subscription_id?: string }>;
+    };
+    expect(body.events).toHaveLength(3);
+    for (const event of body.events) {
+      expect(event.metadata.run_id).toBe("demo-run-123");
+      expect(event.paypal_order_id).toBe(ORDER);
+    }
+    expect(body.events[0]?.metadata.user_email).toBe("buyer@example.com");
+    expect(body.events[1]?.paypal_subscription_id).toBe(SUBSCRIPTION);
+    expect(body.events[2]?.paypal_subscription_id).toBe(SUBSCRIPTION);
+  });
+
+  it("rejects non-object metadata on helpers", () => {
+    const { client } = createClient();
+    const error = captureError(() =>
+      client.trackUsage({ paypalPayerId: PAYER, units: 1, metadata: "x" as unknown as Record<string, unknown> }),
+    );
+    expectSdkError(error, "validation_error");
+  });
+});

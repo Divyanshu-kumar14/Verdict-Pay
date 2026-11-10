@@ -70,6 +70,7 @@ export const STAGE_META: Record<DisputeStage, Meta> = {
   INQUIRY: { short: "Inquiry", label: "Inquiry", tone: "warning" },
   CHARGEBACK: { short: "Chargeback", label: "Chargeback", tone: "negative" },
   PRE_ARBITRATION: { short: "Pre-arbitration", label: "Pre-arbitration", tone: "negative" },
+  ARBITRATION: { short: "Arbitration", label: "Arbitration", tone: "negative" },
   RESOLVED: { short: "Resolved", label: "Resolved", tone: "positive" },
   CLOSED: { short: "Closed", label: "Closed", tone: "neutral" },
 };
@@ -160,6 +161,16 @@ export const ACTION_META: Record<
     label: "Provide evidence",
     description: "Upload the signed seller-protection dossier to PayPal.",
     tone: "positive",
+  },
+  ESCALATE: {
+    label: "Escalate",
+    description: "Escalate the inquiry to a PayPal claim. The Sentinel blocks it when it tips a 1.5% cliff.",
+    tone: "negative",
+  },
+  APPEAL: {
+    label: "Appeal",
+    description: "Appeal a lost decision with new evidence (only when PayPal offers it).",
+    tone: "warning",
   },
 };
 

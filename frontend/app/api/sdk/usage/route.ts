@@ -54,6 +54,13 @@ const RequestSchema = z.object({
   export_name: z.string().trim().min(1).max(255).default(DEFAULT_EXPORT_NAME),
   client_ip: z.string().trim().min(2).max(64).optional(),
   device_fingerprint: z.string().trim().min(2).max(128).optional(),
+  // Demo run tag: rides in every event's metadata so GET /sandbox/runs/{run_id}
+  // can count this run's events (same alphabet as backend run ids).
+  run_id: z
+    .string()
+    .trim()
+    .regex(/^[A-Za-z0-9_-]{3,64}$/)
+    .optional(),
 });
 
 type ErrorDetail = { field: string | null; message: string; code: string | null };
@@ -105,6 +112,8 @@ export async function POST(request: Request): Promise<NextResponse> {
   const input = parsed.data;
   const clientIp = input.client_ip ?? DEFAULT_CLIENT_IP;
   const deviceFingerprint = input.device_fingerprint ?? DEFAULT_DEVICE_FINGERPRINT;
+  const runMetadata: Record<string, unknown> = input.run_id ? { run_id: input.run_id } : {};
+  const subscription = input.subscription_id ? { paypalSubscriptionId: input.subscription_id } : {};
 
   const client = new VerdictPayClient({
     apiKey: API_KEY,
@@ -127,6 +136,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       deviceFingerprint,
       tosVersion: TOS_VERSION,
       tosContentSha256: sha256Hex(TOS_TEXT),
+      metadata: runMetadata,
     });
 
     client.trackEvent({
@@ -140,22 +150,29 @@ export async function POST(request: Request): Promise<NextResponse> {
         logins: input.logins,
         asn: "AS15169",
         user_agent: DEMO_USER_AGENT,
+        ...runMetadata,
       },
     });
 
     client.trackUsage({
       paypalPayerId: input.payer_id,
+      paypalOrderId: input.order_id,
+      ...subscription,
       units: input.tokens,
       clientIp,
       deviceFingerprint,
+      metadata: runMetadata,
     });
 
     client.trackDelivery({
       paypalPayerId: input.payer_id,
+      paypalOrderId: input.order_id,
+      ...subscription,
       resourceId: input.export_name,
       resourceSha256: sha256Hex(DEMO_ASSET_PAYLOAD),
       clientIp,
       deviceFingerprint,
+      metadata: runMetadata,
     });
 
     const flushed = await client.flush();
@@ -185,7 +202,7 @@ export async function POST(request: Request): Promise<NextResponse> {
       );
     }
 
-    return NextResponse.json(validated.data);
+    return NextResponse.json({ ...validated.data, run_id: input.run_id ?? null });
   } catch (caught) {
     if (isVerdictPayError(caught)) {
       const status = caught.status ?? (caught.code === "validation_error" ? 400 : 502);

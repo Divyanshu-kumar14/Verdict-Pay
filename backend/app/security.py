@@ -65,5 +65,3 @@ class SlidingWindowLimiter:
             return False, 0
         hits.append(current)
         return True, self.limit - len(hits)
-
-

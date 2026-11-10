@@ -30,8 +30,9 @@ from app.api.schemas import (
     TelemetryIngestResponse,
 )
 from app.config import Settings
+from app.domain.enums import TelemetryEventType
 from app.domain.telemetry.service import TelemetryService, to_event_out
-from app.errors import UnauthorizedError
+from app.errors import UnauthorizedError, ValidationFailedError
 from app.security import verify_signature
 
 router = APIRouter(tags=["telemetry"])
@@ -109,6 +110,11 @@ async def ingest_events(
     )
     body = _parse_ingest_body(raw_body)
     events = [body] if isinstance(body, TelemetryEventIn) else list(body.events)
+    if any(event.event_type is TelemetryEventType.SENTINEL_VERDICT for event in events):
+        raise ValidationFailedError(
+            "SENTINEL_VERDICT events are written by the Sentinel only.",
+            details=[{"field": "event_type", "message": "server_only_event_type"}],
+        )
     service = TelemetryService(session, merchant.id)
     results = await service.record_many(events)
     accepted = sum(1 for result in results if result.created)

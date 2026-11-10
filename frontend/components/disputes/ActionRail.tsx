@@ -10,7 +10,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { api, toApiError, type ApiError } from "@/lib/api";
-import { formatLatency, formatUsd, shortHash } from "@/lib/format";
+import { formatLatency, formatPercent, formatUsd, shortHash } from "@/lib/format";
 import {
   DISPUTE_ACTIONS,
   type ActionRecord,
@@ -86,19 +86,37 @@ export function ActionRail({
         return "Lose the disputed " + formatUsd(detail.amount_usd) + " — settle at a loss.";
       case "MAKE_OFFER":
         return (
-          "Settle at a fraction of the claim, costing roughly " +
-          formatUsd(feeUsd) +
-          " in fees."
+          "Settle at " +
+          formatUsd(Math.abs(detail.breakdown.ev_offer_usd)) +
+          " — a " +
+          formatPercent(detail.breakdown.offer_ratio ?? 0, 0) +
+          " goodwill offer costing " +
+          formatUsd(Math.abs(detail.breakdown.ev_offer_usd)) +
+          "; PayPal charges a $0.00 offer fee."
         );
       case "PROVIDE_EVIDENCE":
         return (
-          "Contest with evidence — win " +
+          "Contest with evidence — keep " +
           formatUsd(detail.amount_usd) +
-          " or lose " +
-          formatUsd(feeUsd) +
-          " more."
+          (detail.breakdown.win_fee_usd > 0
+            ? " less the non-refundable " + formatUsd(detail.breakdown.win_fee_usd) + " HVD fee"
+            : "") +
+          ", or lose it plus one " +
+          formatUsd(detail.breakdown.fight_fee_usd + feeUsd) +
+          " dispute fee."
         );
       case "SEND_MESSAGE":
+        return "Post a response in the dispute thread — no fee.";
+      case "ESCALATE":
+        return (
+          "Open a PayPal claim for review — a loss costs the disputed " +
+          formatUsd(detail.amount_usd) +
+          " plus the " +
+          formatUsd(detail.breakdown.fight_fee_usd) +
+          " claim fee."
+        );
+      case "APPEAL":
+        return "Ask PayPal to review a lost claim again — no fee.";
       default:
         return "Post a response in the dispute thread — no fee.";
     }

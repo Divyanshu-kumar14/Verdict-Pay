@@ -28,6 +28,7 @@ import {
   HealthResponseSchema,
   OrderStatusResponseSchema,
   ReportingSummarySchema,
+  VetoLabResponseSchema,
   TriageResponseSchema,
   UsageResponseSchema,
   type ActionRequestInput,
@@ -55,6 +56,7 @@ import {
   type HealthResponse,
   type OrderStatusResponse,
   type ReportingSummary,
+  type VetoLabResponse,
   type TriageResponse,
   type UsageRequestInput,
   type UsageResponse,
@@ -485,6 +487,15 @@ export const api = {
   },
 
   /** GET /reporting/summary — exposure, protection and fee-saved KPIs. */
+  /** POST /veto-lab/run — three negative controls through the isolated Sentinel. */
+  runVetoLab(signal?: AbortSignal): Promise<VetoLabResponse> {
+    return request("/api/v1/veto-lab/run", {
+      method: "POST",
+      body: {},
+      schema: VetoLabResponseSchema,
+      signal,
+    });
+  },
   reportingSummary(signal?: AbortSignal): Promise<ReportingSummary> {
     return request("/api/v1/reporting/summary", { schema: ReportingSummarySchema, signal });
   },

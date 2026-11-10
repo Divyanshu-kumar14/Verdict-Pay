@@ -11,7 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -42,8 +42,9 @@ from app.domain.protocols import (
     NarrativeRequest,
     PayPalGateway,
 )
-from app.errors import ConflictError
+from app.errors import ConflictError, ValidationFailedError
 from app.logging_setup import get_logger, log_context
+from app.sentinel import token as sentinel_token
 from app.services.dispute_service import (
     ACTION_STATUS_IN_PROGRESS,
     INTERNAL_TEST_SKIP_REASON,
@@ -200,9 +201,27 @@ class DossierRecord:
         )
 
 
+_DISPUTE_ID_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-")
+
+
 def dossier_artifact_path(settings: Settings, dispute_id: str) -> Path:
-    """Where the served dossier PDF lives on disk."""
-    return Path(settings.artifacts_dir) / f"{dispute_id}.pdf"
+    """Where the served dossier PDF lives on disk, never outside artifacts_dir.
+
+    The id is checked against the PayPal id alphabet and the resolved path must
+    stay inside the resolved artifacts directory, so ``../`` or an absolute id
+    can never read or write another file.
+    """
+    if not dispute_id or not set(dispute_id) <= _DISPUTE_ID_CHARS:
+        raise ValidationFailedError(
+            "Invalid dispute id.", details=[{"veto_code": "VETO_PATH_TRAVERSAL_BLOCKED"}]
+        )
+    root = Path(settings.artifacts_dir).resolve()
+    target = (root / f"{dispute_id}.pdf").resolve()
+    if not target.is_relative_to(root):
+        raise ValidationFailedError(
+            "Invalid dispute id.", details=[{"veto_code": "VETO_PATH_TRAVERSAL_BLOCKED"}]
+        )
+    return target
 
 
 class EvidenceService:
@@ -354,12 +373,19 @@ class EvidenceService:
 
     # ------------------------------------------------------------------ submit
     async def submit(
-        self, dispute_id: str, *, idempotency_key: str
+        self,
+        dispute_id: str,
+        *,
+        idempotency_key: str,
+        authorize: (Callable[[DossierRecord, str], Awaitable[Mapping[str, Any]]] | None) = None,
     ) -> tuple[DisputeActionRecord, DisputeCase]:
         """Upload the dossier to PayPal, recording exactly one audit row.
 
-        The PayPal request key is claimed atomically before the upload, so a
-        concurrent duplicate click can never submit two dossiers.
+        The PayPal request key is claimed atomically before the Sentinel gate
+        and before the upload, so a concurrent duplicate click can never submit
+        two dossiers and a veto never runs against a key another request owns.
+        ``authorize`` is called once, after the claim, with the frozen dossier
+        and the document name; it must return the ApprovalToken verdict.
         """
         case = await self._case(dispute_id)
         self._ensure_legal(case)
@@ -390,6 +416,19 @@ class EvidenceService:
             await self.session.refresh(case)
             return self._replayed(replay, dispute_id), case
 
+        approval: Mapping[str, Any] | None = None
+        if authorize is not None:
+            try:
+                approval = await authorize(record, document_name)
+            except Exception as exc:
+                # A vetoed write must be a terminal audit row, never a claim
+                # stuck IN_PROGRESS that blocks every later retry.
+                record_row.status = ActionStatus.FAILED.value
+                record_row.error = f"{type(exc).__name__}: {exc}"
+                record_row.latency_ms = 0
+                await self.session.commit()
+                raise
+
         if is_internal_test_case(case):
             # The dossier is real and downloadable, but PayPal has no such
             # dispute to attach it to, so the upload is recorded as skipped.
@@ -408,6 +447,11 @@ class EvidenceService:
             idempotency_key=key,
         )
         started = time.perf_counter()
+        reset = (
+            sentinel_token.current_approval.set(str(approval["hmac_approval_token"]))
+            if approval is not None
+            else None
+        )
         try:
             response = await self.gateway.provide_evidence(submission)
         except Exception as exc:
@@ -420,16 +464,40 @@ class EvidenceService:
                 extra=log_context(dispute_id=dispute_id, error=record_row.error),
             )
             raise
+        finally:
+            if reset is not None:
+                sentinel_token.current_approval.reset(reset)
 
         record_row.status = ActionStatus.EXECUTED.value
         record_row.latency_ms = _elapsed_ms(started)
         record_row.response_payload = dict(response.body)
         case.status = DisputeStatus.UNDER_REVIEW.value
         case.dossier_pdf_url = DOSSIER_URL_TEMPLATE.format(dispute_id=dispute_id)
+        # PayPal moves the dispute (status, links, due date) after an upload;
+        # resync so the next action is guarded by PayPal's current links.
+        await self._refresh_from_gateway(case)
         await self.session.commit()
         return record_row, case
 
     # ------------------------------------------------------------------ internals
+    async def _refresh_from_gateway(self, case: DisputeCase) -> None:
+        """Best-effort resync of stage/status/links after an upload."""
+        if is_internal_test_case(case):
+            return
+        try:
+            dispute = await self.gateway.get_dispute(case.dispute_id)
+        except Exception as exc:
+            logger.warning(
+                "case_refresh_failed",
+                extra=log_context(dispute_id=case.dispute_id, error=str(exc)[:200]),
+            )
+            return
+        case.lifecycle_stage = dispute.stage.value
+        case.dispute_channel = dispute.channel.value
+        case.status = dispute.status.value
+        case.seller_response_due_date = dispute.seller_response_due_date
+        case.paypal_links = dict(dispute.links)
+
     def _ensure_legal(self, case: DisputeCase) -> None:
         ensure_allowed(
             DisputeAction.PROVIDE_EVIDENCE,

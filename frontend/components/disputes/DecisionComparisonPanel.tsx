@@ -137,7 +137,9 @@ export function DecisionComparisonPanel({
                 <span className="num text-sm text-ink">{formatUsd(policyOption.value_usd)}</span>
               ) : null}
             </div>
-            <p className="mt-1.5 text-xs text-muted">{comparison.policy_reason}</p>
+            <p className="mt-1.5 break-words text-xs text-muted [overflow-wrap:anywhere]">
+              {comparison.policy_reason}
+            </p>
           </div>
 
           <div className="min-w-0 rounded-md border border-control bg-ground px-3.5 py-3">
@@ -163,9 +165,9 @@ export function DecisionComparisonPanel({
         {/* The backend's own explanation, rendered verbatim: it is the only place
             that knows the policy's actual reason for preferring a costlier action. */}
         {comparison.agree ? null : comparison.divergence_explanation ? (
-          <p className="flex items-start gap-2 rounded-md border border-control bg-ground px-3.5 py-3 text-sm text-ink">
+          <p className="flex min-w-0 items-start gap-2 rounded-md border border-control bg-ground px-3.5 py-3 text-sm text-ink">
             <ArrowRight size={14} className="mt-0.5 shrink-0 text-accent" aria-hidden />
-            <span className="min-w-0">{comparison.divergence_explanation}</span>
+            <span className="min-w-0 break-words [overflow-wrap:anywhere]">{comparison.divergence_explanation}</span>
           </p>
         ) : (
           <p className="flex items-start gap-2 text-sm text-muted">

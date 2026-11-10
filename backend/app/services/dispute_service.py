@@ -14,11 +14,12 @@ import json
 import time
 import uuid
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import UTC, datetime, timedelta
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_DOWN, Decimal
 from typing import Any
 
+from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,15 +27,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api import schemas
 from app.config import Settings
 from app.db.models import (
+    CardNetworkMonthlyFeed,
     DisputeActionRecord,
     DisputeCase,
     PaypalTransaction,
     TelemetryLedger,
     WebhookEventRecord,
 )
+from app.domain.constants import SETTLED_STATUSES
 from app.domain.disputes.decision import compare, policy_reason_from
-from app.domain.disputes.ev import EvInputs, compute_ev, ratio_relation, to_breakdown
-from app.domain.disputes.state_machine import ensure_allowed, to_allowed_actions
+from app.domain.disputes.ev import EvInputs, compute_ev, to_breakdown
+from app.domain.disputes.state_machine import (
+    ensure_allowed,
+    expected_rels,
+    to_allowed_actions,
+)
 from app.domain.disputes.triage import TriageDecision, TriageInput, decide
 from app.domain.disputes.win_probability import SignalSet, completeness, score_win_probability
 from app.domain.enums import (
@@ -68,6 +75,17 @@ from app.errors import (
 )
 from app.integrations.paypal import wire
 from app.logging_setup import get_logger, log_context
+from app.oracle.cliff_engine import (
+    HvdInputs,
+    ecp_state,
+    full_calendar_months_window,
+    hvd_state,
+    vamp_state,
+)
+from app.oracle.manifest import get_manifest
+from app.oracle.money import PPM, from_minor, to_minor
+from app.sentinel import bridge as sentinel_bridge
+from app.sentinel import token as sentinel_token
 
 logger = get_logger("verdictpay.disputes")
 
@@ -81,23 +99,57 @@ CONTAINMENT_SNAPSHOT_KEY = "_containment"
 # "paypal_sandbox" when PayPal created the dispute, "internal_test_event" when
 # the demo built it locally. Absent for cases that arrived by webhook.
 DISPUTE_ORIGIN_KEY = "_origin"
+# PayPal messages[] (buyer/seller thread), kept for the AI analyst.
+MESSAGES_SNAPSHOT_KEY = "_messages"
+# Kept in sync with evidence_service.DOSSIER_SNAPSHOT_KEY (import cycle).
+DOSSIER_SNAPSHOT_KEY = "_dossier"
+PRIVATE_SNAPSHOT_KEYS = frozenset(
+    {
+        "_triage",
+        "_containment",
+        "_origin",
+        "_messages",
+        "_dossier",
+        "_sentinel",
+    }
+)
 CE3_WINDOW_START_DAYS = 365
 CE3_WINDOW_END_DAYS = 120
 VOLUME_WINDOW_DAYS = 90
 MESSAGE_MAX_CHARS = 2000
 OPEN_STAGES = frozenset(
-    {DisputeStage.INQUIRY, DisputeStage.CHARGEBACK, DisputeStage.PRE_ARBITRATION}
+    {
+        DisputeStage.INQUIRY,
+        DisputeStage.CHARGEBACK,
+        DisputeStage.PRE_ARBITRATION,
+        DisputeStage.ARBITRATION,
+    }
 )
-CLAIM_STAGES = frozenset({DisputeStage.CHARGEBACK, DisputeStage.PRE_ARBITRATION})
+CLAIM_STAGES = frozenset(
+    {DisputeStage.CHARGEBACK, DisputeStage.PRE_ARBITRATION, DisputeStage.ARBITRATION}
+)
+SOURCE_BADGES: dict[str, str] = {
+    "LIVE_PAYPAL_SANDBOX": "[LIVE PAYPAL SANDBOX]",
+    "SIMULATED_CARD_NETWORK_FEED": "[VISA-TC40 / ACQUIRER-FEED SIMULATION]",
+    "INTERNAL_TEST_EVENT": "[LOCAL TEST DISPUTE · PAYPAL SANDBOX ORDER]",
+}
 PROTECTED_ACTIONS = frozenset(
     {RecommendedAction.DEFLECT_INQUIRY, RecommendedAction.PROVIDE_EVIDENCE}
 )
 
 
+def _source_plane_for(payment_rail: str) -> str:
+    return (
+        "SIMULATED_CARD_NETWORK_FEED"
+        if payment_rail == "UNBRANDED_CARD"
+        else ("LIVE_PAYPAL_SANDBOX")
+    )
+
+
 def quantize_money(value: Decimal | int | float | str) -> Decimal:
-    """Round any money-ish value to cents, half-up (deterministic)."""
+    """Round any money-ish value to cents, toward zero (deterministic)."""
     raw = value if isinstance(value, Decimal) else Decimal(str(value))
-    return raw.quantize(CENT, rounding=ROUND_HALF_UP)
+    return raw.quantize(CENT, rounding=ROUND_DOWN)
 
 
 def as_decimal(value: Decimal | int | float | str | None) -> Decimal:
@@ -156,17 +208,29 @@ def to_dispute_summary(case: DisputeCase) -> schemas.DisputeSummary:
         status=DisputeStatus(case.status),
         currency=case.currency,
         amount_usd=quantize_money(as_decimal(case.amount_usd)),
-        p_win=float(case.p_win),
+        p_win=as_decimal(case.p_win),
         ev_fight_usd=quantize_money(as_decimal(case.ev_fight_usd)),
         ev_settle_usd=quantize_money(as_decimal(case.ev_settle_usd)),
         ev_offer_usd=quantize_money(as_decimal(case.ev_offer_usd)),
-        telemetry_completeness=float(case.telemetry_completeness),
+        telemetry_completeness=as_decimal(case.telemetry_completeness),
         recommended_action=RecommendedAction(case.recommended_action),
         subscription_suspended=bool(case.subscription_suspended),
         dossier_available=bool(case.dossier_pdf_url),
         seller_response_due_date=utc_aware(case.seller_response_due_date),
         created_at=utc_aware(case.created_at),
         updated_at=utc_aware(case.updated_at),
+        payment_rail=case.payment_rail or "PAYPAL_WALLET",
+        external_reason_code=case.external_reason_code,
+        amount_minor=int(case.amount_minor or to_minor(as_decimal(case.amount_usd))),
+        source_plane=case.source_plane or "LIVE_PAYPAL_SANDBOX",
+        source_badge=SOURCE_BADGES.get(
+            case.source_plane or "", SOURCE_BADGES["LIVE_PAYPAL_SANDBOX"]
+        ),
+        sla_response_days=int(
+            ((case.facts_snapshot or {}).get(TRIAGE_SNAPSHOT_KEY) or {})
+            .get("breakdown", {})
+            .get("sla_response_days", 10)
+        ),
     )
 
 
@@ -228,9 +292,7 @@ async def claim_action(
         if existing is None:
             raise
         if existing.dispute_id != dispute_id:
-            raise ConflictError(
-                "That idempotency key belongs to another dispute."
-            ) from None
+            raise ConflictError("That idempotency key belongs to another dispute.") from None
         if existing.status == ACTION_STATUS_IN_PROGRESS:
             raise ConflictError(
                 "This action is already being executed.", code="action_in_progress"
@@ -373,6 +435,78 @@ async def cache_transactions(
     await session.flush()
 
 
+def _record_from_row(row: PaypalTransaction) -> PayPalTransactionRecord:
+    return PayPalTransactionRecord(
+        transaction_id=row.transaction_id,
+        payer_id=row.payer_id,
+        amount=as_decimal(row.amount_usd),
+        currency=row.currency,
+        status=row.status,
+        client_ip=row.client_ip or "",
+        device_fingerprint=row.device_fingerprint or "",
+        created_at=utc_aware(row.created_at) or datetime.now(UTC),
+        payment_rail=row.payment_rail or "PAYPAL_WALLET",
+        payment_credential_hash=row.payment_credential_hash or "",
+        account_login_id_hash=row.account_login_id_hash or "",
+        shipping_address_hash=row.shipping_address_hash or "",
+        has_prior_dispute=bool(row.disputed_claim),
+        has_tc40=bool(row.has_tc40),
+        source=row.source or "local",
+    )
+
+
+async def correlate_local_anchors(
+    session: AsyncSession,
+    *,
+    merchant_id: str,
+    payer_id: str,
+    records: Sequence[PayPalTransactionRecord],
+    start: datetime,
+    end: datetime,
+) -> list[PayPalTransactionRecord]:
+    """Attach CE 3.0 anchors from the local ledger to Reporting v1 records.
+
+    PayPal Reporting v1 has no buyer IP, device, credential, login or shipping
+    fields. The local order/telemetry ledger does, keyed by transaction id, so
+    each PayPal record is enriched from it, and ledger-only history rows (the
+    labelled seed history) are included alongside.
+    """
+    rows = list(
+        (
+            await session.scalars(
+                select(PaypalTransaction).where(
+                    PaypalTransaction.merchant_id == merchant_id,
+                    PaypalTransaction.payer_id == payer_id,
+                    PaypalTransaction.created_at >= start,
+                    PaypalTransaction.created_at <= end,
+                )
+            )
+        ).all()
+    )
+    local = {row.transaction_id: _record_from_row(row) for row in rows}
+    merged: list[PayPalTransactionRecord] = []
+    for record in records:
+        anchor = local.pop(record.transaction_id, None)
+        if anchor is None:
+            merged.append(record)
+            continue
+        merged.append(
+            replace(
+                record,
+                client_ip=record.client_ip or anchor.client_ip,
+                device_fingerprint=record.device_fingerprint or anchor.device_fingerprint,
+                payment_rail=anchor.payment_rail,
+                payment_credential_hash=anchor.payment_credential_hash,
+                account_login_id_hash=anchor.account_login_id_hash,
+                shipping_address_hash=anchor.shipping_address_hash,
+                has_prior_dispute=anchor.has_prior_dispute,
+                has_tc40=anchor.has_tc40,
+            )
+        )
+    merged.extend(local[key] for key in sorted(local))
+    return merged
+
+
 async def assemble_case_facts(
     session: AsyncSession,
     *,
@@ -409,6 +543,14 @@ async def assemble_case_facts(
         paypal_mode=settings.provenance,
         records=transactions,
     )
+    transactions = await correlate_local_anchors(
+        session,
+        merchant_id=merchant_id,
+        payer_id=case.paypal_payer_id,
+        records=transactions,
+        start=reference - timedelta(days=CE3_WINDOW_START_DAYS + 1),
+        end=reference - timedelta(days=CE3_WINDOW_END_DAYS - 1),
+    )
     verification = await TelemetryService(session, merchant_id=merchant_id).verify(
         case.paypal_payer_id
     )
@@ -425,6 +567,10 @@ async def assemble_case_facts(
             chain_valid=verification.valid,
             now=reference,
             response_due_date=case.seller_response_due_date,
+            payment_rail=case.payment_rail or "PAYPAL_WALLET",
+            external_reason_code=case.external_reason_code,
+            order_id=case.paypal_order_id,
+            disputed_at=utc_aware(case.created_at) or reference,
         )
     )
 
@@ -470,6 +616,8 @@ class DisputeService:
         channel: DisputeChannel,
         amount: Decimal,
         buyer_claim_text: str | None = None,
+        payment_rail: str = "PAYPAL_WALLET",
+        external_reason_code: str | None = None,
     ) -> tuple[WebhookEventRecord, DisputeCase, str]:
         """Open a dispute for a demo order and run it through the case pipeline.
 
@@ -506,20 +654,22 @@ class DisputeService:
                 stage=stage,
                 channel=channel,
                 amount=amount,
+                payment_rail=payment_rail,
+                external_reason_code=external_reason_code,
+                hvd_sla_days=await self._current_sla_days(),
             )
         # Trust comes from the authenticated call (or from building it here),
         # not from a webhook signature, so no signature check is needed.
         event = wire.parse_webhook_event(self._webhook_envelope(dispute))
-        record, case = await self._ingest_event(event)
-        if case is None:
-            raise ValidationFailedError("Sandbox dispute did not produce a case.")
-        snapshot = {**(case.facts_snapshot or {}), DISPUTE_ORIGIN_KEY: origin}
+        # The claim text and origin must be on the case *before* triage runs,
+        # otherwise the first triage (and its AI context) never sees them.
+        preset: dict[str, Any] = {DISPUTE_ORIGIN_KEY: origin}
         claim = (buyer_claim_text or "").strip()[:4000]
         if claim:
-            # _apply_triage preserves top-level keys and _facts_from_snapshot
-            # restores this one onto CaseFacts.buyer_claim_text.
-            snapshot["buyer_claim_text"] = claim
-        case.facts_snapshot = snapshot
+            preset["buyer_claim_text"] = claim
+        record, case = await self._ingest_event(event, preset_snapshot=preset)
+        if case is None:
+            raise ValidationFailedError("Sandbox dispute did not produce a case.")
         await self.session.commit()
         return record, case, origin
 
@@ -532,7 +682,14 @@ class DisputeService:
         stage: DisputeStage,
         channel: DisputeChannel,
         amount: Decimal,
+        payment_rail: str = "PAYPAL_WALLET",
+        external_reason_code: str | None = None,
+        hvd_sla_days: int = 10,
     ) -> PayPalDisputeRecord:
+        """A locally built dispute; its response SLA follows the merchant's tier.
+
+        PayPal gives standard merchants 10 days and HVD-tier merchants 3.
+        """
         now = datetime.now(UTC)
         return PayPalDisputeRecord(
             dispute_id=f"PP-D-TEST-{uuid.uuid4().hex[:10].upper()}",
@@ -545,14 +702,16 @@ class DisputeService:
             payer_id=payer_id,
             order_id=order_id,
             subscription_id=None,
-            seller_response_due_date=now + timedelta(days=20),
-            links={},
+            seller_response_due_date=now + timedelta(days=hvd_sla_days),
+            links=expected_rels(stage),
             created_at=now,
             raw={"source": "internal_test_event"},
+            external_reason_code=external_reason_code,
+            payment_rail=payment_rail,
         )
 
     async def _ingest_event(
-        self, event: WebhookEvent
+        self, event: WebhookEvent, *, preset_snapshot: Mapping[str, Any] | None = None
     ) -> tuple[WebhookEventRecord, DisputeCase | None]:
         """De-duplicate on event_id, then upsert and triage the case."""
         existing = await self._find_event(event.event_id)
@@ -577,7 +736,7 @@ class DisputeService:
                 raise
             return await self._replay(existing)
 
-        case = await self._apply_event(record, event)
+        case = await self._apply_event(record, event, preset_snapshot=preset_snapshot)
         return record, case
 
     # ------------------------------------------------------------------ reads
@@ -679,7 +838,12 @@ class DisputeService:
                 .order_by(DisputeActionRecord.created_at.desc(), DisputeActionRecord.id)
             )
         ).all()
-        allowed_actions = to_allowed_actions(stage=stage, channel=channel, links=links)
+        allowed_actions = to_allowed_actions(
+            stage=stage,
+            channel=channel,
+            links=links,
+            high_volume=breakdown.high_volume,
+        )
         return schemas.DisputeDetail(
             **to_dispute_summary(case).model_dump(),
             breakdown=breakdown,
@@ -724,6 +888,12 @@ class DisputeService:
         if action is DisputeAction.PROVIDE_EVIDENCE:
             from app.services.evidence_service import EvidenceService
 
+            ensure_allowed(
+                action,
+                stage=DisputeStage(case.lifecycle_stage),
+                channel=DisputeChannel(case.dispute_channel),
+                links=dict(case.paypal_links or {}),
+            )
             evidence = EvidenceService(
                 self.session,
                 settings=self.settings,
@@ -731,8 +901,28 @@ class DisputeService:
                 narrative=self.narrative,
                 merchant_id=self.merchant_id,
             )
+
+            async def authorize_evidence(dossier: Any, document_name: str) -> dict[str, Any]:
+                """Gate the upload with the frozen dossier as the evidence claim."""
+                return await self.authorize_write(
+                    case,
+                    action,
+                    request,
+                    evidence_payload={
+                        "attachments": [{"name": document_name, "size_bytes": dossier.size_bytes}],
+                        # Digital goods: there is no shipment tracker, and the
+                        # merchant asserts no tracking or refund reference it
+                        # cannot corroborate, so nothing is claimed here.
+                        "known_tracking_numbers": [],
+                        "known_refund_ids": [],
+                        "evidences": [],
+                    },
+                )
+
             return await evidence.submit(
-                dispute_id, idempotency_key=request.idempotency_key or ""
+                dispute_id,
+                idempotency_key=request.idempotency_key or "",
+                authorize=authorize_evidence,
             )
 
         stage = DisputeStage(case.lifecycle_stage)
@@ -750,11 +940,24 @@ class DisputeService:
                 "note": request.note,
                 "offer_ratio": None if request.offer_ratio is None else str(request.offer_ratio),
                 "idempotency_key": request.idempotency_key,
+                "stage": stage.value,
             },
         )
         if replay is not None:
             await self.session.refresh(case)
             return self._replay_action(replay, case)
+
+        # The key is owned before the Sentinel runs, so two concurrent clicks
+        # can never both clear the gate and dispatch. A veto is terminal for
+        # this key: mark the claim FAILED or it blocks every later retry.
+        try:
+            approval = await self.authorize_write(case, action, request)
+        except Exception as exc:
+            record.status = ActionStatus.FAILED.value
+            record.error = f"{type(exc).__name__}: {exc}"
+            record.latency_ms = 0
+            await self.session.commit()
+            raise
 
         if is_internal_test_case(case):
             # PayPal has never seen this dispute, so any call would 404.
@@ -766,6 +969,7 @@ class DisputeService:
             return record, case
 
         started = time.perf_counter()
+        reset = sentinel_token.current_approval.set(approval["hmac_approval_token"])
         try:
             upstream = await self._dispatch(action, case, request)
         except Exception as exc:
@@ -775,11 +979,11 @@ class DisputeService:
             await self.session.commit()
             logger.error(
                 "action_failed",
-                extra=log_context(
-                    dispute_id=dispute_id, action=action.value, error=record.error
-                ),
+                extra=log_context(dispute_id=dispute_id, action=action.value, error=record.error),
             )
             raise
+        finally:
+            sentinel_token.current_approval.reset(reset)
 
         record.status = ActionStatus.EXECUTED.value
         record.latency_ms = _elapsed_ms(started)
@@ -791,6 +995,101 @@ class DisputeService:
         await self.session.commit()
         return record, case
 
+    async def authorize_write(
+        self,
+        case: DisputeCase,
+        action: DisputeAction,
+        request: schemas.ActionRequest,
+        *,
+        untrusted_text: str | None = None,
+        evidence_payload: Mapping[str, Any] | None = None,
+        claimed_ce3_manifest: Mapping[str, Any] | None = None,
+        candidate_mode: str = "HARDENED",
+    ) -> dict[str, Any]:
+        """Run the Sentinel for one PayPal write; VETO raises 422, ALLOW returns a token.
+
+        Actions chosen by the deterministic triage carry no buyer text (the
+        text cannot have influenced them); AI-originated proposals pass it.
+        The merchant's own ``note`` is untrusted too: it is sent to the buyer
+        verbatim, so it is scanned and priced like any other free text.
+        """
+        note = (request.note or "").strip() or None
+        gate_text = "\n".join(part for part in (untrusted_text, note) if part) or None
+        if action is DisputeAction.PROVIDE_EVIDENCE and claimed_ce3_manifest is None:
+            proof = (case.facts_snapshot or {}).get("ce3_proof")
+            if isinstance(proof, Mapping):
+                claim = proof.get("claim_manifest")
+                if isinstance(claim, Mapping):
+                    claimed_ce3_manifest = claim
+        hvd = await self._hvd_inputs(exclude_dispute_id=case.dispute_id)
+        vamp = await self.vamp_status()
+        amount_minor = to_minor(quantize_money(as_decimal(case.amount_usd)))
+        offer_minor = None
+        if action is DisputeAction.MAKE_OFFER:
+            ratio = request.offer_ratio
+            if ratio is None:
+                ratio = self.settings.offer_ratio
+            offer_minor = to_minor(quantize_money(as_decimal(case.amount_usd) * as_decimal(ratio)))
+        proposal = sentinel_bridge.build_proposal(
+            dispute_id=case.dispute_id,
+            action=action.value,
+            stage=case.lifecycle_stage,
+            channel=case.dispute_channel,
+            reason_code=case.reason_code,
+            payment_rail=case.payment_rail or "PAYPAL_WALLET",
+            external_reason_code=case.external_reason_code,
+            amount_minor=amount_minor,
+            currency=case.currency,
+            hateoas_rels=list((case.paypal_links or {}).keys()),
+            portfolio={
+                "hvd": {
+                    "settled_txns_3m": hvd.settled_txns,
+                    "net_sales_minor_3m": hvd.net_sales_minor,
+                    "disputed_amount_minor_3m": hvd.disputed_minor,
+                },
+                "vamp": None
+                if vamp is None
+                else {
+                    "tc05_settled_cnp": vamp.tc05_settled_cnp,
+                    "tc40_fraud_count": vamp.tc40_fraud_count,
+                    "tc15_dispute_count": vamp.tc15_dispute_count,
+                },
+            },
+            untrusted_text=gate_text,
+            offer_amount_minor=offer_minor,
+            offer_note=note if action is DisputeAction.MAKE_OFFER else None,
+            evidence_payload=evidence_payload,
+            claimed_ce3_manifest=claimed_ce3_manifest,
+            p_win_ppm=int((as_decimal(case.p_win) * PPM).to_integral_value(rounding=ROUND_DOWN)),
+            modeled_fight_ev_minor=to_minor(quantize_money(as_decimal(case.ev_fight_usd))),
+            candidate_mode=candidate_mode,
+        )
+        return await sentinel_bridge.authorize(
+            self.session,
+            settings=self.settings,
+            merchant_id=self.merchant_id,
+            proposal=proposal,
+        )
+
+    async def record_ai_veto(self, *, dispute_id: str, veto_code: str, detail: str) -> None:
+        """Audit a deterministic AI-layer veto on the SENTINEL-AUDIT chain."""
+        await sentinel_bridge.record_verdict(
+            self.session,
+            merchant_id=self.merchant_id,
+            verdict={
+                "proposal_id": str(uuid.uuid4()),
+                "dispute_id": dispute_id,
+                "proposed_action": "AI_ANALYZE",
+                "verdict": "VETO",
+                "exit_code": 2,
+                "veto_codes": [veto_code],
+                "reasons": [detail],
+                "manifest_sha256": get_manifest().sha256,
+                "candidate_mode": "LLM_UNGUARDED",
+            },
+        )
+        await self.session.commit()
+
     def _replay_action(
         self, existing: DisputeActionRecord, case: DisputeCase
     ) -> tuple[DisputeActionRecord, DisputeCase]:
@@ -798,9 +1097,7 @@ class DisputeService:
         if existing.dispute_id != case.dispute_id:
             raise ConflictError("That idempotency key belongs to another dispute.")
         if existing.status == ACTION_STATUS_IN_PROGRESS:
-            raise ConflictError(
-                "This action is already being executed.", code="action_in_progress"
-            )
+            raise ConflictError("This action is already being executed.", code="action_in_progress")
         return existing, case
 
     # ------------------------------------------------------------------ reporting
@@ -827,19 +1124,23 @@ class DisputeService:
             ),
             Decimal("0.00"),
         )
-        fees_avoided = self.settings.standard_fee_usd * len(in_inquiry)
-        p_wins = [float(case.p_win) for case in cases]
-        confident = [
-            float(case.p_win) for case in cases if float(case.telemetry_completeness) >= 0.6
-        ]
-        sales_3mo, disputes_3mo = await self._volume_counts()
-        ratio = disputes_3mo / max(sales_3mo, 1)
-        # Same helper the case detail uses, so the dashboard and the case room can
-        # never disagree about which side of the 1.5% line a merchant is on.
-        high_volume = (
-            sales_3mo >= self.settings.high_volume_min_sales
-            and ratio_relation(ratio, self.settings.ratio_threshold) == "at_or_above"
+        hvd_inputs = await self._hvd_inputs()
+        hvd = hvd_state(
+            settled_txns_3m=hvd_inputs.settled_txns,
+            net_sales_minor_3m=hvd_inputs.net_sales_minor,
+            disputed_amount_minor_3m=hvd_inputs.disputed_minor,
         )
+        # Fees avoided = the active tier fee on INQUIRY cases that were *closed
+        # amicably* (deflected / settled by offer) and so never became claims.
+        # An open inquiry nobody acted on has avoided nothing yet.
+        deflected = await self._resolved_deflected_inquiries(cases)
+        fees_avoided = from_minor(hvd.active_fee_tier_usd_cents) * deflected
+        p_wins = [as_decimal(case.p_win) for case in cases]
+        confident = [
+            as_decimal(case.p_win)
+            for case in cases
+            if as_decimal(case.telemetry_completeness) >= Decimal("0.6")
+        ]
         payers = sorted({case.paypal_payer_id for case in cases})
         chain_verified = 0
         if payers:
@@ -859,23 +1160,66 @@ class DisputeService:
             fees_avoided_usd=quantize_money(fees_avoided),
             avg_p_win=_mean(p_wins),
             win_rate_estimate=_mean(confident),
-            subscription_suspensions=sum(
-                1 for case in cases if bool(case.subscription_suspended)
-            ),
+            subscription_suspensions=sum(1 for case in cases if bool(case.subscription_suspended)),
             chain_verified_customers=chain_verified,
             high_volume=schemas.HighVolumeStatus(
-                flag=high_volume,
-                ratio=ratio,
-                threshold=float(self.settings.ratio_threshold),
-                sales_3mo=sales_3mo,
-                disputes_3mo=disputes_3mo,
+                flag=hvd.in_tier,
+                ratio=Decimal(hvd.ratio_ppm) / PPM,
+                threshold=Decimal(hvd.threshold_ppm) / PPM,
+                sales_3mo=hvd.settled_txns_3m,
+                disputes_3mo=hvd_inputs.disputed_claims,
+                ratio_ppm=hvd.ratio_ppm,
+                threshold_ppm=hvd.threshold_ppm,
+                ratio_str=hvd.ratio_str,
+                net_sales_minor_3m=hvd.net_sales_amount_minor_3m,
+                disputed_amount_minor_3m=hvd.disputed_amount_minor_3m,
+                amount_until_cliff_minor=hvd.amount_until_cliff_minor,
+                active_fee_tier_usd_cents=hvd.active_fee_tier_usd_cents,
+                fee_reimbursable_on_win=hvd.fee_reimbursable_on_win,
+                sla_response_days=hvd.sla_response_days,
+                window_start=hvd_inputs.window_start,
+                window_end=hvd_inputs.window_end,
             ),
+            vamp=await self.vamp_status(),
+            rules_manifest_sha256=get_manifest().sha256,
             generated_at=datetime.now(UTC),
         )
 
+    async def _resolved_deflected_inquiries(self, cases: Sequence[DisputeCase]) -> int:
+        """INQUIRY cases closed amicably after an executed SEND_MESSAGE/MAKE_OFFER."""
+        closed = [
+            case
+            for case in cases
+            if DisputeStage(case.lifecycle_stage) in (DisputeStage.RESOLVED, DisputeStage.CLOSED)
+        ]
+        if not closed:
+            return 0
+        rows = (
+            await self.session.execute(
+                select(DisputeActionRecord.dispute_id, DisputeActionRecord.request_payload).where(
+                    DisputeActionRecord.dispute_id.in_([case.dispute_id for case in closed]),
+                    DisputeActionRecord.action.in_(
+                        [DisputeAction.SEND_MESSAGE.value, DisputeAction.MAKE_OFFER.value]
+                    ),
+                    DisputeActionRecord.status == ActionStatus.EXECUTED.value,
+                )
+            )
+        ).all()
+        deflected: set[str] = set()
+        for dispute_id, payload in rows:
+            if (payload or {}).get("stage", DisputeStage.INQUIRY.value) == (
+                DisputeStage.INQUIRY.value
+            ):
+                deflected.add(dispute_id)
+        return len(deflected)
+
     # ------------------------------------------------------------------ internals
     async def _apply_event(
-        self, record: WebhookEventRecord, event: WebhookEvent
+        self,
+        record: WebhookEventRecord,
+        event: WebhookEvent,
+        *,
+        preset_snapshot: Mapping[str, Any] | None = None,
     ) -> DisputeCase | None:
         dispute = event.dispute
         if dispute is None:
@@ -888,8 +1232,17 @@ class DisputeService:
         case.subscription_suspended = containment.suspended
         case.facts_snapshot = {
             **(case.facts_snapshot or {}),
+            **dict(preset_snapshot or {}),
             CONTAINMENT_SNAPSHOT_KEY: asdict(containment),
         }
+        if dispute.messages:
+            case.facts_snapshot = {
+                **case.facts_snapshot,
+                MESSAGES_SNAPSHOT_KEY: [dict(message) for message in dispute.messages],
+            }
+        origin = (preset_snapshot or {}).get(DISPUTE_ORIGIN_KEY)
+        if origin == "internal_test_event":
+            case.source_plane = "INTERNAL_TEST_EVENT"
         await self._apply_triage(case)
         record.processed = True
         await self.session.commit()
@@ -935,6 +1288,10 @@ class DisputeService:
                 subscription_suspended=False,
                 seller_response_due_date=dispute.seller_response_due_date,
                 paypal_links=dict(dispute.links),
+                payment_rail=dispute.payment_rail,
+                external_reason_code=dispute.external_reason_code,
+                amount_minor=to_minor(quantize_money(dispute.amount)),
+                source_plane=_source_plane_for(dispute.payment_rail),
             )
             self.session.add(case)
             return case
@@ -950,6 +1307,9 @@ class DisputeService:
         case.amount_usd = quantize_money(dispute.amount)
         case.seller_response_due_date = dispute.seller_response_due_date
         case.paypal_links = dict(dispute.links)
+        case.payment_rail = dispute.payment_rail
+        case.external_reason_code = dispute.external_reason_code or case.external_reason_code
+        case.amount_minor = to_minor(quantize_money(dispute.amount))
         return case
 
     async def _contain(self, case: DisputeCase) -> ContainmentResult:
@@ -995,32 +1355,26 @@ class DisputeService:
         signals = SignalSet(**facts.signals)
         win = score_win_probability(signals, case.reason_code)
         signal_completeness = completeness(signals)
-        sales_3mo, disputes_3mo = await self._volume_counts(
-            exclude_dispute_id=case.dispute_id
-        )
-        ratio_after = (disputes_3mo + 1) / max(sales_3mo, 1)
-        high_volume = (
-            sales_3mo >= self.settings.high_volume_min_sales
-            and ratio_relation(ratio_after, self.settings.ratio_threshold) == "at_or_above"
-        )
+        hvd = await self._hvd_inputs(exclude_dispute_id=case.dispute_id)
         stage = DisputeStage(case.lifecycle_stage)
         channel = DisputeChannel(case.dispute_channel)
         links = dict(case.paypal_links or {})
         amount = quantize_money(as_decimal(case.amount_usd))
-        prior_claim = (case.facts_snapshot or {}).get("buyer_claim_text")
+        previous = dict(case.facts_snapshot or {})
+        prior_claim = previous.get("buyer_claim_text")
         if prior_claim and not facts.buyer_claim_text:
             facts = facts.model_copy(update={"buyer_claim_text": prior_claim})
         inputs = EvInputs(
             amount_usd=amount,
             p_win=win.score,
-            sales_3mo=sales_3mo,
-            disputes_3mo=disputes_3mo,
-            high_volume=high_volume,
-            claim_fee_attached=stage in CLAIM_STAGES,
+            stage=stage,
+            payment_rail=case.payment_rail or "PAYPAL_WALLET",
+            reason_code=case.reason_code,
+            settled_txns_3m=hvd.settled_txns,
+            net_sales_minor_3m=hvd.net_sales_minor,
+            disputed_amount_minor_3m=hvd.disputed_minor,
+            disputes_3mo=hvd.disputed_claims,
             offer_ratio=self.settings.offer_ratio,
-            standard_fee_usd=self.settings.standard_fee_usd,
-            high_volume_fee_usd=self.settings.high_volume_fee_usd,
-            ratio_threshold=self.settings.ratio_threshold,
         )
         outcome = compute_ev(inputs)
         breakdown = to_breakdown(inputs, outcome)
@@ -1037,11 +1391,11 @@ class DisputeService:
             )
         )
 
-        case.p_win = Decimal(str(round(win.score, 4)))
+        case.p_win = Decimal(str(win.score)).quantize(Decimal("0.0001"))
         case.ev_fight_usd = quantize_money(outcome.ev_fight)
         case.ev_settle_usd = quantize_money(outcome.ev_settle)
         case.ev_offer_usd = quantize_money(outcome.ev_offer)
-        case.telemetry_completeness = Decimal(str(round(signal_completeness, 4)))
+        case.telemetry_completeness = Decimal(str(signal_completeness))
         case.recommended_action = decision.action.value
         case.action_rationale = [item.model_dump(mode="json") for item in decision.rationale]
         snapshot = {
@@ -1049,14 +1403,16 @@ class DisputeService:
             TRIAGE_SNAPSHOT_KEY: {
                 "breakdown": breakdown.model_dump(mode="json"),
                 "win_probability": win.model_dump(mode="json"),
+                "hvd_window": [hvd.window_start.isoformat(), hvd.window_end.isoformat()],
             },
         }
-        containment = (case.facts_snapshot or {}).get(CONTAINMENT_SNAPSHOT_KEY)
-        if containment is not None:
-            snapshot[CONTAINMENT_SNAPSHOT_KEY] = containment
-        origin = (case.facts_snapshot or {}).get(DISPUTE_ORIGIN_KEY)
-        if origin is not None:
-            snapshot[DISPUTE_ORIGIN_KEY] = origin
+        # Every private key (containment proof, origin, PayPal thread, the
+        # dossier record, Sentinel audit) survives a re-triage untouched.
+        for key in PRIVATE_SNAPSHOT_KEYS - {TRIAGE_SNAPSHOT_KEY}:
+            if key in previous:
+                snapshot[key] = previous[key]
+        if prior_claim and "buyer_claim_text" not in snapshot:
+            snapshot["buyer_claim_text"] = prior_claim
         case.facts_snapshot = snapshot
         return decision
 
@@ -1083,14 +1439,28 @@ class DisputeService:
                 else self.settings.offer_ratio
             )
             amount = quantize_money(as_decimal(case.amount_usd) * as_decimal(ratio))
-            note = f"Goodwill offer of {amount} USD to resolve dispute {case.dispute_id}."
+            note = (request.note or "").strip() or (
+                f"Goodwill offer of {amount} USD to resolve dispute {case.dispute_id}."
+            )
             return await self.gateway.make_offer(
-                case.dispute_id, amount, note, currency=case.currency
+                case.dispute_id,
+                amount,
+                note,
+                currency=case.currency,
+                offer_type=request.offer_type or "REFUND",
             )
 
         if action is DisputeAction.ACCEPT_CLAIM:
             note = f"Merchant accepts claim {case.dispute_id}."
-            return await self.gateway.accept_claim(case.dispute_id, note)
+            return await self.gateway.accept_claim(
+                case.dispute_id,
+                note,
+                accept_claim_type=request.accept_claim_type or "REFUND",
+            )
+
+        if action is DisputeAction.ESCALATE:
+            note = (request.note or "").strip() or f"Seller escalates {case.dispute_id}."
+            return await self.gateway.escalate(case.dispute_id, note[:MESSAGE_MAX_CHARS])
 
         raise ValidationFailedError(f"Unsupported dispute action: {action}.")
 
@@ -1113,41 +1483,120 @@ class DisputeService:
         case.seller_response_due_date = dispute.seller_response_due_date
         case.paypal_links = dict(dispute.links)
 
-    async def _volume_counts(self, *, exclude_dispute_id: str | None = None) -> tuple[int, int]:
-        """Completed sales and disputes in the trailing 90-day window.
+    async def _hvd_inputs(self, *, exclude_dispute_id: str | None = None) -> HvdInputs:
+        """Dollar-weighted PayPal HVD inputs over the 3 full calendar months.
 
-        Triage passes the case being decided so disputes_3mo counts *prior*
-        disputes only: the EV engine then applies its own (disputes_3mo + 1)
-        increment once, never twice.
+        Wallet rail only. Net sales = settled (COMPLETED/CAPTURED) wallet sales.
+        Disputed amount = wallet INR/SNAD *claims* (historic sales flagged
+        ``disputed_claim`` plus live cases in a claim stage). Unescalated
+        INQUIRY cases and UNBRANDED_CARD disputes never count. The case being
+        decided is excluded so the EV engine adds it exactly once.
         """
-        cutoff = datetime.now(UTC) - timedelta(days=VOLUME_WINDOW_DAYS)
-        sales = (
-            await self.session.scalar(
-                select(func.count())
-                .select_from(PaypalTransaction)
-                .where(
-                    PaypalTransaction.merchant_id == self.merchant_id,
-                    PaypalTransaction.status == "COMPLETED",
-                    PaypalTransaction.created_at >= cutoff,
-                )
-            )
-            or 0
+        rules = get_manifest().section("hvd")
+        window_start, window_end = full_calendar_months_window(
+            datetime.now(UTC), int(rules["lookback_full_calendar_months"])
         )
-        dispute_filters = [
+        wallet_sales = (
+            PaypalTransaction.merchant_id == self.merchant_id,
+            PaypalTransaction.status.in_(SETTLED_STATUSES),
+            PaypalTransaction.payment_rail == "PAYPAL_WALLET",
+            PaypalTransaction.created_at >= window_start,
+            PaypalTransaction.created_at < window_end,
+        )
+        row = (
+            await self.session.execute(
+                select(func.count(), func.coalesce(func.sum(PaypalTransaction.amount_usd), 0))
+                .select_from(PaypalTransaction)
+                .where(*wallet_sales)
+            )
+        ).one()
+        settled, net_sales = int(row[0] or 0), as_decimal(row[1] or 0)
+        claimed = (
+            await self.session.execute(
+                select(func.count(), func.coalesce(func.sum(PaypalTransaction.amount_usd), 0))
+                .select_from(PaypalTransaction)
+                .where(*wallet_sales, PaypalTransaction.disputed_claim.is_(True))
+            )
+        ).one()
+        claim_filters = [
             DisputeCase.merchant_id == self.merchant_id,
-            DisputeCase.created_at >= cutoff,
+            DisputeCase.payment_rail == "PAYPAL_WALLET",
+            DisputeCase.reason_code.in_(list(rules["countable_reasons"])),
+            DisputeCase.lifecycle_stage.in_(list(rules["countable_stages"])),
+            DisputeCase.created_at >= window_start,
+            DisputeCase.created_at < window_end,
         ]
         if exclude_dispute_id is not None:
-            dispute_filters.append(DisputeCase.dispute_id != exclude_dispute_id)
-        disputes = (
-            await self.session.scalar(
-                select(func.count())
+            claim_filters.append(DisputeCase.dispute_id != exclude_dispute_id)
+        live = (
+            await self.session.execute(
+                select(func.count(), func.coalesce(func.sum(DisputeCase.amount_usd), 0))
                 .select_from(DisputeCase)
-                .where(*dispute_filters)
+                .where(*claim_filters)
             )
-            or 0
+        ).one()
+        return HvdInputs(
+            settled_txns=settled,
+            net_sales_minor=to_minor(net_sales),
+            disputed_minor=to_minor(as_decimal(claimed[1] or 0))
+            + to_minor(as_decimal(live[1] or 0)),
+            disputed_claims=int(claimed[0] or 0) + int(live[0] or 0),
+            window_start=window_start,
+            window_end=window_end,
         )
-        return int(sales), int(disputes)
+
+    async def _current_sla_days(self) -> int:
+        hvd = await self._hvd_inputs()
+        return hvd_state(
+            settled_txns_3m=hvd.settled_txns,
+            net_sales_minor_3m=hvd.net_sales_minor,
+            disputed_amount_minor_3m=hvd.disputed_minor,
+        ).sla_response_days
+
+    async def vamp_status(self) -> schemas.VampStatus | None:
+        """Latest month of the simulated card-network feed, or None if absent."""
+        feed = await self.session.scalar(
+            select(CardNetworkMonthlyFeed)
+            .where(CardNetworkMonthlyFeed.merchant_id == self.merchant_id)
+            .order_by(CardNetworkMonthlyFeed.month.desc())
+            .limit(1)
+        )
+        if feed is None:
+            return None
+        vamp = vamp_state(
+            tc05_settled_cnp=feed.tc05_count,
+            tc40_fraud_count=feed.tc40_count,
+            tc15_dispute_count=feed.tc15_count,
+            dual_counted_events=feed.dual_counted,
+            ce3_remedied_tc15=feed.ce3_remedied_tc15,
+        )
+        ecp = ecp_state(
+            prior_month_settled_mc=feed.mc_prior_month_settled,
+            current_month_chargebacks_mc=feed.mc_chargebacks,
+        )
+        return schemas.VampStatus(
+            month=feed.month,
+            tc05_settled_cnp=vamp.tc05_settled_cnp,
+            tc40_fraud_count=vamp.tc40_fraud_count,
+            tc15_dispute_count=vamp.tc15_dispute_count,
+            ce3_remedied_tc15=vamp.ce3_remedied_tc15,
+            dual_counted_events=vamp.dual_counted_events,
+            combined_events=vamp.combined_events,
+            monthly_floor_events=vamp.monthly_floor_events,
+            ratio_ppm=vamp.ratio_ppm,
+            ratio_str=vamp.ratio_str,
+            threshold_ppm=vamp.threshold_ppm,
+            excessive_enforcement_active=vamp.excessive_enforcement_active,
+            projected_vamp_fines_usd_cents=vamp.projected_vamp_fines_usd_cents,
+            projected_vamp_fines_str=vamp.projected_vamp_fines_str,
+            events_until_cliff=vamp.events_until_cliff,
+            ecp_ratio_ppm=ecp.ratio_ppm,
+            ecp_threshold_ppm=ecp.threshold_ppm,
+            ecp_warning=ecp.warning,
+            ecp_breached=ecp.breached,
+            mc_chargebacks=ecp.current_month_chargebacks_mc,
+            mc_prior_month_settled=ecp.prior_month_settled_mc,
+        )
 
     async def _find_event(self, event_id: str) -> WebhookEventRecord | None:
         return await self.session.scalar(
@@ -1189,20 +1638,34 @@ class DisputeService:
     def _facts_from_snapshot(
         self, snapshot: Mapping[str, Any], case: DisputeCase
     ) -> schemas.CaseFacts:
+        """Rebuild CaseFacts from a stored snapshot, tolerating partial dicts.
+
+        Older or partially written snapshots (for example one holding only the
+        buyer claim text) must never surface as a 500 ValidationError.
+        """
         payload = {
             key: value
-            for key, value in snapshot.items()
-            if key not in (TRIAGE_SNAPSHOT_KEY, CONTAINMENT_SNAPSHOT_KEY, DISPUTE_ORIGIN_KEY)
+            for key, value in (snapshot or {}).items()
+            if key not in PRIVATE_SNAPSHOT_KEYS
         }
-        if payload:
-            return schemas.CaseFacts.model_validate(payload)
-        return schemas.CaseFacts(
-            payer_id=case.paypal_payer_id,
-            chain_valid=False,
-            chain_head="",
-            event_count=0,
-            completeness=0.0,
-        )
+        fallback: dict[str, Any] = {
+            "payer_id": case.paypal_payer_id,
+            "chain_valid": False,
+            "chain_head": "",
+            "event_count": 0,
+            "completeness": 0.0,
+        }
+        try:
+            return schemas.CaseFacts.model_validate({**fallback, **payload})
+        except ValidationError as exc:
+            logger.warning(
+                "facts_snapshot_invalid",
+                extra=log_context(dispute_id=case.dispute_id, errors=exc.error_count()),
+            )
+            claim = payload.get("buyer_claim_text")
+            if isinstance(claim, str) and claim:
+                fallback["buyer_claim_text"] = claim[:4000]
+            return schemas.CaseFacts.model_validate(fallback)
 
     def _webhook_envelope(self, dispute: PayPalDisputeRecord) -> dict[str, Any]:
         """Render a PayPal-shaped CUSTOMER.DISPUTE.CREATED body for the sandbox."""
@@ -1232,5 +1695,9 @@ class DisputeService:
                 ),
                 "links": [{"rel": rel, "href": href} for rel, href in dispute.links.items()],
                 "create_time": dispute.created_at.isoformat(),
+                "external_reason_code": dispute.external_reason_code,
+                "payment_rail": dispute.payment_rail,
+                "allowed_response_options": dict(dispute.allowed_response_options),
+                "messages": [dict(message) for message in dispute.messages],
             },
         }

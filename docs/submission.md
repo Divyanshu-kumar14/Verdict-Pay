@@ -20,8 +20,8 @@ seeded database and the test gates. Placeholders a human must fill are marked `[
 PayPal REST APIs (Disputes v1, Orders v2, Subscriptions v1, Reporting v1, Notifications v1)
 Python 3.12+ · FastAPI · Pydantic v2 · SQLAlchemy 2.0 (async) · SQLite · httpx · ReportLab · pypdf
 Next.js 15 · React 19 · TypeScript 5.9 · Tailwind CSS 4 · AG Grid Community 34
-OpenAI-compatible Chat Completions API · Ollama (optional local model) · Docker Compose
-uv · pnpm · pytest · Vitest · Ruff · ESLint · Postman
+Google Gemini (google-genai, gemini-2.5-flash) · OpenAI-compatible Chat Completions API · Ollama (optional local model) · Docker Compose
+uv · pnpm · pytest · Vitest · Playwright · Ruff · ESLint · Postman
 ```
 
 Not claimed anywhere: Bryntum Scheduler, AG Studio, Elastic Cloud, or a live PayPal sandbox
@@ -79,21 +79,31 @@ plausible one.
 **What is novel is the ordering.** Most dispute tools generate prose first and check it later, or
 price a dispute after the fee is already attached. VerdictPay inverts both: the money is decided by
 a pure EV function whose constants are unit-tested to the cent, and the prose is generated last,
-inside the fence the facts built. The fee-cliff model is the part merchants feel: with 200 sales in
-the trailing 90 days, the **third** dispute moves the rolling ratio from 1.0% to 1.5% — exactly onto
-PayPal's high-volume threshold — which re-prices the portfolio at $30 per escalated claim plus a $90
-three-dispute penalty exposure. By the time the seeded queue is live the ratio sits at 2.5–3.0%, so
-every subsequent fight carries the never-refunded fee. VerdictPay prices that crossing and then picks
+inside the fence the facts built. The fee-cliff model is the part merchants feel, and it is
+dollar-weighted: `disputed_amount_minor_3m / net_sales_minor_3m` against PayPal's 1.5% line.
+An INQUIRY that crosses carries a $45.00 penalty — `($30 − $15) × 3` — while a claim-stage
+crossing is sunk and unpriced. A lost $99 claim in the high-volume tier costs `-(99 + 30) − 45`;
+a won one still costs the never-refunded $30. VerdictPay prices that crossing and then picks
 the action that avoids it — usually a zero-fee evidence-backed inquiry deflection that ends the case
 before a claim fee can attach.
+
+**CliffGuard is the second gate.** The same two-axis cliff (`TwoAxisCliffs`: HVD dollars, Visa VAMP
+counts) is enforced by an isolated Sentinel subprocess (`python -I -B`, no sockets, CPU/memory/file
+limits) that returns EXIT CODE 0/2 before any PayPal write. An ALLOW carries a signed HMAC
+`ApprovalToken`; a VETO blocks with machine-checkable codes. The `/veto-lab` page runs three
+executable negative controls (naive float triage, the recorded `@paypal/agent-toolkit@1.11.0` trace,
+a live LLM attack) against the real Sentinel and shows each veto with its exit code. The policy
+constants the gate enforces live in `app/oracle/rules_manifest.json`, pinned by
+`python scripts/pin_oracle_manifest.py` at boot.
 
 **The demo is seven steps and it is not a video.** Two panes: a buyer storefront on the left, the
 merchant command center on the right. The steps run checkout, telemetry, chain verification, dispute
 creation, deterministic triage, Gemini analysis and dossier verification, each showing its real
-identifiers and response data. The seeded SNAD claim prices live: p(win) 90.0%, EV fight -$41.40, EV
-settle -$99.00, EV offer -$29.70, policy recommendation DEFLECT_INQUIRY at a $0.00 fee, and a
-decision-comparison panel that names the cheapest modelled loss separately from the policy choice. The
-CLI variant files INR instead and asserts p(win) 0.95, EV fight -$35.70. Behind those screens: the
+identifiers and response data. Every claim prices live from the two-tier fee model: in PayPal's high-volume tier the $30 fee
+replaces the $15 fee (a lost $100 claim costs -$130, a won one still costs -$30), accepting in
+INQUIRY is fee-free, and the policy recommendation is shown next to a decision-comparison panel that
+names the cheapest modelled loss separately from the policy choice. A PayPal Wallet INR scores 5 of 6
+telemetry signals (Visa CE 3.0 applies only to unbranded-card 10.4 fraud). Behind those screens: the
 backend pytest suite, the frontend unit and component suites, the HTTP contract tests that drive a real
 server, the SDK tests and the 26 end-to-end assertions against PayPal Sandbox, all reproducible
 with `make test` (offline, using a test-only fake gateway) and `make demo` (sandbox credentials from `.env`).
@@ -109,7 +119,9 @@ with `make test` (offline, using a test-only fake gateway) and `make demo` (sand
 | Fallback | Deterministic template narrative, offline, no key, cannot fail | on | [template_provider.py](../backend/app/integrations/llm/template_provider.py) |
 | Guard | `validate_narrative()` rejects invented numbers, unverified dates, banned phrases, non-ASCII | always | [narrative.py](../backend/app/domain/evidence/narrative.py) |
 
-No model is called on the demo path. No model touches an EV number, a win probability, a chain hash
+`LLM_MODE=template` skips only the dossier-time LLM prose; Step 6 of the demo still invokes
+`gemini-2.5-flash` and falls back to the deterministic template when Gemini is unavailable (see
+[Gemini AI layer](#gemini-ai-layer-classify-and-draft-never-decide)). No model touches an EV number, a win probability, a chain hash
 or the PDF layout.
 
 ### Gemini AI layer: classify and draft, never decide
@@ -138,7 +150,7 @@ against api-m.sandbox.paypal.com.
 **How the codebase was built — disclosed, not implied:** VerdictPay was implemented by an AI coding
 agent (DeepSeek-based DSH) working under human direction, with the human owning scope, the frozen
 spec and every merge decision. The agent did not self-certify: each phase closed on executable
-gates, `make verify` runs Ruff, pytest (296), ESLint, `tsc --noEmit`, `next build`, Vitest (188 frontend + 24 SDK) and the
+gates, `make verify` runs Ruff, pytest (473), ESLint, `tsc --noEmit`, `next build`, Vitest (230 frontend + 36 SDK) and the
 26-assertion E2E script, and an adversarial QA pass ([docs/qa/backend-findings.md](qa/backend-findings.md))
 filed 36 probes, found 2 HIGH bugs, and those two now have regression tests
 (`test_chunked_oversized_body_cannot_bypass_the_cap`,
@@ -149,17 +161,18 @@ filed 36 probes, found 2 HIGH bugs, and those two now have regression tests
 | Time | On screen | Spoken |
 |---|---|---|
 | 0:00–0:12 | Title card: "VerdictPay — defend the dispute before the fee" | "PayPal charges $15 to fight a dispute, $30 for a high-volume merchant. VerdictPay decides whether fighting is even worth it." |
-| 0:12–0:28 | `/disputes` AG Grid queue, seeded: 5 cases with `PP-D-TEST-…` ids, EV cells, stage/channel badges | "This is a seeded merchant: five open cases, $497 of exposure, a 2.5% rolling dispute ratio against PayPal's 1.5% high-volume threshold." |
+| 0:12–0:28 | `/disputes` AG Grid queue, seeded: 6 cases with `PP-D-TEST-…` ids, EV cells, stage/channel badges | "This is a seeded merchant: six cases on file — five open ($497.00 of exposure) plus one resolved inquiry ($15.00 fee avoided) — a 1.37% rolling dispute ratio against PayPal's 1.5% high-volume threshold." |
 | 0:28–0:40 | Back to `/` judge sandbox, both panes visible | "One page. Buyer storefront left, merchant command center right. Nothing on the right is mocked." |
 | 0:40–0:55 | Click **1 · Checkout $99 Pro plan**; step log prints order, subscription, payer | "Orders v2 creates the order, Subscriptions v1 binds the plan, and the SDK ties the payer id to the exact Terms-of-Service hash the buyer accepted." |
 | 0:55–1:10 | Click **Record usage**; ledger shows 4 events, chain badge flips to verified | "Four signed events: ToS, login, delivery with a SHA-256, and 42,000 metered tokens. Each one links to the previous hash. A judge can recompute that chain." |
 | 1:10–1:22 | Zoom the chain hash row; click verify | "Change one row and verification reports the exact sequence number that broke. That is the system of record PayPal asks for and SaaS never keeps." |
-| 1:22–1:38 | Click **Open dispute**; origin badge, containment result, case appears | "The buyer files a SNAD claim. If PayPal sent a webhook for this order we use it; otherwise the API opens the case and labels its origin. Containment tries to suspend the subscription and reports PayPal's answer, and the fact pack locks." |
-| 1:38–1:55 | EV cards: Fight -$41.40, Settle -$99.00, Offer -$29.70 (Best EV) | "Fight is minus $41.40. Settle is the full claim. Offer is minus $29.70 and wins on raw EV — but the policy picks the zero-fee move first." |
+| 1:22–1:38 | Click **Open dispute**; origin badge, containment result, case appears | "The buyer files an INR claim. If PayPal sent a webhook for this order we use it; otherwise the API opens the case and labels its origin. Containment tries to suspend the subscription and reports PayPal's answer, and the fact pack locks." |
+| 1:38–1:55 | EV cards: Fight -$58.80, Settle -$99.00, Offer -$29.70 (Best EV) | "Fight is minus $58.80 — a $99 claim that crosses the 1.5% cliff with the $45 penalty. Settle is the full claim. Offer is minus $29.70 and wins on raw EV — but the policy picks the zero-fee move first." |
 | 1:55–2:08 | Click **Deflect inquiry**; result chip `SKIPPED · Send message` for an `internal_test_event` case (`EXECUTED` for a `paypal_sandbox` case) | "A zero-fee, evidence-backed inquiry deflection through PayPal's send-message endpoint. This case exists only in VerdictPay, so nothing is sent to PayPal and the action is recorded as skipped. The HATEOAS guard means we cannot call an action PayPal would reject." |
-| 2:08–2:22 | Case room, download **dossier.pdf**; PDF pages scroll: chain table, ToS snapshot, usage ledger, CE 3.0 exhibit | "The dossier is ReportLab, built from the locked facts. Three pages, payer id and chain head printed, no secrets. That is the prove-it artifact." |
-| 2:22–2:36 | `/analytics`: queue 6, open exposure $596.00, fees avoided $60.00, ratio 3.00% vs 1.50% | "Six cases, $596 exposure, $60 of fees avoided, and the ratio that decides whether the next dispute costs $15 or $30." |
-| 2:36–2:52 | Terminal: `git clone … && cd Verdict-Pay && make install && make stack`, then `make web` — green assertions | "Clone it, make install, make stack, make web. Twenty-six assertions, sandbox credentials required. Everything you just saw runs with real sandbox orders." |
+| 2:08–2:20 | Case room, download **dossier.pdf**; PDF pages scroll: chain table, ToS snapshot, usage ledger, CE 3.0 exhibit | "The dossier is ReportLab, built from the locked facts. Three pages, payer id and chain head printed, no secrets. That is the prove-it artifact." |
+| 2:20–2:34 | `/veto-lab`: run all three; EXIT CODE 2 vetoes and dry-run ALLOWs | "CliffGuard: three negative controls against the isolated Sentinel. Unguarded proposals are vetoed with exit code 2; hardened alternatives get a signed token. Crime versus exorcism, on one page." |
+| 2:34–2:44 | `/analytics` (the 1:22 UI dispute is still open): 6 open cases (7 cases on file), $596.00 open exposure, $15.00 fees avoided, ratio 1.37% vs 1.50% | "Six open cases, $596 exposure, $15 of fees avoided. The ratio still reads 1.37%: an unescalated inquiry does not count toward PayPal's high-volume ratio, and that ratio decides whether the next dispute costs $15 or $30." |
+| 2:44–2:58 | Terminal: `git clone … && cd Verdict-Pay && make install && make stack`, then `make web` — green assertions | "Clone it, make install, make stack, make web. Twenty-six assertions, sandbox credentials required. Everything you just saw runs with real sandbox orders." |
 
 **Production checklist**
 
@@ -200,21 +213,22 @@ curl -s localhost:8000/api/v1/health
 
 **What you will see** (fresh seed, sandbox gateway; every value comes from [demo.md](demo.md)):
 
-| Field | UI path — third button files **SNAD** | CLI path — `make demo` files **INR** |
+| Field | UI path — third button files **INR** (no `reason_code` sent) | CLI path — `make demo` files **INR** |
 |---|---|---|
 | Case id | `PP-D-TEST-…` (origin `internal_test_event`), or a PayPal id if PayPal creates it (`paypal_sandbox`) | same |
-| Reason / stage / channel | SNAD · INQUIRY · INTERNAL | INR · INQUIRY · INTERNAL |
+| Reason / stage / channel | INR · INQUIRY · INTERNAL | INR · INQUIRY · INTERNAL |
 | Claim amount | `$99.00` | `$99.00` |
-| p(win) | `90.0%` (SNAD multiplier 0.90) | `95.0%` (INR multiplier 1.00) |
-| EV fight / settle / offer | `-$41.40` / `-$99.00` / `-$29.70` (best EV) | `-$35.70` / `-$99.00` / `-$29.70` |
+| p(win) | `80.0%` (INR multiplier 1.00, 5 of 6 signals — Visa CE 3.0 is card-only) | `80.0%` (INR multiplier 1.00, 5 of 6 signals — Visa CE 3.0 is card-only) |
+| EV fight / settle / offer | `-$58.80` / `-$99.00` / `-$29.70` — a $99 inquiry that crosses the 1.5% line with the $45.00 penalty | `-$58.80` / `-$99.00` / `-$29.70` — a $99 inquiry that crosses the 1.5% line with the $45.00 penalty |
 | Recommendation | `DEFLECT_INQUIRY`, fee `$0.00` | `DEFLECT_INQUIRY`, fee `$0.00` |
 | Containment | `suspended=false` with PayPal's error (the demo payer's fallback subscription `I-BW452GLLEP1G` does not exist in the sandbox) | same |
 | Seller action | `SKIPPED` for `internal_test_event` (nothing sent to PayPal); `EXECUTED` for `paypal_sandbox` | same |
 | Telemetry | 4 new events, `logins=15 · tokens=42,000 · assets=1`, chain verified | same, 42,000 tokens |
 | Dossier | case room → `/dossier.pdf`, `%PDF`, 3 pages | 7 KB, `%PDF` verified; uploaded via `multipart/related` for a `paypal_sandbox` case, upload `SKIPPED` for `internal_test_event` |
-| Reporting | queue 6 · exposure `$596.00` · fees avoided `$60.00` · ratio `3.00%` vs `1.50%` | queue 7 · exposure `$695.00` · fees avoided `$60.00` |
+| Reporting | 6 open cases (7 on file) · exposure `$596.00` · fees avoided `$15.00` · ratio `1.37%` vs `1.50%` | queue 8 · exposure `$695.00` · fees avoided `$15.00` |
 
-The CLI ends at 7 cases because it escalates a second $99 claim to CHARGEBACK and uploads a dossier.
+The CLI adds 2 E2E $99 cases on top of the 6 seeded cases (its escalated claim + its own dispute):
+8 cases / $695 exposure. Fees avoided stays $15.00 — the one seeded historical inquiry.
 Latency and timestamps are the only moving values; EV and p(win) are deterministic.
 
 ## 6. Compliance checklist
@@ -254,9 +268,9 @@ Latency and timestamps are the only moving values; EV and p(win) are determinist
    badge. Open the repo logged out and screenshot it for the submission.
 6. **Submission window — UNVERIFIED locally.** The stated period is October 1 to November 12, 2026.
    Confirm the deadline and timezone on the Devpost page, and submit with margin.
-7. **Repo sync — VERIFIED.** The public `main` branch contains every source file, `LICENSE` and
-   this pack; the tree is clean and local `HEAD` equals `origin/main`. Re-read the GitHub page
-   logged out once more immediately before submitting.
+7. **Repo sync — VERIFY BEFORE SUBMITTING.** Push `cliffguard-upgrade` only when the exit gate
+   in §5 is green, merge to `main` via the hosting remote, then re-read the GitHub page logged out
+   immediately before submitting. Do not claim sync while unpushed.
 
 ## 7. FAQ for judges
 
@@ -284,7 +298,7 @@ Sandbox credentials are required: `PAYPAL_SANDBOX_CLIENT_ID` / `PAYPAL_SANDBOX_C
 
 **Is the data real?**
 
-The 200 trailing-90-day sales and 15 CE 3.0 lookback rows are synthetic demo data from [seed_demo.py](../backend/scripts/seed_demo.py), labelled `source="seed"`, not scraped. The seed's checkouts are real PayPal sandbox orders, and its five disputes go through `POST /api/v1/sandbox/dispute`. Every number derived from it is computed live by the EV engine and the reporting endpoint. The chain hashes are real SHA-256 over the stored rows; the PDF is a real PDF.
+The 200 trailing-90-day sales and 18 CE 3.0 lookback rows are synthetic demo data from [seed_demo.py](../backend/scripts/seed_demo.py), labelled `source="seed"`, not scraped. The seed's checkouts are real PayPal sandbox orders, and its five disputes go through `POST /api/v1/sandbox/dispute`. Every number derived from it is computed live by the EV engine and the reporting endpoint. The chain hashes are real SHA-256 over the stored rows; the PDF is a real PDF.
 
 **What is deterministic and what is generated?**
 

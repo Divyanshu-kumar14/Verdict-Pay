@@ -58,6 +58,9 @@ STEP_CHECKOUT = "checkout"
 STEP_APPROVAL = "approval"
 STEP_CAPTURE = "capture"
 STEP_TELEMETRY = "telemetry"
+REQUIRED_TELEMETRY_TYPES = frozenset(
+    {"TOS_ACCEPTED", "SESSION_AUTH", "USAGE_METERED", "ASSET_DELIVERED"}
+)
 STEP_EVIDENCE = "evidence"
 STEP_DISPUTE = "dispute"
 STEP_TRIAGE = "triage"
@@ -361,6 +364,12 @@ class DemoRunService:
         ai_analyzed = await self._ai_analyzed(dispute_id, tagged)
 
         steps = {**empty_steps(), **(record.steps or {})}
+        # Telemetry sent through the SDK route is tagged with metadata.run_id
+        # instead of passing through /sandbox/usage, so derive the step from the
+        # ledger: all four evidence events present means the step is done.
+        tagged_types = {row.event_type for row in tagged}
+        if tagged_types >= REQUIRED_TELEMETRY_TYPES:
+            steps[STEP_TELEMETRY] = STEP_DONE
         if ai_analyzed:
             steps[STEP_AI] = STEP_DONE
         if case is not None and case.dossier_pdf_url:
@@ -408,9 +417,7 @@ class DemoRunService:
         ).all()
         return [row for row in rows if _event_run_id(row) == run_id]
 
-    async def _ai_analyzed(
-        self, dispute_id: str | None, tagged: list[TelemetryLedger]
-    ) -> bool:
+    async def _ai_analyzed(self, dispute_id: str | None, tagged: list[TelemetryLedger]) -> bool:
         """True only when a real AI provenance event exists for this run's case."""
         if dispute_id is None:
             return False
@@ -448,18 +455,19 @@ class DemoRunService:
             ).all()
         )
         webhook_ids = [
-            _WEBHOOK_ID_TEMPLATE.format(dispute_id=dispute_id)
-            for dispute_id in demo_dispute_ids
+            _WEBHOOK_ID_TEMPLATE.format(dispute_id=dispute_id) for dispute_id in demo_dispute_ids
         ]
 
         # Children first: dispute_actions has a FK to dispute_cases.
+        cleared_actions = 0
         if demo_dispute_ids:
-            await self.session.execute(
+            action_result = await self.session.execute(
                 delete(DisputeActionRecord).where(
                     DisputeActionRecord.dispute_id.in_(demo_dispute_ids)
                 )
             )
-        cleared_actions = len(demo_dispute_ids)
+            # The real number of audit rows removed, not the number of cases.
+            cleared_actions = int(action_result.rowcount or 0)
         if webhook_ids:
             webhook_result = await self.session.execute(
                 delete(WebhookEventRecord).where(WebhookEventRecord.event_id.in_(webhook_ids))
@@ -487,7 +495,10 @@ class DemoRunService:
             )
         )
         run_result = await self.session.execute(
-            delete(DemoRunRecord).where(DemoRunRecord.merchant_id == self.merchant_id)
+            delete(DemoRunRecord).where(
+                DemoRunRecord.merchant_id == self.merchant_id,
+                DemoRunRecord.run_id.startswith(DEMO_RUN_PREFIX),
+            )
         )
 
         cleared_cases = int(case_result.rowcount or 0)

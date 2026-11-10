@@ -14,7 +14,7 @@ import pytest
 from app.api import schemas
 from app.domain.disputes.decision import compare, label_for, policy_reason_from
 from app.domain.disputes.ev import EvInputs, compute_ev, to_breakdown
-from app.domain.disputes.state_machine import to_allowed_actions
+from app.domain.disputes.state_machine import expected_rels, to_allowed_actions
 from app.domain.enums import DisputeAction, DisputeChannel, DisputeStage, RecommendedAction
 
 
@@ -22,11 +22,12 @@ def _breakdown(**overrides: object) -> schemas.EvBreakdown:
     """A chargeback-shaped breakdown; the engine computes the real values."""
     base: dict[str, object] = {
         "amount_usd": Decimal("99.00"),
-        "p_win": 0.7,
-        "sales_3mo": 200,
-        "disputes_3mo": 1,
-        "high_volume": True,
-        "claim_fee_attached": True,
+        "p_win": Decimal("0.7"),
+        "stage": DisputeStage.CHARGEBACK,
+        # HVD tier: $200 disputed / $10,000 net sales over 200 settled sales.
+        "settled_txns_3m": 200,
+        "net_sales_minor_3m": 1_000_000,
+        "disputed_amount_minor_3m": 20_000,
     }
     base.update(overrides)
     inputs = EvInputs(**base)  # type: ignore[arg-type]
@@ -38,7 +39,11 @@ def _allowed(
     channel: DisputeChannel = DisputeChannel.INTERNAL,
     links: dict[str, str] | None = None,
 ) -> list[schemas.AllowedAction]:
-    return to_allowed_actions(stage=stage, channel=channel, links=links or {})
+    return to_allowed_actions(
+        stage=stage,
+        channel=channel,
+        links=links if links is not None else expected_rels(stage),
+    )
 
 
 def _option(
@@ -105,7 +110,7 @@ def test_deflect_inquiry_policy_versus_cheapest_offer() -> None:
     """DEFLECT_INQUIRY is policy; MAKE_OFFER carries the lowest modelled loss."""
     breakdown = schemas.EvBreakdown(
         **{
-            **_breakdown(claim_fee_attached=False).model_dump(),
+            **_breakdown(stage=DisputeStage.INQUIRY).model_dump(),
             # Force the divergence the defect report describes: the offer is the
             # cheapest modelled outcome while policy deflects the inquiry.
             "ev_fight_usd": Decimal("-120.00"),
@@ -185,7 +190,7 @@ def test_unavailable_paypal_action_marks_row_unavailable_with_a_reason() -> None
     comparison = compare(
         breakdown=breakdown,
         policy_action=RecommendedAction.DEFLECT_INQUIRY,
-        allowed_actions=_allowed(stage=DisputeStage.INQUIRY, links={}),
+        allowed_actions=_allowed(stage=DisputeStage.INQUIRY),
     )
 
     fight = _option(comparison, RecommendedAction.PROVIDE_EVIDENCE)
@@ -356,7 +361,7 @@ def test_divergence_says_so_when_the_cheapest_row_is_not_available() -> None:
     comparison = compare(
         breakdown=breakdown,
         policy_action=RecommendedAction.DEFLECT_INQUIRY,
-        allowed_actions=_allowed(stage=DisputeStage.INQUIRY, links={}),
+        allowed_actions=_allowed(stage=DisputeStage.INQUIRY),
     )
 
     fight = _option(comparison, RecommendedAction.PROVIDE_EVIDENCE)
@@ -391,11 +396,11 @@ def test_real_engine_policy_vs_cheapest_divergence_uses_engine_values() -> None:
     assert comparison.best_financial_action is RecommendedAction.MAKE_OFFER
     assert comparison.divergence_explanation is not None
     explanation = comparison.divergence_explanation
-    # Names both actions, states the exact $34.50 gap, and keeps the concepts
+    # Names both actions, states the exact $30.00 gap, and keeps the concepts
     # separate: policy preference vs lowest modelled loss.
     assert "Fight (provide evidence)" in explanation
     assert "Make offer" in explanation
-    assert "$34.50" in explanation  # 64.20 - 29.70
+    assert "$30.00" in explanation  # 59.70 - 29.70 ($30 replaces $15)
     assert "lowest modelled loss" in explanation
     assert "policy preference" in explanation or "not the cheapest" in explanation
     for banned in ("highest expected value", "most profitable", "optimal"):
@@ -427,5 +432,5 @@ def test_real_engine_agree_only_when_policy_is_the_cheapest_row() -> None:
     )
     assert disagree.agree is False
     assert disagree.divergence_explanation is not None
-    # The $84.30 gap between settle (-114.00) and offer (-29.70) is stated.
-    assert "$84.30" in disagree.divergence_explanation
+    # The $99.30 gap between settle (-129.00) and offer (-29.70) is stated.
+    assert "$99.30" in disagree.divergence_explanation

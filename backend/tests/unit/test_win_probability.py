@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 
 from app.domain.disputes.win_probability import (
@@ -45,10 +47,14 @@ def test_score_exact(
     signals: SignalSet, reason: str, expected_score: float, expected_sum: float
 ) -> None:
     result = score_win_probability(signals, reason)
-    assert result.score == expected_score
-    assert result.base == BASE == 0.10
-    assert result.signal_sum == expected_sum
-    assert result.reason_multiplier == REASON_MULTIPLIERS[reason]
+    assert D(result.score) == D(expected_score)
+    assert D(result.base) == BASE == Decimal("0.10")
+    assert D(result.signal_sum) == D(expected_sum)
+    assert D(result.reason_multiplier) == REASON_MULTIPLIERS[reason]
+
+
+def D(value: object) -> Decimal:
+    return Decimal(str(value))
 
 
 def test_clamp_and_contributions_order() -> None:
@@ -63,16 +69,12 @@ def test_clamp_and_contributions_order() -> None:
         "Telemetry chain verified",
         "Visa CE 3.0 prior identity match",
     ]
-    assert [item.delta for item in result.signals] == [
-        WEIGHTS[key] for key in SIGNAL_ORDER
-    ]
+    assert [D(item.delta) for item in result.signals] == [WEIGHTS[key] for key in SIGNAL_ORDER]
     assert all(item.present is True for item in result.signals)
 
 
 def test_absent_signals_have_zero_delta() -> None:
-    result = score_win_probability(
-        SignalSet(ip_match=True), "MERCHANDISE_OR_SERVICE_NOT_RECEIVED"
-    )
+    result = score_win_probability(SignalSet(ip_match=True), "MERCHANDISE_OR_SERVICE_NOT_RECEIVED")
     deltas = {item.key: item.delta for item in result.signals}
     present = {item.key: item.present for item in result.signals}
     assert deltas["ip_match"] == 0.12
@@ -106,13 +108,13 @@ def test_missing_telemetry_lowers_score() -> None:
     "signals,expected",
     [
         (SignalSet(), 0.0),
-        (SignalSet(tos_accepted=True), 0.1667),
+        (SignalSet(tos_accepted=True), 0.1666),  # 1/6 truncated (ROUND_DOWN)
         (SignalSet(tos_accepted=True, ip_match=True, asset_delivered=True), 0.5),
         (ALL_SIGNALS, 1.0),
     ],
 )
 def test_completeness_exact(signals: SignalSet, expected: float) -> None:
-    assert completeness(signals) == expected
+    assert completeness(signals) == D(expected)
 
 
 def test_scoring_is_deterministic() -> None:

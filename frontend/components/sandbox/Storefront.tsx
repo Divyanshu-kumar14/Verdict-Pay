@@ -138,9 +138,21 @@ export function MerchantCheckout({ state }: { state: SandboxFlowState }) {
           </div>
         </div>
         {order ? (
-          <div className="mt-4 rounded-card border border-positive/30 bg-pill-positive/40 px-3 py-2.5">
-            <p className="flex items-center gap-1.5 text-xs font-medium text-positive">
-              <CircleCheck size={12} aria-hidden /> Order captured
+          <div
+            className={
+              order.lifecycle_stage === "CAPTURED"
+                ? "mt-4 rounded-card border border-positive/30 bg-pill-positive/40 px-3 py-2.5"
+                : "mt-4 rounded-card border border-warning/30 bg-pill-warning/40 px-3 py-2.5"
+            }
+          >
+            <p
+              className={
+                order.lifecycle_stage === "CAPTURED"
+                  ? "flex items-center gap-1.5 text-xs font-medium text-positive"
+                  : "flex items-center gap-1.5 text-xs font-medium text-warning"
+              }
+            >
+              <CircleCheck size={12} aria-hidden /> {orderStageLabel(order.lifecycle_stage)}
             </p>
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               <CopyButton value={order.order_id} label={shortHash(order.order_id, 10, 4)} />
@@ -274,9 +286,10 @@ function buildSteps(
       index: 6,
       title: "Generate dossier",
       subtitle: "PDF + SHA-256 manifest + tamper verification",
-      successDetail: state.dossierStatus === "success"
-        ? "Dossier verified"
-        : null,
+      // dossierStatus flips to "success" only after verifyDossier confirms
+      // verified=true; "error" covers both manifest and verification failures.
+      successDetail:
+        state.dossierStatus === "success" ? "Dossier verified" : null,
       action: "Generate dossier",
       status: state.dossierStatus,
       canRun: canDossier || state.dossierStatus === "error",
@@ -378,6 +391,20 @@ export function RealVsSim() {
       </ul>
     </div>
   );
+}
+
+/** Never call an order "captured" before PayPal reports a completed capture. */
+export function orderStageLabel(stage: string | undefined): string {
+  switch (stage) {
+    case "CAPTURED":
+      return "Order captured";
+    case "APPROVED":
+      return "Order approved · awaiting capture";
+    case "FAILED":
+      return "Capture failed";
+    default:
+      return "Order created · awaiting buyer approval";
+  }
 }
 
 export function Storefront({ state, onCheckout, onUsage, onDispute, onEvidence, onAI, onDossier, onReset }: StorefrontProps) {

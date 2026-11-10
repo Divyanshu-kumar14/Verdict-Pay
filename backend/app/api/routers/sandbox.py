@@ -173,9 +173,7 @@ def _is_not_found(exc: UpstreamError) -> bool:
 
 
 def _is_not_approved(exc: UpstreamError) -> bool:
-    return _upstream_code(exc) == "order_not_approved" or _has_issue(
-        exc, "ORDER_NOT_APPROVED"
-    )
+    return _upstream_code(exc) == "order_not_approved" or _has_issue(exc, "ORDER_NOT_APPROVED")
 
 
 def _is_already_captured(exc: UpstreamError) -> bool:
@@ -211,7 +209,7 @@ def _usage_events(
             event_type=TelemetryEventType.TOS_ACCEPTED,
             tos_version=TOS_VERSION,
             tos_content_sha256=_sha256_hex(TOS_TEXT),
-            metadata={"plan": "pro", **run_meta},
+            metadata={"plan": payload.plan, **run_meta},
         ),
         schemas.TelemetryEventIn(
             **common,
@@ -378,9 +376,7 @@ async def sandbox_checkout(
     except UpstreamError:
         # A failed create leaves the run OPEN with checkout marked failed, so the
         # UI can retry honestly instead of showing a phantom order.
-        await runs.touch(
-            run, step=STEP_CHECKOUT, step_state=STEP_FAILED, payer_id=payer_id
-        )
+        await runs.touch(run, step=STEP_CHECKOUT, step_state=STEP_FAILED, payer_id=payer_id)
         raise
 
     stage = _order_stage(order)
@@ -459,8 +455,7 @@ async def get_order(
                 row,
                 settings=settings,
                 detail=(
-                    "The gateway no longer has this order; "
-                    "the state below is the persisted record."
+                    "The gateway no longer has this order; the state below is the persisted record."
                 ),
             )
         raise
@@ -544,9 +539,7 @@ async def capture_order(
     if row is None:
         raise NotFoundError(f"Order {order_id} was not found.")
 
-    replay = await _existing_capture(
-        session, merchant_id=merchant.id, row=row, settings=settings
-    )
+    replay = await _existing_capture(session, merchant_id=merchant.id, row=row, settings=settings)
     if replay is not None:
         return replay
 
@@ -778,6 +771,8 @@ async def open_dispute(
         channel=payload.channel,
         amount=amount,
         buyer_claim_text=payload.claim_text,
+        payment_rail=payload.payment_rail,
+        external_reason_code=payload.external_reason_code,
     )
     if run_id is not None:
         # The tag that makes this case invisible to every other run.

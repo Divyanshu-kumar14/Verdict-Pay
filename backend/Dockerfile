@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1.7
 # VerdictPay API image. Build from the repository root:
 #   docker build -f backend/Dockerfile -t verdictpay/api .
-# The demo is keyless: the simulator gateway is the default and needs no PayPal account.
+# PayPal Sandbox credentials required (PAYPAL_CLIENT_ID / PAYPAL_CLIENT_SECRET);
+# the app boots unconfigured without them and names the missing keys in /health.
 
 FROM python:3.12-slim AS builder
 

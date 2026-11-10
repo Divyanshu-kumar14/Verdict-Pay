@@ -71,7 +71,9 @@ not-as-described 0.90, unauthorized 0.75, other 0.95) and clamped to 0.02–0.95
 Three processes, no broker, no cloud dependency on the demo path.
 
 - **Frontend** — Next.js 15 App Router, React 19, TypeScript, Tailwind 4. Pages: landing, the
-  seven-step `/demo` workflow, disputes list and detail, customer timeline, analytics, settings.
+  seven-step `/demo` workflow, disputes list and detail, customer timeline, analytics, settings,
+  and the `/veto-lab` negative-control suite (CliffGuard: three executable controls against the
+  isolated Sentinel, each with veto/allow provenance).
   One route handler (`/api/sdk/usage`) runs the SDK server-side so the HMAC signing secret never
   reaches the browser.
 - **Backend** — FastAPI on Python 3.12, SQLAlchemy 2 async, SQLite by default (Postgres optional via
@@ -114,26 +116,29 @@ open it and log in as the sandbox buyer. Buyer approval happens only in the PayP
 
 ### Deterministic EV engine
 
-`backend/app/domain/disputes/ev.py` is a pure function. Given a claim amount, a win probability and
-the merchant's 90-day ratio, it prices four actions and picks one by lowest modelled loss with a
-deterministic tie-break.
+`backend/app/domain/disputes/ev.py` is a pure function over integer minor units and integer
+parts-per-million (ppm). The policy constants live in `backend/app/oracle/rules_manifest.json`
+(April 2026 thresholds), whose canonical SHA-256 is pinned in code and checked at boot: a missing,
+float-bearing or edited manifest makes the API exit with code 2.
 
 ```python
-ratio_before   = disputes_3mo / max(sales_3mo, 1)
-ratio_after    = (disputes_3mo + 1) / max(sales_3mo, 1)
-crosses_cliff  = high_volume and ratio_before < 0.015 and ratio_after >= 0.015
-penalty        = 30.00 * 3 if crosses_cliff else 0.00        # 90.00 on the crossing dispute
-
-ev_fight       = p * (-30.00) + (1-p) * (-amount - 15.00 - 30.00 - penalty)
-ev_settle      = -(amount + 15.00) if claim_fee_attached else -amount
-ev_offer       = -(0.30 * amount)                            # offer_ratio default 0.30
+# PayPal HVD (PAYPAL_WALLET only), 3 full calendar months, dollar-weighted
+hvd_ratio_ppm   = disputed_wallet_inr_snad_claims_minor * 1_000_000 // net_sales_minor
+in_hvd_tier     = settled_wallet_txns > 100 and hvd_ratio_ppm >= 15_000
+fee             = 30.00 if in_hvd_tier else 15.00     # $30 REPLACES $15, never both
+win_fee         = 30.00 if in_hvd_tier else 0.00      # HVD fee is charged even on a win
+# an unescalated INQUIRY is not added to the ratio; only the fight path prices escalation
+penalty         = (30.00 - 15.00) * 3 if stage == INQUIRY and fight_would_cross else 0.00
+ev_fight        = p * (-win_fee) + (1 - p) * (-(amount + fee) - penalty)   # $100 loss: -$130 HVD, -$115 standard
+ev_settle       = -amount if stage == INQUIRY else -(amount + fee)         # accept is $0 in INQUIRY
+ev_offer        = -(0.30 * amount)                                         # amicable inquiry offer, $0 fee
 ```
 
-Every value is quantised with `ROUND_HALF_UP` to cents and negative zero is normalised away. The
-breakdown also returns `ratio_relation` (`below` / `at_or_above`) as the authoritative word on where
-the merchant sits against 1.5%. Renderers must read `ratio_relation` and never infer position from
-`crosses_cliff` — that field is `false` both below the line and already above it, which is exactly
-how a UI ends up printing "3.00% below 1.50%".
+Money is quantised with `ROUND_DOWN` (toward zero) so a ratio is never rounded up across a cliff;
+ratios are reported as `ratio_*_ppm` integers plus exact six-place strings. Visa VAMP
+(`(TC40 + TC15) / TC05 >= 15,000 ppm` and `>= 1,500` events, $8 per event) and Mastercard ECP are
+computed by `app/oracle/cliff_engine.py` from a **simulated** acquirer feed and are always labelled
+`[VISA-TC40 / ACQUIRER-FEED SIMULATION]` (`source_plane: "SIMULATED_CARD_NETWORK_FEED"`).
 
 Tie-break order, when two actions price equally: `PROVIDE_EVIDENCE` → `DEFLECT_INQUIRY` →
 `MAKE_OFFER` → `ACCEPT_CLAIM`, then lower fee.
@@ -289,7 +294,6 @@ Every variable below is documented in [.env.example](.env.example). Values shown
 |---|---|---|
 | `VERDICTPAY_API_KEY` | Demo tenant key (public in the browser bundle by design) | `vp_demo_sk_local` |
 | `VERDICTPAY_SIGNING_SECRET` | HMAC key for telemetry signatures | `openssl rand -hex 32` |
-| `VERDICTPAY_WEBHOOK_SECRET` | HMAC key for the internal webhook | `openssl rand -hex 32` |
 | `REQUIRE_SIGNED_TELEMETRY` | Reject unsigned batches; keep `true` | `true` |
 | `WEBHOOK_TOLERANCE_SECONDS` | Replay window for signed timestamps | `300` |
 | `RATE_LIMIT_PER_MINUTE` | In-process limiter, per key | `600` |
@@ -526,9 +530,11 @@ Stated plainly, because a judge should not have to discover these.
 - **Subscription containment needs a real subscription.** The demo payer's fallback subscription id
   does not exist in your sandbox, so containment on a demo dispute reports `suspended: false` with
   PayPal's error rather than claiming a suspension.
-- **Impact metrics are estimates.** `fees_avoided_usd`, `protected_usd` and `win_rate_estimate` in
-  `/reporting/summary` extrapolate the modelled EV over the seeded case set. They are not observed
-  PayPal outcomes.
+- **Impact metrics are exact aggregates, not PayPal observations.** `fees_avoided_usd` counts
+  one active-tier fee per INQUIRY case closed amicably after an executed SEND_MESSAGE or MAKE_OFFER
+  (the seeded historical inquiry contributes one $15.00); `protected_usd` sums open-case amounts with
+  a protected recommendation; `win_rate_estimate` averages confident p(win) scores. They are computed
+  from the seeded case set, not observed PayPal outcomes.
 - **The win probability is a prior, not a prediction.** The weights are a hand-set, documented model.
   They are not fitted to real dispute outcomes, and they should not be read as a calibrated forecast.
 - **`PAYPAL_SANDBOX` is the default (sandbox credentials required).** Order ids and captures are PayPal-assigned sandbox values. The seeded sales history and CE 3.0 lookback rows are synthetic and labelled `source: "seed"`.

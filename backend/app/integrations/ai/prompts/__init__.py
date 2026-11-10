@@ -1,2 +1,1 @@
-"""Versioned prompts for the Gemini AI layer.
-"""
+"""Versioned prompts for the Gemini AI layer."""

@@ -35,9 +35,7 @@ class FakeGateway:
         self.suspended_subscriptions: dict[str, str] = {}
         self.calls: list[tuple[str, str]] = []
 
-    async def suspend_subscription(
-        self, subscription_id: str, reason: str
-    ) -> GatewayResponse:
+    async def suspend_subscription(self, subscription_id: str, reason: str) -> GatewayResponse:
         self.calls.append((subscription_id, reason))
         if subscription_id != self._demo_id:
             raise UpstreamError("subscription_not_found")
@@ -54,9 +52,7 @@ class SlowGateway:
         self.delay_seconds = delay_seconds
         self.calls: list[tuple[str, str]] = []
 
-    async def suspend_subscription(
-        self, subscription_id: str, reason: str
-    ) -> GatewayResponse:
+    async def suspend_subscription(self, subscription_id: str, reason: str) -> GatewayResponse:
         self.calls.append((subscription_id, reason))
         await asyncio.sleep(self.delay_seconds)
         return GatewayResponse(status_code=200, body={}, latency_ms=0)
@@ -174,9 +170,7 @@ async def test_containment_hook_failure_does_not_raise(settings: Settings) -> No
     assert result.attempted is True
     assert result.suspended is True
     assert result.error == "merchant_hook_failed: api key revocation failed"
-    assert gateway.suspended_subscriptions == {
-        settings.demo_subscription_id: "claim opened"
-    }
+    assert gateway.suspended_subscriptions == {settings.demo_subscription_id: "claim opened"}
 
 
 async def test_containment_without_subscription_is_skipped(settings: Settings) -> None:

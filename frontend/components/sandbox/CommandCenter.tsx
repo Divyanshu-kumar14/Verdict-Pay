@@ -662,7 +662,7 @@ export function CommandCenter({
           {restoredFromQueue ? (
             <Badge
               tone="warning"
-              title="Loaded from the latest open dispute in GET /disputes. Run the three steps to create a new case."
+              title="Loaded from the latest open dispute in GET /disputes. Run the demo steps to create a new case."
             >
               Latest case
             </Badge>

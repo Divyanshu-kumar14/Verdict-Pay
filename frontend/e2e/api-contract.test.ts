@@ -2,7 +2,7 @@
  * API contract tests over real HTTP (no mocks, no browser).
  *
  * Every JSON body is validated with the frozen zod schemas from lib/types.ts,
- * so backend contract drift fails here first. Requires the simulator API from
+ * so backend contract drift fails here first. Requires the demo API from
  * docs/demo.md (default http://127.0.0.1:8000, key vp_demo_sk_local).
  *
  * Transport, the one-shot health probe and the failure message live in
@@ -45,8 +45,12 @@ describe("api-contract", () => {
 
     expect(res.status).toBe(200);
     const health = HealthResponseSchema.parse(res.payload);
-    expect(health.gateway_status.mode).toBe("PAYPAL_SANDBOX");
-    expect(health.gateway_status.readiness).toBe("ready");
+    const gateway = health.gateway_status;
+    if (gateway === null) {
+      throw new Error("health.gateway_status is null");
+    }
+    expect(gateway.mode).toBe("PAYPAL_SANDBOX");
+    expect(gateway.readiness).toBe("ready");
   });
 
   it("lists the seeded dispute queue", async () => {
@@ -77,7 +81,7 @@ describe("api-contract", () => {
     const detail = DisputeDetailSchema.parse(res.payload);
     expect(detail.facts.chain_valid).toBe(true);
     expect(detail.win_probability.signals).toHaveLength(6);
-    expect(detail.allowed_actions).toHaveLength(4);
+    expect(detail.allowed_actions).toHaveLength(6);
     expect(Number(detail.breakdown.ev_fight_usd)).toBeLessThan(0);
   });
 

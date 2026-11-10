@@ -50,6 +50,7 @@ def _legacy_mode_for(base: str) -> GatewayMode:
         return GatewayMode.PAYPAL_SANDBOX
     return GatewayMode.PAYPAL_SANDBOX if "sandbox" in base.lower() else GatewayMode.PAYPAL_LIVE
 
+
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
 _REPO_DIR = _BACKEND_DIR.parent
 _ENV_FILES = (str(_BACKEND_DIR / ".env"), str(_REPO_DIR / ".env"))
@@ -98,6 +99,9 @@ class Settings(BaseSettings):
     # --- secrets / auth ---------------------------------------------------
     verdictpay_api_key: str = "vp_demo_sk_local"
     verdictpay_signing_secret: str = "dev-signing-secret-change-me"
+    # Legacy HMAC secret for test/fake webhook signing. NOT wired to PayPal's
+    # verify-webhook-signature (which uses transmission headers + webhook ID),
+    # and NOT checked in production — a dead secret must not fail boot.
     verdictpay_webhook_secret: str = "dev-webhook-secret-change-me"
     webhook_tolerance_seconds: int = 300
     allow_unsigned_webhooks: bool = False
@@ -195,11 +199,7 @@ class Settings(BaseSettings):
             object.__setattr__(self, "paypal_mode", _legacy_mode_for(base).value)
         if not base:
             resolved = self.gateway_mode
-            base = (
-                PAYPAL_LIVE_BASE
-                if resolved is GatewayMode.PAYPAL_LIVE
-                else PAYPAL_SANDBOX_BASE
-            )
+            base = PAYPAL_LIVE_BASE if resolved is GatewayMode.PAYPAL_LIVE else PAYPAL_SANDBOX_BASE
         object.__setattr__(self, "paypal_api_base", base)
         return self
 
@@ -217,7 +217,6 @@ class Settings(BaseSettings):
             for name, value in (
                 ("verdictpay_api_key", self.verdictpay_api_key),
                 ("verdictpay_signing_secret", self.verdictpay_signing_secret),
-                ("verdictpay_webhook_secret", self.verdictpay_webhook_secret),
             )
             if not value or value.startswith(_DEV_SECRET_PREFIX)
         ]

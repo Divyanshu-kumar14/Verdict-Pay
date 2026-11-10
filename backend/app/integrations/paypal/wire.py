@@ -27,8 +27,17 @@ _STAGES: dict[str, DisputeStage] = {
     "INQUIRY": DisputeStage.INQUIRY,
     "CHARGEBACK": DisputeStage.CHARGEBACK,
     "PRE_ARBITRATION": DisputeStage.PRE_ARBITRATION,
+    "ARBITRATION": DisputeStage.ARBITRATION,
     "RESOLVED": DisputeStage.RESOLVED,
     "CLOSED": DisputeStage.CLOSED,
+}
+
+# Reporting v1 transaction_status is a one-letter code, not an Orders v2 status.
+_REPORTING_STATUS: dict[str, str] = {
+    "S": "COMPLETED",
+    "P": "PENDING",
+    "V": "REVERSED",
+    "D": "DENIED",
 }
 
 _CHANNELS: dict[str, DisputeChannel] = {
@@ -193,6 +202,54 @@ def _first_str(payload: Mapping[str, Any] | Any, *keys: str) -> str | None:
     return None
 
 
+_MESSAGE_MAX_CHARS = 4000
+_MESSAGES_MAX = 50
+
+
+def parse_messages(raw: Any) -> tuple[dict[str, str], ...]:
+    """PayPal ``messages[]`` as bounded ``{posted_by, time_posted, content}`` dicts."""
+    if not isinstance(raw, Sequence) or isinstance(raw, (str, bytes)):
+        return ()
+    messages: list[dict[str, str]] = []
+    for item in raw[:_MESSAGES_MAX]:
+        if not isinstance(item, Mapping):
+            continue
+        content = item.get("content")
+        if not isinstance(content, str):
+            continue
+        messages.append(
+            {
+                "posted_by": str(item.get("posted_by") or "UNKNOWN")[:16],
+                "time_posted": str(item.get("time_posted") or "")[:40],
+                "content": content[:_MESSAGE_MAX_CHARS],
+            }
+        )
+    return tuple(messages)
+
+
+def _external_reason_code(payload: Mapping[str, Any]) -> str | None:
+    code = _first_str(payload, "external_reason_code")
+    return code[:16] if code else None
+
+
+def infer_payment_rail(payload: Mapping[str, Any], external_reason_code: str | None) -> str:
+    """PAYPAL_WALLET unless the payload says otherwise.
+
+    Disputes v1 has no explicit rail field. An explicit ``payment_rail`` wins;
+    otherwise an EXTERNAL dispute carrying a Visa-style ``NN.N`` network reason
+    code (for example ``10.4``) is treated as an unbranded card transaction.
+    """
+    explicit = _first_str(payload, "payment_rail")
+    if explicit in {"PAYPAL_WALLET", "UNBRANDED_CARD"}:
+        return explicit
+    channel = str(payload.get("dispute_channel") or "").upper()
+    code = external_reason_code or ""
+    head, _, tail = code.partition(".")
+    if channel == "EXTERNAL" and head.isdigit() and tail.isdigit():
+        return "UNBRANDED_CARD"
+    return "PAYPAL_WALLET"
+
+
 def parse_dispute(
     payload: Mapping[str, Any], *, now: datetime | None = None
 ) -> PayPalDisputeRecord:
@@ -205,6 +262,7 @@ def parse_dispute(
     created_at = parse_datetime(
         payload.get("create_time") or payload.get("created_at")
     ) or ensure_utc(now or datetime.now(UTC))
+    external_code = _external_reason_code(payload)
 
     return PayPalDisputeRecord(
         dispute_id=_first_str(payload, "dispute_id", "id") or "",
@@ -232,11 +290,25 @@ def parse_dispute(
         links=parse_links(payload.get("links")),
         created_at=created_at,
         raw=payload,
+        external_reason_code=external_code,
+        allowed_response_options=(
+            dict(payload["allowed_response_options"])
+            if isinstance(payload.get("allowed_response_options"), Mapping)
+            else {}
+        ),
+        messages=parse_messages(payload.get("messages")),
+        payment_rail=infer_payment_rail(payload, external_code),
     )
 
 
 def parse_transaction(payload: Mapping[str, Any]) -> PayPalTransactionRecord:
-    """Build a transaction record from a Reporting v1 transaction_details item."""
+    """Build a transaction record from a Reporting v1 transaction_details item.
+
+    Reporting v1 has no buyer IP or device fields, so ``client_ip`` and
+    ``device_fingerprint`` are left empty here; the service correlates them
+    (and the CE 3.0 hashes) from the local telemetry/order ledger by
+    transaction id instead of trusting fields PayPal never sends.
+    """
     info = payload.get("transaction_info")
     info = info if isinstance(info, Mapping) else payload
     payer = payload.get("payer_info")
@@ -247,11 +319,13 @@ def parse_transaction(payload: Mapping[str, Any]) -> PayPalTransactionRecord:
         payer_id=payer_id or _first_str(info, "payer_id") or "",
         amount=amount,
         currency=currency,
-        status=_first_str(info, "transaction_status") or "",
-        client_ip=str(payload.get("client_ip") or ""),
-        device_fingerprint=str(payload.get("device_fingerprint") or ""),
-        created_at=parse_datetime(info.get("transaction_initiation_date"))
-        or datetime.now(UTC),
+        status=_REPORTING_STATUS.get(
+            (_first_str(info, "transaction_status") or "").upper(),
+            _first_str(info, "transaction_status") or "",
+        ),
+        client_ip="",
+        device_fingerprint="",
+        created_at=parse_datetime(info.get("transaction_initiation_date")) or datetime.now(UTC),
     )
 
 
@@ -312,9 +386,8 @@ def extract_error_detail(body: Mapping[str, Any]) -> str:
             return "upstream error redacted"
     return detail[:300]
 
-def parse_webhook_event(
-    payload: Mapping[str, Any], *, now: datetime | None = None
-) -> WebhookEvent:
+
+def parse_webhook_event(payload: Mapping[str, Any], *, now: datetime | None = None) -> WebhookEvent:
     """Build a WebhookEvent from a PayPal webhook body, including its dispute."""
     resource = payload.get("resource")
     dispute: PayPalDisputeRecord | None = None

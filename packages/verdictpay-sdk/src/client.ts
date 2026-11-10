@@ -210,6 +210,17 @@ function normaliseOccurredAt(value: Date | string | undefined): string {
   return date.toISOString();
 }
 
+/** Optional caller metadata for the typed helpers; validated like trackEvent's. */
+function metadataOf(value: unknown, method: string): Record<string, unknown> {
+  if (value === undefined) {
+    return {};
+  }
+  if (!isRecord(value)) {
+    throw new VerdictPayError("validation_error", `${method} metadata must be a plain object.`);
+  }
+  return normaliseMetadata(value);
+}
+
 /**
  * Validate metadata is a JSON-serialisable plain object.
  *
@@ -405,7 +416,7 @@ export class VerdictPayClient {
     if (!isRecord(input)) {
       throw new VerdictPayError("validation_error", "trackCheckout requires an input object.");
     }
-    const metadata: Record<string, unknown> = {};
+    const metadata: Record<string, unknown> = { ...metadataOf(input.metadata, "trackCheckout") };
     if (input.userEmail !== undefined) {
       metadata["user_email"] = requireString(input.userEmail, "userEmail", 3, 254);
     }
@@ -430,11 +441,14 @@ export class VerdictPayClient {
     this.trackEvent({
       eventType: input.eventType ?? "ASSET_DELIVERED",
       paypalPayerId: input.paypalPayerId,
+      paypalOrderId: input.paypalOrderId,
+      paypalSubscriptionId: input.paypalSubscriptionId,
       resourceId: input.resourceId,
       resourceSha256: input.resourceSha256,
       unitsConsumed: input.computeUnitsConsumed,
       clientIp: input.clientIp,
       deviceFingerprint: input.deviceFingerprint,
+      metadata: metadataOf(input.metadata, "trackDelivery"),
     });
   }
 
@@ -446,10 +460,13 @@ export class VerdictPayClient {
     this.trackEvent({
       eventType: "USAGE_METERED",
       paypalPayerId: input.paypalPayerId,
+      paypalOrderId: input.paypalOrderId,
+      paypalSubscriptionId: input.paypalSubscriptionId,
       unitsConsumed: input.units,
       resourceId: input.resourceId,
       clientIp: input.clientIp,
       deviceFingerprint: input.deviceFingerprint,
+      metadata: metadataOf(input.metadata, "trackUsage"),
     });
   }
 

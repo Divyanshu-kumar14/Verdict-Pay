@@ -167,9 +167,7 @@ class FakePayPalGateway:
     def is_sandbox(self) -> bool:
         return True
 
-    def __init__(
-        self, settings: Settings, *, clock: Callable[[], datetime] | None = None
-    ) -> None:
+    def __init__(self, settings: Settings, *, clock: Callable[[], datetime] | None = None) -> None:
         self._settings = settings
         self._clock = clock or (lambda: datetime.now(UTC))
         self._lock = asyncio.Lock()
@@ -370,9 +368,7 @@ class FakePayPalGateway:
 
         async with self._lock:
             self._dispute_sequence += 1
-            dispute_id = (
-                f"{DISPUTE_ID_PREFIX}{DISPUTE_ID_BASE + self._dispute_sequence:05d}"
-            )
+            dispute_id = f"{DISPUTE_ID_PREFIX}{DISPUTE_ID_BASE + self._dispute_sequence:05d}"
             created_at = self._now()
             subscription_id = self._order_subscriptions.get(order_id.strip())
             state = _StoredDispute(
@@ -409,9 +405,7 @@ class FakePayPalGateway:
             return
         suffix = dispute_id[len(DISPUTE_ID_PREFIX) :]
         if suffix.isdigit():
-            self._dispute_sequence = max(
-                self._dispute_sequence, int(suffix) - DISPUTE_ID_BASE
-            )
+            self._dispute_sequence = max(self._dispute_sequence, int(suffix) - DISPUTE_ID_BASE)
 
     async def hydrate(self, records: Sequence[PayPalDisputeRecord]) -> None:
         """Merge persisted dispute snapshots so a restarted server can still act.
@@ -495,7 +489,13 @@ class FakePayPalGateway:
             )
 
     async def make_offer(
-        self, dispute_id: str, amount: Decimal, note: str, *, currency: str = "USD"
+        self,
+        dispute_id: str,
+        amount: Decimal,
+        note: str,
+        *,
+        currency: str = "USD",
+        offer_type: str = "REFUND",
     ) -> GatewayResponse:
         """Make an offer, rejecting values outside (0, dispute amount]."""
         offer_amount = wire.parse_decimal(amount)
@@ -518,6 +518,7 @@ class FakePayPalGateway:
                     "amount": f"{offer_amount:.2f}",
                     "currency": code,
                     "note": text,
+                    "offer_type": offer_type,
                 },
             )
             return GatewayResponse(
@@ -531,7 +532,34 @@ class FakePayPalGateway:
                 latency_ms=0,
             )
 
-    async def accept_claim(self, dispute_id: str, note: str) -> GatewayResponse:
+    async def probe(self) -> GatewayResponse:
+        return GatewayResponse(
+            status_code=200, body={"items": []}, latency_ms=0, request_id="fake-debug-id"
+        )
+
+    async def escalate(self, dispute_id: str, note: str) -> GatewayResponse:
+        async with self._lock:
+            self._require_dispute(dispute_id)
+            self._record_call("escalate", {"dispute_id": dispute_id, "note": note})
+            return GatewayResponse(status_code=200, body={"dispute_id": dispute_id}, latency_ms=0)
+
+    async def appeal(self, submission: EvidenceSubmission) -> GatewayResponse:
+        self._record_call("appeal", {"dispute_id": submission.dispute_id})
+        return GatewayResponse(
+            status_code=200, body={"dispute_id": submission.dispute_id}, latency_ms=0
+        )
+
+    async def adjudicate(self, dispute_id: str, outcome: str) -> GatewayResponse:
+        self._record_call("adjudicate", {"dispute_id": dispute_id, "outcome": outcome})
+        return GatewayResponse(status_code=200, body={"dispute_id": dispute_id}, latency_ms=0)
+
+    async def add_trackers(self, trackers: Any) -> GatewayResponse:
+        self._record_call("add_trackers", {"count": len(list(trackers))})
+        return GatewayResponse(status_code=200, body={"tracker_identifiers": []}, latency_ms=0)
+
+    async def accept_claim(
+        self, dispute_id: str, note: str, *, accept_claim_type: str = "REFUND"
+    ) -> GatewayResponse:
         """Accept the claim: the dispute is resolved in the buyer's favour."""
         text = note if isinstance(note, str) else ""
         if len(text) > NOTE_MAX_CHARS:
@@ -628,9 +656,7 @@ class FakePayPalGateway:
             state = self._require_dispute(dispute_id)
             state.stage = DisputeStage.CHARGEBACK
             state.links = self._links_for(state.stage, state.dispute_id)
-            self._record_call(
-                "require_evidence", {"dispute_id": dispute_id, "action": action}
-            )
+            self._record_call("require_evidence", {"dispute_id": dispute_id, "action": action})
             return GatewayResponse(
                 status_code=200,
                 body={

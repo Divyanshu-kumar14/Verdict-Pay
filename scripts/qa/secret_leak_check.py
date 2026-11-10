@@ -318,7 +318,7 @@ def main() -> int:
     # judge's browser receives), so a server-rendered leak cannot hide behind a bundle.
     html_by_route: dict[str, bytes] = {}
     web_base = os.environ.get("AUDIT_BASE", "http://127.0.0.1:3000").rstrip("/")
-    for route in ("/", "/demo", "/disputes", "/analytics", "/settings"):
+    for route in ("/", "/demo", "/disputes", "/analytics", "/settings", "/veto-lab"):
         try:
             _status, body = http_get(f"{web_base}{route}", {"Accept": "text/html"}, timeout=15.0)
         except SystemExit:

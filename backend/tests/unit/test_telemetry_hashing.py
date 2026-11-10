@@ -109,9 +109,7 @@ def chain_rows() -> list[TelemetryLedger]:
     """Build the three-row reference chain used by the verification tests."""
     rows: list[TelemetryLedger] = []
     prev = GENESIS_HASH
-    for index, (payload, chain_hash) in enumerate(
-        zip(ROW_PAYLOADS, ROW_CHAIN_HASHES, strict=True)
-    ):
+    for index, (payload, chain_hash) in enumerate(zip(ROW_PAYLOADS, ROW_CHAIN_HASHES, strict=True)):
         rows.append(
             ledger_row(
                 sequence=index,

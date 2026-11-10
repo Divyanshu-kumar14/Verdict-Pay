@@ -66,6 +66,9 @@ def settings(tmp_path) -> Settings:
     return Settings(
         app_env="test",
         database_url=f"sqlite+aiosqlite:///{tmp_path / 'test.db'}",
+        # Per-test artifacts: dispute ids repeat across tests, a shared
+        # ./artifacts directory let one test serve another test's PDF.
+        artifacts_dir=str(tmp_path / "artifacts"),
         paypal_mode="PAYPAL_SANDBOX",
         paypal_client_id="test-client-abc",
         paypal_client_secret="test-secret-xyz",

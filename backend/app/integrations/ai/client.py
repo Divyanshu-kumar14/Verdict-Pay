@@ -21,7 +21,43 @@ logger = logging.getLogger(__name__)
 
 
 class AiUnavailableError(RuntimeError):
-    """Raised when the Gemini model cannot produce a usable response."""
+    """Raised when the Gemini model cannot produce a usable response.
+
+    ``upstream`` holds the safe ``_describe_error`` summary of the last SDK
+    failure (class name + HTTP code/status only), or None.
+    """
+
+    def __init__(self, message: str, *, upstream: str | None = None) -> None:
+        super().__init__(message)
+        self.upstream = upstream
+
+
+def _describe_error(exc: BaseException) -> str:
+    """Class name plus non-secret HTTP code/status, e.g. ``ClientError 429 RESOURCE_EXHAUSTED``.
+
+    google-genai ``APIError`` carries ``code`` and ``status``; the message body is
+    deliberately omitted so a key echoed by an upstream error can never be logged.
+    """
+    parts = [type(exc).__name__]
+    code = getattr(exc, "code", None)
+    status = getattr(exc, "status", None)
+    if isinstance(code, int):
+        parts.append(str(code))
+    if isinstance(status, str) and status:
+        parts.append(status)
+    return " ".join(parts)
+
+
+def safe_error_reason(exc: BaseException) -> str:
+    """Key-safe reason for a degraded response: never includes an error message.
+
+    An ``AiUnavailableError`` that wraps an SDK failure reports that failure
+    (``ClientError 429 RESOURCE_EXHAUSTED``); anything else reports its own
+    class name plus any HTTP code/status attributes.
+    """
+    if isinstance(exc, AiUnavailableError) and exc.upstream:
+        return exc.upstream
+    return _describe_error(exc)
 
 
 class GeminiClient:
@@ -57,9 +93,7 @@ class GeminiClient:
     def model(self) -> str:
         return self._model
 
-    async def generate_json(
-        self, *, system: str, user: str, schema: Any
-    ) -> dict | None:
+    async def generate_json(self, *, system: str, user: str, schema: Any) -> dict | None:
         """Return the model JSON response as a dict, or None when disabled."""
         if not self.available:
             return None
@@ -83,11 +117,12 @@ class GeminiClient:
                     "gemini generate_json attempt %d/%d failed: %s",
                     attempt,
                     attempts,
-                    type(exc).__name__,
+                    _describe_error(exc),
                 )
+        upstream = _describe_error(last_error) if last_error else None
         raise AiUnavailableError(
-            f"gemini unavailable after {attempts} attempt(s): "
-            f"{type(last_error).__name__ if last_error else 'unknown'}"
+            f"gemini unavailable after {attempts} attempt(s): {upstream or 'unknown'}",
+            upstream=upstream,
         )
 
     def _generate(self, system: str, user: str, schema: Any) -> str:

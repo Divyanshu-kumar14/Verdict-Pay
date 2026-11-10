@@ -61,9 +61,7 @@ class ElasticSearchIndex:
         source = json.dumps(dict(document), default=str, separators=(",", ":"))
         body = f"{action}\n{source}\n"
         try:
-            response = await self._client_or_create().post(
-                "/_bulk", content=body.encode("utf-8")
-            )
+            response = await self._client_or_create().post("/_bulk", content=body.encode("utf-8"))
             response.raise_for_status()
         except Exception as exc:  # the optional mirror must never break ingestion
             logger.warning(

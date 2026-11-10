@@ -31,6 +31,10 @@ class PayPalDisputeRecord:
     links: Mapping[str, str]
     created_at: datetime
     raw: Mapping[str, Any] = field(default_factory=dict, repr=False)
+    external_reason_code: str | None = None
+    allowed_response_options: Mapping[str, Any] = field(default_factory=dict, repr=False)
+    messages: tuple[Mapping[str, Any], ...] = ()
+    payment_rail: str = "PAYPAL_WALLET"
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +47,15 @@ class PayPalTransactionRecord:
     client_ip: str
     device_fingerprint: str
     created_at: datetime
+    # CE 3.0 anchors. PayPal Reporting v1 carries none of these; they are
+    # correlated from the local telemetry/order ledger by transaction id.
+    payment_rail: str = "PAYPAL_WALLET"
+    payment_credential_hash: str = ""
+    account_login_id_hash: str = ""
+    shipping_address_hash: str = ""
+    has_prior_dispute: bool = False
+    has_tc40: bool = False
+    source: str = "paypal_reporting"
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,6 +72,9 @@ class EvidenceSubmission:
     notes: str
     documents: Sequence[EvidenceDocument]
     idempotency_key: str
+    # PayPal evidence_info: shipment tracking and refund references.
+    tracking_info: Sequence[Mapping[str, str]] = ()
+    refund_ids: Sequence[str] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,10 +156,26 @@ class PayPalGateway(Protocol):
     async def send_message(self, dispute_id: str, message: str) -> GatewayResponse: ...
 
     async def make_offer(
-        self, dispute_id: str, amount: Decimal, note: str, *, currency: str = "USD"
+        self,
+        dispute_id: str,
+        amount: Decimal,
+        note: str,
+        *,
+        currency: str = "USD",
+        offer_type: str = "REFUND",
     ) -> GatewayResponse: ...
 
-    async def accept_claim(self, dispute_id: str, note: str) -> GatewayResponse: ...
+    async def accept_claim(
+        self, dispute_id: str, note: str, *, accept_claim_type: str = "REFUND"
+    ) -> GatewayResponse: ...
+
+    async def escalate(self, dispute_id: str, note: str) -> GatewayResponse: ...
+
+    async def appeal(self, submission: EvidenceSubmission) -> GatewayResponse: ...
+
+    async def adjudicate(self, dispute_id: str, outcome: str) -> GatewayResponse: ...
+
+    async def add_trackers(self, trackers: Sequence[Mapping[str, str]]) -> GatewayResponse: ...
 
     async def provide_evidence(self, submission: EvidenceSubmission) -> GatewayResponse: ...
 

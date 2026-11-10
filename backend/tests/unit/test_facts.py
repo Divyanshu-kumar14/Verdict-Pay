@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError
+from dataclasses import FrozenInstanceError, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -128,7 +128,8 @@ def test_assemble_facts_exact_values() -> None:
     assert facts.chain_valid is True
     assert facts.chain_head == "4" * 64
     assert facts.event_count == 4
-    assert facts.completeness == 1.0
+    # A PayPal Wallet INR is never CE 3.0 eligible: 5 of 6 signals.
+    assert facts.completeness == 0.8333
     assert facts.tos_version == "v2.4-2026-01"
     assert facts.tos_hash == "a" * 64
     assert facts.tos_accepted_at == datetime(2026, 2, 19, 10, 0, tzinfo=UTC)
@@ -149,57 +150,145 @@ def test_assemble_facts_exact_values() -> None:
     assert facts.response_due_date == NOW + timedelta(days=7)
 
 
-def test_signals_and_ce3_exact() -> None:
-    facts = assemble_facts(_case())
-    assert facts.signals == {
-        "tos_accepted": True,
-        "ip_match": True,
-        "asset_delivered": True,
-        "usage_metered": True,
-        "chain_verified": True,
-        "ce3_historical_match": True,
+CARD = "cred-hash-1"
+LOGIN = "login-hash-1"
+SHIP = "ship-hash-1"
+
+
+def _card_events() -> list[TelemetryEventView]:
+    events = _events()
+    first = events[0]
+    payload = dict(first.payload)
+    payload["metadata"] = {
+        "logins": 5,
+        "payment_credential_hash": CARD,
+        "account_login_id_hash": LOGIN,
+        "shipping_address_hash": SHIP,
     }
-    assert facts.ce3_window_days == 365
-    assert facts.ce3_matches == [
-        {
-            "transaction_id": "TXN-200",
-            "amount_usd": "49.00",
-            "status": "COMPLETED",
-            "days_ago": 200,
-            "matched_on": "ip",
-        },
-        {
-            "transaction_id": "TXN-300",
-            "amount_usd": "59.00",
-            "status": "COMPLETED",
-            "days_ago": 300,
-            "matched_on": "device",
-        },
-    ]
+    events[0] = replace(first, payload=payload)
+    return events
 
 
-def test_ce3_window_boundaries_and_status_filter() -> None:
-    transactions = [
-        _txn("TXN-119", 119),
-        _txn("TXN-120", 120),
-        _txn("TXN-365", 365),
-        _txn("TXN-366", 366),
-        _txn("TXN-PENDING", 200, status="PENDING"),
-    ]
-    facts = assemble_facts(_case(transactions=transactions))
-    assert [match["transaction_id"] for match in facts.ce3_matches] == [
-        "TXN-120",
-        "TXN-365",
-    ]
-    assert facts.ce3_matches[0]["days_ago"] == 120
-    assert facts.ce3_window_days == 365
+def _card_txn(transaction_id: str, seconds_ago: int, **overrides: Any) -> PayPalTransactionRecord:
+    base: dict[str, Any] = {
+        "transaction_id": transaction_id,
+        "payer_id": PAYER,
+        "amount": Decimal("49.00"),
+        "currency": "USD",
+        "status": "COMPLETED",
+        "client_ip": "203.0.113.10",
+        "device_fingerprint": "dev-abc",
+        "created_at": NOW - timedelta(seconds=seconds_ago),
+        "payment_rail": "UNBRANDED_CARD",
+        "payment_credential_hash": CARD,
+        "account_login_id_hash": LOGIN,
+        "shipping_address_hash": SHIP,
+    }
+    base.update(overrides)
+    return PayPalTransactionRecord(**base)
 
 
-def test_no_ce3_matches_reports_zero_window() -> None:
-    facts = assemble_facts(_case(transactions=[_txn("TXN-50", 50)]))
+def _card_case(transactions: list[PayPalTransactionRecord], **overrides: Any) -> CaseInput:
+    return _case(
+        reason_code="UNAUTHORIZED",
+        payment_rail="UNBRANDED_CARD",
+        external_reason_code="10.4",
+        order_id="O-D",
+        disputed_at=NOW,
+        events=_card_events(),
+        transactions=transactions,
+        **overrides,
+    )
+
+
+DAY = 86400
+
+
+def test_wallet_dispute_is_never_ce3_eligible() -> None:
+    facts = assemble_facts(
+        _case(transactions=[_card_txn("A", 200 * DAY), _card_txn("B", 300 * DAY)])
+    )
     assert facts.ce3_matches == []
-    assert facts.ce3_window_days == 0
     assert facts.signals["ce3_historical_match"] is False
+    assert facts.ce3_proof is not None
+    assert facts.ce3_proof["veto_code"] == "VETO_CE3_NOT_ELIGIBLE"
+
+
+def test_card_10_4_three_way_match_exact() -> None:
+    facts = assemble_facts(
+        _card_case([_card_txn("TXN-200", 200 * DAY), _card_txn("TXN-300", 300 * DAY)])
+    )
+    assert facts.signals["ce3_historical_match"] is True
+    assert facts.ce3_proof["verified"] is True
+    assert len(facts.ce3_proof["sha256_manifest"]) == 64
+    assert [m["transaction_id"] for m in facts.ce3_matches] == ["TXN-300", "TXN-200"]
+    assert facts.ce3_matches[0]["matched_on"] == (
+        "ip_hash+device_id_hash+account_login_id_hash+shipping_address_hash"
+    )
+
+
+def test_ip_or_device_alone_is_not_enough() -> None:
+    # The old rule (ip_hit OR device_hit) would have accepted this pair.
+    history = [
+        _card_txn(
+            "A",
+            200 * DAY,
+            device_fingerprint="dev-other",
+            account_login_id_hash="x",
+            shipping_address_hash="y",
+        ),
+        _card_txn(
+            "B",
+            300 * DAY,
+            client_ip="198.51.100.99",
+            account_login_id_hash="x2",
+            shipping_address_hash="y2",
+        ),
+    ]
+    facts = assemble_facts(_card_case(history))
+    assert facts.signals["ce3_historical_match"] is False
+    assert facts.ce3_proof["veto_code"] == "VETO_CE3_MISSING_PRIMARY_ANCHOR"
+
+
+@pytest.mark.parametrize(
+    "seconds,verified",
+    [
+        (120 * DAY - 1, False),  # 119d 23h 59m 59s
+        (120 * DAY, True),
+        (365 * DAY, True),
+        (365 * DAY + 1, False),
+    ],
+)
+def test_ce3_window_is_second_precise(seconds: int, verified: bool) -> None:
+    facts = assemble_facts(_card_case([_card_txn("EDGE", seconds), _card_txn("MID", 200 * DAY)]))
+    assert facts.ce3_proof["verified"] is verified
+    if not verified:
+        assert facts.ce3_proof["veto_code"] == "VETO_CE3_WINDOW_OUT_OF_RANGE"
+
+
+def test_status_filter_accepts_captured_and_drops_pending() -> None:
+    facts = assemble_facts(
+        _card_case(
+            [
+                _card_txn("CAP", 200 * DAY, status="CAPTURED"),
+                _card_txn("DONE", 250 * DAY),
+                _card_txn("PEND", 300 * DAY, status="PENDING"),
+            ]
+        )
+    )
+    assert {m["transaction_id"] for m in facts.ce3_matches} == {"CAP", "DONE"}
+
+
+def test_tc40_or_prior_dispute_contaminates_history() -> None:
+    facts = assemble_facts(
+        _card_case(
+            [
+                _card_txn("A", 200 * DAY, has_tc40=True),
+                _card_txn("B", 300 * DAY, has_prior_dispute=True),
+            ]
+        )
+    )
+    assert facts.ce3_proof["veto_code"] == "VETO_CE3_CONTAMINATED_HISTORY"
 
 
 def test_login_count_falls_back_to_session_event_count() -> None:

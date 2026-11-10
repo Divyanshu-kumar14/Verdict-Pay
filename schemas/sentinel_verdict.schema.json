@@ -1,0 +1,174 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SentinelVerdict",
+  "type": "object",
+  "required": [
+    "verdict",
+    "exit_code",
+    "veto_codes",
+    "proposal_id",
+    "dispute_id",
+    "manifest_sha256"
+  ],
+  "properties": {
+    "verdict": {
+      "enum": [
+        "ALLOW",
+        "VETO"
+      ]
+    },
+    "exit_code": {
+      "enum": [
+        0,
+        2
+      ]
+    },
+    "veto_codes": {
+      "type": "array",
+      "items": {
+        "enum": [
+          "VETO_FAIL_CLOSED_ORACLE_MISSING",
+          "VETO_FLOAT_PRECISION_REJECTED",
+          "VETO_PAYPAL_ID_PATH_TRAVERSAL",
+          "VETO_PATH_TRAVERSAL_BLOCKED",
+          "VETO_TOOLKIT_ACL_BYPASS",
+          "VETO_PROMPT_INJECTION_BLOCKED",
+          "VETO_ILLEGAL_HATEOAS_TRANSITION",
+          "VETO_CE3_NOT_ELIGIBLE",
+          "VETO_CE3_INSUFFICIENT_PRIOR_TXNS",
+          "VETO_CE3_WINDOW_OUT_OF_RANGE",
+          "VETO_CE3_MISSING_PRIMARY_ANCHOR",
+          "VETO_CE3_CONTAMINATED_HISTORY",
+          "VETO_HALLUCINATED_EVIDENCE_REF",
+          "VETO_EVIDENCE_FILE_CONSTRAINT",
+          "VETO_PORTFOLIO_CLIFF_BREACH_EV_DOMINATED",
+          "VETO_HVD_CLIFF_BREACH",
+          "VETO_VAMP_CLIFF_BREACH",
+          "VETO_SCHEMA_INVALID",
+          "VETO_SANDBOX_RESOURCE_LIMIT"
+        ]
+      }
+    },
+    "proposal_id": {
+      "type": "string"
+    },
+    "dispute_id": {
+      "type": "string"
+    },
+    "manifest_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "reasons": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "portfolio_ev_analysis": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "fight_ev_minor": {
+          "type": "integer"
+        },
+        "offer_ev_minor": {
+          "type": "integer"
+        },
+        "accept_ev_minor": {
+          "type": "integer"
+        },
+        "cliff_penalty_minor": {
+          "type": "integer"
+        },
+        "recommended_action": {
+          "type": "string"
+        }
+      }
+    },
+    "ce3_proof": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "verified": {
+          "type": "boolean"
+        },
+        "sha256_manifest": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "matched_prior_orders": {
+          "type": "array"
+        },
+        "shared_anchors": {
+          "type": "array"
+        }
+      }
+    },
+    "hmac_approval_token": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "proposal_id",
+        "action",
+        "dispute_id",
+        "expires_at_epoch",
+        "sig_hmac_sha256"
+      ],
+      "properties": {
+        "proposal_id": {
+          "type": "string"
+        },
+        "action": {
+          "type": "string"
+        },
+        "dispute_id": {
+          "type": "string"
+        },
+        "expires_at_epoch": {
+          "type": "integer"
+        },
+        "sig_hmac_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "verdict": {
+            "const": "ALLOW"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "exit_code": {
+            "const": 0
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "exit_code": {
+            "const": 2
+          },
+          "hmac_approval_token": {
+            "const": null
+          }
+        }
+      }
+    }
+  ]
+}

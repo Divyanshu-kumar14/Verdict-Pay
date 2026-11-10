@@ -4,9 +4,7 @@ from __future__ import annotations
 
 
 async def _run_sandbox_flow(client) -> dict:
-    checkout = (
-        await client.post("/api/v1/sandbox/checkout", json={"plan": "pro"})
-    ).json()
+    checkout = (await client.post("/api/v1/sandbox/checkout", json={"plan": "pro"})).json()
     usage = await client.post(
         "/api/v1/sandbox/usage",
         json={
@@ -41,18 +39,23 @@ async def test_summary_totals_match_the_sandbox_flow(client) -> None:
     assert summary["in_claim"] == 0
     assert summary["total_exposure_usd"] == "99.00"
     assert summary["protected_usd"] == "99.00"
-    assert summary["fees_avoided_usd"] == "15.00"
-    assert summary["avg_p_win"] == 0.95
-    assert summary["win_rate_estimate"] == 0.95
+    # An open inquiry nobody resolved has avoided no fee yet.
+    assert summary["fees_avoided_usd"] == "0.00"
+    assert summary["avg_p_win"] == 0.8
+    assert summary["win_rate_estimate"] == 0.8
     assert summary["subscription_suspensions"] == 1
     assert summary["chain_verified_customers"] == 1
-    assert summary["high_volume"] == {
+    high_volume = summary["high_volume"]
+    # An unescalated INQUIRY is not an HVD claim; no sales means no ratio.
+    assert {key: high_volume[key] for key in ("flag", "ratio", "sales_3mo", "disputes_3mo")} == {
         "flag": False,
-        "ratio": 1.0,
-        "threshold": 0.015,
+        "ratio": 0.0,
         "sales_3mo": 0,
-        "disputes_3mo": 1,
+        "disputes_3mo": 0,
     }
+    assert high_volume["ratio_ppm"] == 0
+    assert high_volume["threshold_ppm"] == 15000
+    assert high_volume["source_plane"] == "LIVE_PAYPAL_SANDBOX"
 
 
 async def test_summary_is_zero_safe_with_no_cases(client) -> None:
@@ -68,13 +71,12 @@ async def test_summary_is_zero_safe_with_no_cases(client) -> None:
     assert summary["win_rate_estimate"] == 0.0
     assert summary["subscription_suspensions"] == 0
     assert summary["chain_verified_customers"] == 0
-    assert summary["high_volume"] == {
-        "flag": False,
-        "ratio": 0.0,
-        "threshold": 0.015,
-        "sales_3mo": 0,
-        "disputes_3mo": 0,
-    }
+    high_volume = summary["high_volume"]
+    assert high_volume["flag"] is False
+    assert high_volume["ratio_ppm"] == 0
+    assert high_volume["threshold"] == 0.015
+    assert high_volume["sales_3mo"] == 0
+    assert high_volume["disputes_3mo"] == 0
 
 
 async def test_transactions_are_cached_newest_first(client) -> None:
@@ -99,14 +101,10 @@ async def test_transactions_are_cached_newest_first(client) -> None:
 async def test_transactions_filter_and_limit(client) -> None:
     await _run_sandbox_flow(client)
 
-    filtered = (
-        await client.get("/api/v1/reporting/transactions?payer_id=YRZ829104KLA")
-    ).json()
+    filtered = (await client.get("/api/v1/reporting/transactions?payer_id=YRZ829104KLA")).json()
     assert len(filtered) == 3
 
-    missing = (
-        await client.get("/api/v1/reporting/transactions?payer_id=NOBODY-HERE")
-    ).json()
+    missing = (await client.get("/api/v1/reporting/transactions?payer_id=NOBODY-HERE")).json()
     assert missing == []
 
     limited = (await client.get("/api/v1/reporting/transactions?limit=2")).json()

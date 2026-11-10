@@ -155,7 +155,7 @@ def run(client: httpx.Client) -> int:
     check(len(detail["win_probability"]["signals"]) == 6, "expected six win-probability signals")
     present = sum(1 for signal in detail["win_probability"]["signals"] if signal["present"])
     check(present >= 5, f"only {present}/6 telemetry signals present")
-    check(len(detail["allowed_actions"]) == 4, "expected four HATEOAS action capabilities")
+    check(len(detail["allowed_actions"]) == 6, "expected six HATEOAS action capabilities")
     check(
         Decimal(detail["breakdown"]["ev_fight_usd"]) < Decimal("0"),
         "EV_fight should be negative for a 99.00 claim",
@@ -171,7 +171,7 @@ def run(client: httpx.Client) -> int:
         "DEFLECT_INQUIRY": "SEND_MESSAGE",
         "MAKE_OFFER": "MAKE_OFFER",
         "ACCEPT_CLAIM": "ACCEPT_CLAIM",
-        "PROVIDE_EVIDENCE": "ACCEPT_CLAIM",
+        "PROVIDE_EVIDENCE": "PROVIDE_EVIDENCE",
         "MONITOR": "SEND_MESSAGE",
     }[recommended]
     executed = call(

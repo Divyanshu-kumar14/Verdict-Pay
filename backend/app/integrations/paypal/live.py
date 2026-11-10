@@ -18,7 +18,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import httpx
 
@@ -34,8 +34,9 @@ from app.domain.protocols import (
     SandboxOrder,
     WebhookVerification,
 )
-from app.errors import UpstreamError
+from app.errors import SentinelVetoError, UpstreamError
 from app.integrations.paypal import wire
+from app.sentinel import token as sentinel_token
 
 TOKEN_PATH = "/v1/oauth2/token"
 DISPUTES_PATH = "/v1/customer/disputes"
@@ -50,6 +51,24 @@ NOTE_MAX_CHARS = 2000
 PAGE_SIZE_MAX = 50
 ORDERS_PATH = "/v2/checkout/orders"
 TRANSACTIONS_PATH = "/v1/reporting/transactions"
+TRACKERS_PATH = "/v1/shipping/trackers-batch"
+TRACKERS_BATCH_MAX = 20
+OFFER_TYPES = frozenset(
+    {"REFUND", "REFUND_WITH_RETURN", "REFUND_WITH_REPLACEMENT", "REPLACEMENT_WITHOUT_REFUND"}
+)
+ACCEPT_CLAIM_TYPES = frozenset(
+    {"REFUND", "REFUND_WITH_RETURN", "PARTIAL_REFUND", "REFUND_WITH_RETURN_SHIPMENT_LABEL"}
+)
+ADJUDICATION_OUTCOMES = frozenset({"BUYER_FAVOR", "SELLER_FAVOR"})
+# Seller dispute writes that need a Sentinel ApprovalToken (path suffix -> action).
+_GATED_SUFFIXES: dict[str, str] = {
+    "send-message": "SEND_MESSAGE",
+    "make-offer": "MAKE_OFFER",
+    "accept-claim": "ACCEPT_CLAIM",
+    "provide-evidence": "PROVIDE_EVIDENCE",
+    "escalate": "ESCALATE",
+    "appeal": "APPEAL",
+}
 TRANSACTION_FIELDS = "transaction_info,payer_info"
 # PayPal's Reporting API rejects windows greater than 31 days; exactly 31 is
 # accepted, so every request window is capped at this many days and merged.
@@ -153,8 +172,7 @@ class LivePayPalGateway:
     ) -> UpstreamError:
         detail = wire.extract_error_detail(body)
         message = (
-            f"PayPal {method.upper()} {path} failed with status "
-            f"{response.status_code}: {detail}"
+            f"PayPal {method.upper()} {path} failed with status {response.status_code}: {detail}"
         )
         debug_id = response.headers.get("paypal-debug-id") or response.headers.get(
             "paypal-correlation-id"
@@ -193,6 +211,7 @@ class LivePayPalGateway:
         idempotency_key: str | None = None,
         retry: bool = True,
     ) -> GatewayResponse:
+        self._require_approval(method, path)
         token = await self._access_token()
         request_headers: dict[str, str] = {
             "Authorization": f"Bearer {token}",
@@ -249,6 +268,27 @@ class LivePayPalGateway:
             request_id=request_id,
         )
 
+    def _require_approval(self, method: str, path: str) -> None:
+        """Refuse a seller dispute write that carries no valid Sentinel token."""
+        if method.upper() != "POST" or not path.startswith(DISPUTES_PATH + "/"):
+            return
+        tail = path[len(DISPUTES_PATH) + 1 :]
+        dispute_part, _, suffix = tail.partition("/")
+        action = _GATED_SUFFIXES.get(suffix)
+        if action is None:
+            return
+        try:
+            sentinel_token.verify(
+                sentinel_token.current_approval.get(),
+                secret=self._settings.verdictpay_signing_secret,
+                action=action,
+                dispute_id=unquote(dispute_part),
+            )
+        except sentinel_token.ApprovalError as exc:
+            raise SentinelVetoError(
+                details=[{"exit_code": 2, "veto_code": exc.veto_code, "reason": str(exc)}]
+            ) from exc
+
     @staticmethod
     def _require_text(value: Any, code: str, *, max_chars: int | None = None) -> str:
         text = value.strip() if isinstance(value, str) else ""
@@ -269,10 +309,12 @@ class LivePayPalGateway:
     async def get_dispute(self, dispute_id: str) -> PayPalDisputeRecord:
         """GET /v1/customer/disputes/{id}."""
         dispute = self._require_text(dispute_id, "dispute_id_required")
-        response = await self._request(
-            "GET", f"{DISPUTES_PATH}/{quote(dispute, safe='')}"
-        )
+        response = await self._request("GET", f"{DISPUTES_PATH}/{quote(dispute, safe='')}")
         return wire.parse_dispute(response.body)
+
+    async def probe(self) -> GatewayResponse:
+        """GET /v1/customer/disputes?page_size=1 — a read proving live connectivity."""
+        return await self._request("GET", DISPUTES_PATH, params={"page_size": 1}, retry=False)
 
     async def list_disputes(self, *, page_size: int = 50) -> list[PayPalDisputeRecord]:
         """GET /v1/customer/disputes?page_size=..."""
@@ -286,11 +328,7 @@ class LivePayPalGateway:
         items = response.body.get("items")
         if not isinstance(items, list):
             return []
-        return [
-            wire.parse_dispute(item)
-            for item in items
-            if isinstance(item, Mapping)
-        ]
+        return [wire.parse_dispute(item) for item in items if isinstance(item, Mapping)]
 
     async def send_message(self, dispute_id: str, message: str) -> GatewayResponse:
         """POST /v1/customer/disputes/{id}/send-message."""
@@ -303,9 +341,17 @@ class LivePayPalGateway:
         )
 
     async def make_offer(
-        self, dispute_id: str, amount: Decimal, note: str, *, currency: str = "USD"
+        self,
+        dispute_id: str,
+        amount: Decimal,
+        note: str,
+        *,
+        currency: str = "USD",
+        offer_type: str = "REFUND",
     ) -> GatewayResponse:
         """POST /v1/customer/disputes/{id}/make-offer."""
+        if offer_type not in OFFER_TYPES:
+            raise UpstreamError("invalid_offer_type")
         dispute = self._require_text(dispute_id, "dispute_id_required")
         offer_amount = wire.parse_decimal(amount)
         if offer_amount <= 0:
@@ -320,11 +366,16 @@ class LivePayPalGateway:
             json_body={
                 "note": text,
                 "offer_amount": wire.build_offer_amount(offer_amount, code),
+                "offer_type": offer_type,
             },
         )
 
-    async def accept_claim(self, dispute_id: str, note: str) -> GatewayResponse:
+    async def accept_claim(
+        self, dispute_id: str, note: str, *, accept_claim_type: str = "REFUND"
+    ) -> GatewayResponse:
         """POST /v1/customer/disputes/{id}/accept-claim."""
+        if accept_claim_type not in ACCEPT_CLAIM_TYPES:
+            raise UpstreamError("invalid_accept_claim_type")
         dispute = self._require_text(dispute_id, "dispute_id_required")
         text = note if isinstance(note, str) else ""
         if len(text) > NOTE_MAX_CHARS:
@@ -332,8 +383,63 @@ class LivePayPalGateway:
         return await self._request(
             "POST",
             f"{DISPUTES_PATH}/{quote(dispute, safe='')}/accept-claim",
+            json_body={"note": text, "accept_claim_type": accept_claim_type},
+        )
+
+    async def escalate(self, dispute_id: str, note: str) -> GatewayResponse:
+        """POST /v1/customer/disputes/{id}/escalate (INQUIRY -> CLAIM)."""
+        dispute = self._require_text(dispute_id, "dispute_id_required")
+        text = self._require_text(note, "note_required", max_chars=NOTE_MAX_CHARS)
+        return await self._request(
+            "POST",
+            f"{DISPUTES_PATH}/{quote(dispute, safe='')}/escalate",
             json_body={"note": text},
         )
+
+    async def appeal(self, submission: EvidenceSubmission) -> GatewayResponse:
+        """POST multipart/related evidence to /appeal (after a seller loss)."""
+        dispute = self._require_text(submission.dispute_id, "dispute_id_required")
+        key = self._require_text(submission.idempotency_key, "idempotency_key_required")
+        payload = build_multipart_related(submission)
+        return await self._request(
+            "POST",
+            f"{DISPUTES_PATH}/{quote(dispute, safe='')}/appeal",
+            headers={"Content-Type": payload.content_type},
+            content=payload.body,
+            idempotency_key=key,
+        )
+
+    async def adjudicate(self, dispute_id: str, outcome: str) -> GatewayResponse:
+        """POST /v1/customer/disputes/{id}/adjudicate — PayPal sandbox only."""
+        if not self.is_sandbox:
+            raise UpstreamError("adjudicate_is_sandbox_only")
+        if outcome not in ADJUDICATION_OUTCOMES:
+            raise UpstreamError("invalid_adjudication_outcome")
+        dispute = self._require_text(dispute_id, "dispute_id_required")
+        return await self._request(
+            "POST",
+            f"{DISPUTES_PATH}/{quote(dispute, safe='')}/adjudicate",
+            json_body={"adjudication_outcome": outcome},
+        )
+
+    async def add_trackers(self, trackers: Sequence[Mapping[str, str]]) -> GatewayResponse:
+        """POST /v1/shipping/trackers-batch (Trackers v1)."""
+        if not trackers or len(trackers) > TRACKERS_BATCH_MAX:
+            raise UpstreamError("invalid_tracker_batch")
+        body: list[dict[str, str]] = []
+        for item in trackers:
+            entry = {
+                "transaction_id": self._require_text(
+                    item.get("transaction_id"), "tracker_transaction_id_required"
+                ),
+                "tracking_number": self._require_text(
+                    item.get("tracking_number"), "tracking_number_required", max_chars=64
+                ),
+                "status": str(item.get("status") or "SHIPPED"),
+                "carrier": self._require_text(item.get("carrier"), "carrier_required"),
+            }
+            body.append(entry)
+        return await self._request("POST", TRACKERS_PATH, json_body={"trackers": body})
 
     async def provide_evidence(self, submission: EvidenceSubmission) -> GatewayResponse:
         """POST multipart/related evidence built by the frozen evidence builder."""
@@ -411,9 +517,7 @@ class LivePayPalGateway:
             if not isinstance(details, list) or not details:
                 break
             records.extend(
-                wire.parse_transaction(item)
-                for item in details
-                if isinstance(item, Mapping)
+                wire.parse_transaction(item) for item in details if isinstance(item, Mapping)
             )
             total_pages = self._total_pages(response.body)
             if total_pages is not None:
@@ -584,9 +688,7 @@ class LivePayPalGateway:
             if "sandbox" in self._settings.paypal_api_base.lower()
             else CHECKOUT_FALLBACK_PRODUCTION
         )
-        approval_url = (
-            links.get("approve") or links.get("payer-action") or f"{fallback}{order_id}"
-        )
+        approval_url = links.get("approve") or links.get("payer-action") or f"{fallback}{order_id}"
         subscription_id = response.body.get("subscription_id")
         return SandboxOrder(
             order_id=order_id,
@@ -607,7 +709,7 @@ class LivePayPalGateway:
     async def get_order(self, order_id: str) -> SandboxOrder:
         """GET /v2/checkout/orders/{id} — the authoritative order state."""
         order = self._require_text(order_id, "order_id_required")
-        response = await self._request("GET", f"{ORDERS_PATH}/{order}")
+        response = await self._request("GET", f"{ORDERS_PATH}/{quote(order, safe='')}")
         body = response.body
         links = wire.parse_links(body.get("links"))
         fallback = (
@@ -639,7 +741,9 @@ class LivePayPalGateway:
         approved the order yet, not that the payment failed silently.
         """
         order = self._require_text(order_id, "order_id_required")
-        response = await self._request("POST", f"{ORDERS_PATH}/{order}/capture", json_body={})
+        response = await self._request(
+            "POST", f"{ORDERS_PATH}/{quote(order, safe='')}/capture", json_body={}
+        )
         body = response.body
         status = str(body.get("status") or "").upper()
         capture_id, capture_status, captured_at = _capture_details(body)

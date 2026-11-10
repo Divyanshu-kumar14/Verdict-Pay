@@ -12,6 +12,7 @@ export default defineConfig({
       "components/ui/__tests__/**/*.test.tsx",
       "lib/hooks/__tests__/**/*.test.tsx",
       "components/sandbox/__tests__/**/*.test.tsx",
+      "components/disputes/__tests__/**/*.test.tsx",
     ],
   },
   esbuild: {

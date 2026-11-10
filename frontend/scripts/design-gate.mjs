@@ -106,7 +106,7 @@ try {
 
 const routes = has('routes')
   ? String(flag('routes', '')).split(',').map((s) => s.trim()).filter(Boolean)
-  : ['/', '/disputes', caseId ? '/disputes/' + caseId : null, '/timeline', '/analytics', '/settings'].filter(Boolean);
+  : ['/', '/disputes', caseId ? '/disputes/' + caseId : null, '/timeline', '/analytics', '/veto-lab', '/settings'].filter(Boolean);
 
 // 3. Build, because a dev server trips the dev-server WARN and stale assets lie.
 if (!SKIP_BUILD) {

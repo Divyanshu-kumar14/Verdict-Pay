@@ -39,9 +39,20 @@ export function evRatioState(breakdown: EvBreakdown): EvRatioState {
   return breakdown.ratio_relation === "at_or_above" ? "above" : "below";
 }
 
-/** The real threshold as a percentage, at the same 2 decimals as the ratios. */
+/**
+ * An integer ppm ratio as a percent, truncated (never rounded up across a cliff):
+ * 14999 ppm -> "1.49%", 15000 ppm -> "1.50%".
+ */
+export function ppmPercent(ppm: number): string {
+  const hundredths = Math.trunc(ppm / 100);
+  const whole = Math.trunc(hundredths / 100);
+  const fraction = String(Math.abs(hundredths % 100)).padStart(2, "0");
+  return `${whole}.${fraction}%`;
+}
+
+/** The real threshold as a percentage, from the exact ppm value. */
 export function thresholdLabel(breakdown: EvBreakdown): string {
-  return formatPercent(breakdown.ratio_threshold, 2);
+  return ppmPercent(breakdown.ratio_threshold_ppm);
 }
 
 /**
@@ -50,9 +61,9 @@ export function thresholdLabel(breakdown: EvBreakdown): string {
  * the payload so the explanation cannot drift from the scoring rule.
  */
 export function highVolumeRuleNote(breakdown: EvBreakdown): string {
-  return `${formatPercent(breakdown.ratio_threshold, 2)} of 3-month sales, on merchants with ${formatInteger(
+  return `${thresholdLabel(breakdown)} of 3-month net sales in disputed dollars, on merchants with more than ${formatInteger(
     breakdown.high_volume_min_sales,
-  )}+ sales`;
+  )} sales`;
 }
 
 /**
@@ -62,18 +73,24 @@ export function highVolumeRuleNote(breakdown: EvBreakdown): string {
  */
 export function ratioExplain(breakdown: EvBreakdown): string {
   const threshold = thresholdLabel(breakdown);
-  const before = formatPercent(breakdown.ratio_before, 2);
-  const after = formatPercent(breakdown.ratio_after, 2);
+  const before = ppmPercent(breakdown.ratio_before_ppm);
+  const after = ppmPercent(breakdown.ratio_after_ppm);
+  const subject = "The disputed-dollar ratio (wallet INR/SNAD claims / net sales)";
 
+  if (!breakdown.hvd_countable) {
+    return `This ${breakdown.payment_rail === "UNBRANDED_CARD" ? "unbranded card" : "non-INR/SNAD"} dispute does not count toward PayPal's ${threshold} high-volume line (${before} today).`;
+  }
   switch (evRatioState(breakdown)) {
     case "crossing":
-      return `The dispute ratio moves from ${before} to ${after}, crossing this merchant's ${threshold} high-volume line. A penalty of ${formatUsd(
-        breakdown.penalty_ratio_usd,
-      )} lands on the fight path.`;
+      return breakdown.penalty_ratio_usd > 0
+        ? `${subject} would move from ${before} to ${after} if this inquiry escalated, crossing the ${threshold} high-volume line. A ${formatUsd(
+            breakdown.penalty_ratio_usd,
+          )} portfolio penalty lands on the fight path.`
+        : `${subject} moves from ${before} to ${after} with this claim, crossing the ${threshold} line: the $30 fee now replaces $15.`;
     case "above":
-      return `The dispute ratio moves from ${before} to ${after}, already at or above this merchant's ${threshold} high-volume line. The penalty regime is already active, so this dispute adds no new cliff penalty.`;
+      return `${subject} is ${before} before this dispute, already at or above the ${threshold} high-volume line: the $30 fee replaces $15 and is not refunded on a win.`;
     default:
-      return `The dispute ratio moves from ${before} to ${after}, staying below this merchant's ${threshold} high-volume line. No cliff penalty lands on the fight path.`;
+      return `${subject} moves from ${before} to ${after}, staying below the ${threshold} high-volume line. No cliff penalty lands on the fight path.`;
   }
 }
 
@@ -119,23 +136,20 @@ export function evPathValue(breakdown: EvBreakdown, path: EvPath): number {
   return breakdown.ev_offer_usd;
 }
 
+/** One fee, never two: the HVD $30 replaces the standard $15. */
 export function fightEvNote(breakdown: EvBreakdown): string {
-  const highVolumeFee = breakdown.high_volume ? breakdown.high_volume_fee_usd : 0;
-  const loss =
-    breakdown.amount_usd +
-    breakdown.standard_fee_usd +
-    highVolumeFee +
-    breakdown.penalty_ratio_usd;
-  const cliff = breakdown.crosses_cliff
+  const loss = breakdown.amount_usd + breakdown.fight_fee_usd + breakdown.penalty_ratio_usd;
+  const cliff = breakdown.penalty_ratio_usd > 0
     ? ` · cliff ${formatUsd(-breakdown.penalty_ratio_usd)}`
     : "";
-  return `win ${formatUsd(-highVolumeFee)} · loss ${formatUsd(-loss)}${cliff}`;
+  const win = breakdown.win_fee_usd === 0 ? 0 : -breakdown.win_fee_usd;
+  return `win ${formatUsd(win)} · loss ${formatUsd(-loss)}${cliff}`;
 }
 
 export function settleEvNote(breakdown: EvBreakdown, stage: DisputeStage): string {
   return stage === "INQUIRY"
-    ? "principal only · no claim fee yet"
-    : `principal + ${formatUsd(breakdown.standard_fee_usd)} claim fee`;
+    ? "principal only · $0 fee in inquiry"
+    : `principal + ${formatUsd(breakdown.accept_fee_usd)} ${breakdown.high_volume ? "HVD" : "standard"} claim fee`;
 }
 
 export function offerEvNote(breakdown: EvBreakdown): string {
@@ -146,16 +160,19 @@ export type FeeComponent = { label: string; value: string; note: string };
 
 /** Fee annotations shown under the EV waterfall. */
 export function feeComponents(breakdown: EvBreakdown, stage: DisputeStage): FeeComponent[] {
+  const hvdClaim = breakdown.fight_fee_usd > breakdown.standard_fee_usd;
   return [
     {
-      label: "Standard fee",
-      value: formatUsd(breakdown.standard_fee_usd),
-      note: "refunded on a win",
+      label: hvdClaim ? "HVD dispute fee" : "Standard dispute fee",
+      value: formatUsd(breakdown.fight_fee_usd),
+      note: hvdClaim
+        ? `replaces ${formatUsd(breakdown.standard_fee_usd)} · charged even on a win`
+        : "refunded on a win",
     },
     {
-      label: "High-volume fee",
-      value: formatUsd(breakdown.high_volume_fee_usd),
-      note: breakdown.high_volume ? "never refunded" : "not applied",
+      label: "Response SLA",
+      value: `${breakdown.sla_response_days} days`,
+      note: breakdown.sla_response_days <= 3 ? "HVD tier: 10 -> 3 days" : "standard tier",
     },
     {
       label: "Cliff penalty",

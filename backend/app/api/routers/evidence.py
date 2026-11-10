@@ -20,7 +20,15 @@ from app.services.evidence_service import (
 
 router = APIRouter(tags=["evidence"])
 
-DisputeId = Annotated[str, Path(min_length=3, max_length=64, description="PayPal dispute id.")]
+DisputeId = Annotated[
+    str,
+    Path(
+        min_length=3,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9-]+$",
+        description="PayPal dispute id (letters, digits and '-'; no path segments).",
+    ),
+]
 
 
 def get_evidence_service(

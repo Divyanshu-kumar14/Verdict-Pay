@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 
 
-async def _open_dispute(client, *, payer_id: str = "YRZ829104KLA", order_id: str = "5O190127TN364715T") -> dict:
+async def _open_dispute(
+    client, *, payer_id: str = "YRZ829104KLA", order_id: str = "5O190127TN364715T"
+) -> dict:
     response = await client.post(
         "/api/v1/sandbox/dispute",
         json={"payer_id": payer_id, "order_id": order_id},
@@ -79,7 +81,14 @@ async def test_detail_has_six_signals_and_hateoas_actions(client) -> None:
     assert len(detail["facts"]["signals"]) == 6
 
     actions = {item["action"]: item for item in detail["allowed_actions"]}
-    assert set(actions) == {"SEND_MESSAGE", "MAKE_OFFER", "ACCEPT_CLAIM", "PROVIDE_EVIDENCE"}
+    assert set(actions) == {
+        "SEND_MESSAGE",
+        "MAKE_OFFER",
+        "ACCEPT_CLAIM",
+        "PROVIDE_EVIDENCE",
+        "ESCALATE",
+        "APPEAL",
+    }
     assert actions["SEND_MESSAGE"]["allowed"] is True
     assert actions["MAKE_OFFER"]["allowed"] is True
     assert actions["ACCEPT_CLAIM"]["allowed"] is True
@@ -104,6 +113,7 @@ async def test_illegal_provide_evidence_in_inquiry_is_422(client) -> None:
             "action": "PROVIDE_EVIDENCE",
             "stage": "INQUIRY",
             "reason": "require-evidence_link_missing",
+            "veto_code": "VETO_ILLEGAL_HATEOAS_TRANSITION",
         }
     ]
 
@@ -123,9 +133,7 @@ async def test_unknown_dispute_is_404(client) -> None:
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "not_found"
 
-    action = await client.post(
-        "/api/v1/disputes/PP-D-99999/actions/SEND_MESSAGE", json={}
-    )
+    action = await client.post("/api/v1/disputes/PP-D-99999/actions/SEND_MESSAGE", json={})
     assert action.status_code == 404
     assert action.json()["error"]["code"] == "not_found"
 
@@ -138,8 +146,10 @@ async def test_triage_endpoint_is_stable(client) -> None:
 
     assert first["dispute_id"] == created["dispute_id"]
     assert first["recommended_action"] == "DEFLECT_INQUIRY"
-    assert first["win_probability"]["score"] == 0.95
-    assert first["breakdown"]["ev_fight_usd"] == "-5.70"
+    assert (
+        first["win_probability"]["score"] == 0.8
+    )  # wallet INR: CE 3.0 is card-only (10.4), so 5 of 6 signals
+    assert first["breakdown"]["ev_fight_usd"] == "-22.80"
     assert first["breakdown"] == second["breakdown"]
     assert first["win_probability"] == second["win_probability"]
     assert first["allowed_actions"] == second["allowed_actions"]

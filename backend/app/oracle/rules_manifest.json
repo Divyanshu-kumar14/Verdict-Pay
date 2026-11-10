@@ -1,0 +1,47 @@
+{
+  "manifest_version": "1.1.0",
+  "effective_date": "2026-04-01",
+  "note": "Policy constants as integers only: ratios in parts-per-million (ppm), money in USD minor units (cents), windows in days/seconds. Edit, then run scripts/pin_oracle_manifest.py; the API refuses to boot (exit 2) if this file is missing or its canonical SHA-256 differs from the pinned digest.",
+  "hvd": {
+    "rail": "PAYPAL_WALLET",
+    "lookback_full_calendar_months": 3,
+    "min_settled_txns_exclusive": 100,
+    "threshold_ppm": 15000,
+    "standard_fee_minor": 1500,
+    "hvd_fee_minor": 3000,
+    "standard_fee_reimbursable_on_win": true,
+    "hvd_fee_reimbursable_on_win": false,
+    "standard_sla_days": 10,
+    "hvd_sla_days": 3,
+    "countable_reasons": [
+      "MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
+      "MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED"
+    ],
+    "countable_stages": ["CHARGEBACK", "PRE_ARBITRATION", "ARBITRATION"]
+  },
+  "vamp": {
+    "rail": "UNBRANDED_CARD",
+    "threshold_ppm": 15000,
+    "min_monthly_events_inclusive": 1500,
+    "fee_per_event_minor": 800
+  },
+  "ecp": {
+    "threshold_ppm": 15000,
+    "min_monthly_chargebacks_inclusive": 100,
+    "warning_ppm": 10000
+  },
+  "ce3": {
+    "visa_reason_code": "10.4",
+    "rail": "UNBRANDED_CARD",
+    "window_min_days": 120,
+    "window_max_days": 365,
+    "min_prior_txns": 2,
+    "min_shared_elements": 2,
+    "primary_elements": ["ip_hash", "device_id_hash"],
+    "secondary_elements": ["account_login_id_hash", "shipping_address_hash"]
+  },
+  "ev": {
+    "fight_ops_cost_minor": 0,
+    "inquiry_fee_minor": 0
+  }
+}

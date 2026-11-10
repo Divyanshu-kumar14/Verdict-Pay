@@ -37,8 +37,7 @@ class GatewayConfigurationError(RuntimeError):
         self.mode = mode
         self.blockers = blockers
         super().__init__(
-            f"{mode.value} cannot start: {'; '.join(blockers)}. "
-            "Add the missing PayPal credentials."
+            f"{mode.value} cannot start: {'; '.join(blockers)}. Add the missing PayPal credentials."
         )
 
 
@@ -61,8 +60,7 @@ class UnconfiguredGateway:
     def _refuse(self) -> UpstreamError:
         blockers = "; ".join(self._settings.gateway_blockers)
         return UpstreamError(
-            f"{self.mode} is not configured: {blockers}. "
-            "Add the missing PayPal credentials."
+            f"{self.mode} is not configured: {blockers}. Add the missing PayPal credentials."
         )
 
     async def create_order(self, **_kwargs: Any) -> SandboxOrder:
@@ -86,10 +84,25 @@ class UnconfiguredGateway:
     async def send_message(self, **_kwargs: Any) -> GatewayResponse:
         raise self._refuse()
 
-    async def make_offer(self, **_kwargs: Any) -> GatewayResponse:
+    async def make_offer(self, *_args: Any, **_kwargs: Any) -> GatewayResponse:
         raise self._refuse()
 
-    async def accept_claim(self, **_kwargs: Any) -> GatewayResponse:
+    async def accept_claim(self, *_args: Any, **_kwargs: Any) -> GatewayResponse:
+        raise self._refuse()
+
+    async def probe(self) -> GatewayResponse:
+        raise self._refuse()
+
+    async def escalate(self, *_args: Any, **_kwargs: Any) -> GatewayResponse:
+        raise self._refuse()
+
+    async def appeal(self, *_args: Any, **_kwargs: Any) -> GatewayResponse:
+        raise self._refuse()
+
+    async def adjudicate(self, *_args: Any, **_kwargs: Any) -> GatewayResponse:
+        raise self._refuse()
+
+    async def add_trackers(self, *_args: Any, **_kwargs: Any) -> GatewayResponse:
         raise self._refuse()
 
     async def provide_evidence(self, _submission: EvidenceSubmission) -> GatewayResponse:

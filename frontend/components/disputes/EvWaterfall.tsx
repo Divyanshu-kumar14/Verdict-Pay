@@ -10,6 +10,7 @@ import {
   fightEvNote,
   highVolumeRuleNote,
   offerEvNote,
+  ppmPercent,
   ratioExplain,
   ratioRelationNote,
   ratioVerdict,
@@ -17,7 +18,7 @@ import {
   thresholdLabel,
   type EvPath,
 } from "@/lib/ev";
-import { formatInteger, formatPercent, formatUsd } from "@/lib/format";
+import { formatInteger, formatUsd } from "@/lib/format";
 import type { DisputeAction, DisputeDetail, EvBreakdown } from "@/lib/types";
 import { TONE_BAR, type Tone } from "@/lib/vocab";
 
@@ -31,10 +32,11 @@ type FlowStep = { key: string; label: string; value: number; tone: Tone; note: s
 
 /**
  * The fee cascade, built only from frozen EvBreakdown fields. The running total
- * lands on the fight-path loss lib/ev.ts already derives — amount + standard fee
- * + high-volume fee + cliff penalty — so nothing here invents a number.
+ * lands on the fight-path loss: amount + ONE dispute fee (the $30 HVD fee
+ * replaces the $15 standard fee, it never stacks on it) + the cliff penalty.
  */
 function waterflowSteps(breakdown: EvBreakdown): FlowStep[] {
+  const hvd = breakdown.fight_fee_usd > breakdown.standard_fee_usd;
   return [
     {
       key: "amount",
@@ -44,18 +46,13 @@ function waterflowSteps(breakdown: EvBreakdown): FlowStep[] {
       note: "principal under dispute",
     },
     {
-      key: "high-volume",
-      label: "High-volume fee",
-      value: breakdown.high_volume_fee_usd,
-      tone: "warning",
-      note: breakdown.high_volume ? "never refunded" : "not applied",
-    },
-    {
-      key: "standard",
-      label: "Standard fee",
-      value: breakdown.standard_fee_usd,
-      tone: "accent",
-      note: "refunded on a win",
+      key: "fee",
+      label: hvd ? "HVD dispute fee" : "Standard dispute fee",
+      value: breakdown.fight_fee_usd,
+      tone: hvd ? "warning" : "accent",
+      note: hvd
+        ? `replaces ${formatUsd(breakdown.standard_fee_usd)} · charged even on a win`
+        : "refunded on a win",
     },
     {
       key: "penalty",
@@ -282,8 +279,11 @@ export function EvWaterfall({ detail }: { detail: DisputeDetail }) {
 
       <PanelFooter className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <span className="num text-sm text-muted">
-          Dispute ratio {formatPercent(breakdown.ratio_before, 2)} to{" "}
-          {formatPercent(breakdown.ratio_after, 2)}, cliff at {thresholdLabel(breakdown)}
+          Disputed-dollar ratio {ppmPercent(breakdown.ratio_before_ppm)} to{" "}
+          {ppmPercent(breakdown.ratio_after_ppm)}, cliff at {thresholdLabel(breakdown)} ·{" "}
+          {breakdown.source_plane === "SIMULATED_CARD_NETWORK_FEED"
+            ? "[VISA-TC40 / ACQUIRER-FEED SIMULATION]"
+            : "[LIVE PAYPAL SANDBOX]"}
         </span>
         <span className="text-sm text-muted">{ratioVerdict(breakdown)}</span>
       </PanelFooter>
