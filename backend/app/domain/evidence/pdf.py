@@ -11,7 +11,7 @@ import io
 import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_DOWN, Decimal
 from typing import Any, Final
 
 from reportlab.lib import colors
@@ -74,8 +74,8 @@ def _ts(value: datetime | None) -> str:
 
 
 def _money(value: Decimal) -> str:
-    """Render money with two decimals, quantized ROUND_HALF_UP."""
-    return str(value.quantize(_CENTS, rounding=ROUND_HALF_UP))
+    """Render money with two decimals, quantized ROUND_DOWN."""
+    return str(value.quantize(_CENTS, rounding=ROUND_DOWN))
 
 
 def _styles() -> dict[str, ParagraphStyle]:
@@ -269,8 +269,7 @@ def _evidence_timeline(inputs: DossierInput, styles: dict[str, ParagraphStyle]) 
     data: list[list[Any]] = [[Paragraph(_ascii(cell), styles["cell"]) for cell in header]]
 
     tos_ref = (
-        f"version {facts.tos_version or 'not recorded'}; "
-        f"sha256 {facts.tos_hash or 'not recorded'}"
+        f"version {facts.tos_version or 'not recorded'}; sha256 {facts.tos_hash or 'not recorded'}"
     )
     data.append(
         [

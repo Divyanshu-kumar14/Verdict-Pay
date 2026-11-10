@@ -387,9 +387,7 @@ async def test_timeline_for_unknown_payer_is_empty(client: AsyncClient) -> None:
     assert body["chain"]["head_hash"] == "0" * 64
 
 
-async def test_invalid_event_payload_is_rejected(
-    client: AsyncClient, settings: Settings
-) -> None:
+async def test_invalid_event_payload_is_rejected(client: AsyncClient, settings: Settings) -> None:
     invalid = event_payload("evt_invalid", resource_sha256="not-a-sha256")
 
     response = await post_events(client, settings, invalid)

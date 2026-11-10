@@ -19,7 +19,7 @@ out. The same case always renders the same comparison (ADR-003).
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_DOWN, Decimal
 from typing import Final
 
 from app.api import schemas
@@ -72,9 +72,9 @@ _RATIONALE_KEYS: Final[str] = "stage_channel, win_probability, expected_value an
 
 
 def _money(value: Decimal | int | float | str) -> Decimal:
-    """Quantize a money value to cents, half-up, without negative zero."""
+    """Quantize a money value to cents, toward zero, without negative zero."""
     raw = value if isinstance(value, Decimal) else Decimal(str(value))
-    quantized = raw.quantize(_CENTS, rounding=ROUND_HALF_UP)
+    quantized = raw.quantize(_CENTS, rounding=ROUND_DOWN)
     return _ZERO if quantized.is_zero() else quantized
 
 

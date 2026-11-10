@@ -163,9 +163,7 @@ async def test_template_degrades_when_fact_pack_is_incomplete() -> None:
     text = await provider.compose(_request(facts={"payer_id": PAYER}))
     short = await provider.compose(_request(facts={"payer_id": PAYER}, max_chars=40))
 
-    assert text.startswith(
-        "Aurora Analytics responds to the PayPal dispute for payer YRZ829104KLA"
-    )
+    assert text.startswith("Aurora Analytics responds to the PayPal dispute for payer YRZ829104KLA")
     assert text.isascii()
     assert "guarantee" not in text.lower()
     assert len(text) <= 1800
@@ -196,15 +194,11 @@ async def test_openai_falls_back_on_non_2xx() -> None:
 @respx.mock
 async def test_openai_retries_once_on_5xx_then_uses_answer() -> None:
     provider = OpenAINarrativeProvider(_openai_settings())
-    candidate = (
-        "The payer accepted the Terms of Service and the ledger chain is verifiable."
-    )
+    candidate = "The payer accepted the Terms of Service and the ledger chain is verifiable."
     route = respx.post(OPENAI_URL).mock(
         side_effect=[
             httpx.Response(502, json={"error": {"message": "upstream"}}),
-            httpx.Response(
-                200, json={"choices": [{"message": {"content": candidate}}]}
-            ),
+            httpx.Response(200, json={"choices": [{"message": {"content": candidate}}]}),
         ]
     )
 
@@ -229,9 +223,7 @@ async def test_openai_falls_back_on_timeout() -> None:
 @respx.mock
 async def test_openai_falls_back_on_malformed_response() -> None:
     provider = OpenAINarrativeProvider(_openai_settings())
-    route = respx.post(OPENAI_URL).mock(
-        return_value=httpx.Response(200, json={"choices": []})
-    )
+    route = respx.post(OPENAI_URL).mock(return_value=httpx.Response(200, json={"choices": []}))
     request = _request()
 
     text = await provider.compose(request)
@@ -257,9 +249,7 @@ async def test_openai_truncates_verified_answer() -> None:
     provider = OpenAINarrativeProvider(_openai_settings())
     candidate = "The payer accepted the Terms of Service. " * 10
     respx.post(OPENAI_URL).mock(
-        return_value=httpx.Response(
-            200, json={"choices": [{"message": {"content": candidate}}]}
-        )
+        return_value=httpx.Response(200, json={"choices": [{"message": {"content": candidate}}]})
     )
 
     text = await provider.compose(_request(max_chars=100))
@@ -362,7 +352,9 @@ async def test_gemini_outage_falls_back_to_template_instead_of_raising() -> None
     """
     from app.integrations.llm.gemini_provider import GeminiNarrativeProvider
 
-    provider = GeminiNarrativeProvider(Settings(app_env="test", llm_mode="gemini", gemini_api_key="k"))
+    provider = GeminiNarrativeProvider(
+        Settings(app_env="test", llm_mode="gemini", gemini_api_key="k")
+    )
     provider._client = _BoomClient()  # type: ignore[attr-defined]
 
     narrative = await provider.compose(_request())
@@ -379,7 +371,9 @@ async def test_gemini_outage_falls_back_to_template_instead_of_raising() -> None
 async def test_gemini_fallback_hydrates_the_typed_fact_pack() -> None:
     from app.integrations.llm.gemini_provider import GeminiNarrativeProvider
 
-    provider = GeminiNarrativeProvider(Settings(app_env="test", llm_mode="gemini", gemini_api_key="k"))
+    provider = GeminiNarrativeProvider(
+        Settings(app_env="test", llm_mode="gemini", gemini_api_key="k")
+    )
     request = _request()
 
     hydrated = provider._hydrate_facts(request)
@@ -392,7 +386,9 @@ async def test_gemini_fallback_hydrates_the_typed_fact_pack() -> None:
 async def test_gemini_fallback_with_corrupt_facts_asserts_no_figures() -> None:
     from app.integrations.llm.gemini_provider import GeminiNarrativeProvider
 
-    provider = GeminiNarrativeProvider(Settings(app_env="test", llm_mode="gemini", gemini_api_key="k"))
+    provider = GeminiNarrativeProvider(
+        Settings(app_env="test", llm_mode="gemini", gemini_api_key="k")
+    )
     request = replace(_request(), facts={"payer_id": None, "nonsense": object()})
     provider._client = _BoomClient()  # type: ignore[attr-defined]
 

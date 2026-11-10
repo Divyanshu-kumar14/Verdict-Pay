@@ -13,7 +13,7 @@ expected value".
 
 from __future__ import annotations
 
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_DOWN, Decimal
 
 from app.api.schemas import DecisionComparison, EvBreakdown, WinProbability
 from app.domain.disputes.decision import label_for
@@ -24,9 +24,9 @@ _ZERO = Decimal("0.00")
 
 
 def _money(value: Decimal) -> Decimal:
-    """Quantize money to cents, half-up, without negative zero."""
+    """Quantize money to cents, toward zero, without negative zero."""
     raw = value if isinstance(value, Decimal) else Decimal(str(value))
-    quantized = raw.quantize(_CENTS, rounding=ROUND_HALF_UP)
+    quantized = raw.quantize(_CENTS, rounding=ROUND_DOWN)
     return _ZERO if quantized.is_zero() else quantized
 
 

@@ -190,9 +190,7 @@ async def test_429_is_retried_with_stable_idempotency_key(
     request_ids = [call.request.headers["paypal-request-id"] for call in route.calls]
     assert request_ids[0] == request_ids[1]
     assert len(request_ids[0]) == 32
-    assert json.loads(route.calls[1].request.content) == {
-        "message": "We have server-side logs."
-    }
+    assert json.loads(route.calls[1].request.content) == {"message": "We have server-side logs."}
 
 
 @respx.mock
@@ -335,9 +333,7 @@ async def test_non_2xx_raises_sanitized_upstream_error(
     assert "The dispute was not found." in message
     assert "AUTH-TOKEN" not in message
     assert "secret-xyz" not in message
-    assert excinfo.value.details == [
-        {"field": "paypal_debug_id", "message": "debug-404"}
-    ]
+    assert excinfo.value.details == [{"field": "paypal_debug_id", "message": "debug-404"}]
 
 
 @respx.mock
@@ -421,9 +417,7 @@ async def test_create_order_parses_approval_link(live: LivePayPalGateway) -> Non
     assert order.order_id == "5O1EXAMPLEORDER"
     assert order.subscription_id is None
     assert order.status == "PAYER_ACTION_REQUIRED"
-    assert order.approval_url == (
-        "https://sandbox.paypal.com/checkoutnow?token=5O1EXAMPLEORDER"
-    )
+    assert order.approval_url == ("https://sandbox.paypal.com/checkoutnow?token=5O1EXAMPLEORDER")
     assert order.amount == Decimal("99.00")
     assert order.currency == "USD"
     assert order.created_at.tzinfo is UTC
@@ -457,9 +451,7 @@ async def test_create_order_falls_back_to_sandbox_checkout_url(
 
     assert route.calls[0].request.url.path == "/v2/checkout/orders"
     assert order.order_id == "ORDER-NO-LINKS"
-    assert order.approval_url == (
-        "https://www.sandbox.paypal.com/checkoutnow?token=ORDER-NO-LINKS"
-    )
+    assert order.approval_url == ("https://www.sandbox.paypal.com/checkoutnow?token=ORDER-NO-LINKS")
 
 
 @respx.mock
@@ -479,9 +471,7 @@ async def test_search_transactions_parses_reporting_payload(
 
     start = datetime(2024, 12, 25, tzinfo=UTC)
     end = datetime(2025, 1, 5, tzinfo=UTC)
-    records = await live.search_transactions(
-        payer_id="YRZ829104KLA", start=start, end=end
-    )
+    records = await live.search_transactions(payer_id="YRZ829104KLA", start=start, end=end)
 
     assert len(records) == 1
     assert records[0].transaction_id == "TXN-LIVE-1"
@@ -505,16 +495,12 @@ async def test_search_transactions_chunks_a_365_day_window(
 ) -> None:
     respx.post(TOKEN_URL).mock(return_value=_token_ok())
     route = respx.get(f"{BASE}/v1/reporting/transactions").mock(
-        return_value=httpx.Response(
-            200, json={"transaction_details": [], "total_pages": 1}
-        )
+        return_value=httpx.Response(200, json={"transaction_details": [], "total_pages": 1})
     )
 
     start = datetime(2024, 1, 1, tzinfo=UTC)
     end = start + timedelta(days=365)
-    records = await live.search_transactions(
-        payer_id="YRZ829104KLA", start=start, end=end
-    )
+    records = await live.search_transactions(payer_id="YRZ829104KLA", start=start, end=end)
 
     assert records == []
     expected_chunks = math.ceil(365 / 31)
@@ -549,9 +535,7 @@ async def test_search_transactions_follows_pagination_and_dedupes(
             details = [_transaction("TXN-1"), _transaction("TXN-2")]
         else:
             details = [_transaction("TXN-2"), _transaction("TXN-3")]
-        return httpx.Response(
-            200, json={"transaction_details": details, "total_pages": 2}
-        )
+        return httpx.Response(200, json={"transaction_details": details, "total_pages": 2})
 
     route = respx.get(f"{BASE}/v1/reporting/transactions").mock(side_effect=handler)
 
@@ -630,9 +614,7 @@ _ORDER_JSON = {
     "purchase_units": [
         {"amount": {"currency_code": "USD", "value": "99.00"}},
     ],
-    "links": [
-        {"rel": "approve", "href": "https://sandbox.paypal.com/checkoutnow?token=5O1EX"}
-    ],
+    "links": [{"rel": "approve", "href": "https://sandbox.paypal.com/checkoutnow?token=5O1EX"}],
 }
 
 _CAPTURE_JSON = {
@@ -812,9 +794,7 @@ async def test_duplicate_request_id_issue_is_reported_not_hidden(live: LivePayPa
     )
 
     with pytest.raises(UpstreamError) as excinfo:
-        await live.create_order(
-            payer_id="YRZ829104KLA", amount=Decimal("99.00"), currency="USD"
-        )
+        await live.create_order(payer_id="YRZ829104KLA", amount=Decimal("99.00"), currency="USD")
 
     assert excinfo.value.has_issue("DUPLICATE_REQUEST_ID")
 

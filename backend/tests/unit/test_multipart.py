@@ -15,7 +15,9 @@ PDF_BYTES = b"%PDF-1.4\n1 0 obj\n<<>>\nendobj\n%%EOF\n"
 CSV_BYTES = b"event,units\r\nUSAGE_METERED,42000\r\n"
 
 
-def _submission(*, notes: str = "Delivery proof for the disputed order.", documents=None) -> EvidenceSubmission:
+def _submission(
+    *, notes: str = "Delivery proof for the disputed order.", documents=None
+) -> EvidenceSubmission:
     docs = documents or (
         EvidenceDocument(name="dossier.pdf", content=PDF_BYTES, content_type="application/pdf"),
     )

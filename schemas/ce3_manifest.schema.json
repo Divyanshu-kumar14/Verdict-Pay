@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Ce3ProofManifest",
+  "type": "object",
+  "required": [
+    "rule",
+    "disputed_order_id",
+    "payment_credential_hash",
+    "prior_orders",
+    "shared_elements",
+    "window_seconds"
+  ],
+  "properties": {
+    "rule": {
+      "const": "VISA_CE3_10.4"
+    },
+    "disputed_order_id": {
+      "type": "string"
+    },
+    "payment_credential_hash": {
+      "type": "string"
+    },
+    "prior_orders": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "required": [
+          "order_id",
+          "settled_at_utc",
+          "seconds_before_dispute"
+        ],
+        "properties": {
+          "order_id": {
+            "type": "string"
+          },
+          "settled_at_utc": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "seconds_before_dispute": {
+            "type": "integer",
+            "minimum": 10368000,
+            "maximum": 31536000
+          }
+        }
+      }
+    },
+    "shared_elements": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "enum": [
+          "ip_hash",
+          "device_id_hash",
+          "account_login_id_hash",
+          "shipping_address_hash"
+        ]
+      },
+      "contains": {
+        "enum": [
+          "ip_hash",
+          "device_id_hash"
+        ]
+      }
+    },
+    "window_seconds": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "const": 10368000
+        },
+        {
+          "const": 31536000
+        }
+      ],
+      "items": false
+    }
+  }
+}

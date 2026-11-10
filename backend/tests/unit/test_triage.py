@@ -7,6 +7,7 @@ from decimal import Decimal
 import pytest
 
 from app.domain.disputes.ev import EvInputs, compute_ev
+from app.domain.disputes.state_machine import expected_rels
 from app.domain.disputes.triage import (
     TriageDecision,
     TriageInput,
@@ -34,20 +35,19 @@ def _triage(
     signals: SignalSet = FOUR_SIGNALS,
     amount: str = "99.00",
     p_win: float = 0.65,
-    sales_3mo: int = 500,
-    disputes_3mo: int = 0,
     high_volume: bool = True,
-    claim_fee_attached: bool = False,
     links: dict[str, str] | None = None,
 ) -> TriageInput:
+    # HVD tier: $200 disputed over $10,000 net sales (2.0%) and 500 sales.
     ev = compute_ev(
         EvInputs(
             amount_usd=Decimal(amount),
             p_win=p_win,
-            sales_3mo=sales_3mo,
-            disputes_3mo=disputes_3mo,
-            high_volume=high_volume,
-            claim_fee_attached=claim_fee_attached,
+            stage=stage,
+            reason_code=REASON,
+            settled_txns_3m=500,
+            net_sales_minor_3m=1_000_000,
+            disputed_amount_minor_3m=20_000 if high_volume else 0,
         )
     )
     return TriageInput(
@@ -57,7 +57,7 @@ def _triage(
         win=score_win_probability(signals, REASON),
         completeness=completeness(signals),
         ev=ev,
-        links=links if links is not None else {},
+        links=links if links is not None else expected_rels(stage),
         amount_usd=Decimal(amount),
     )
 
@@ -65,13 +65,12 @@ def _triage(
 def test_branch_a_inquiry_deflection() -> None:
     inputs = _triage(stage=DisputeStage.INQUIRY)
     assert inputs.win.score == 0.65
-    assert inputs.completeness == 0.6667
-    assert inputs.ev.ev_fight == Decimal("-69.90")
+    assert inputs.completeness == Decimal("0.6666")
+    # 0.65 x (-30) + 0.35 x -(99 + 30): the $30 HVD fee replaces $15.
+    assert inputs.ev.ev_fight == Decimal("-64.65")
     decision = decide(inputs)
     assert decision.action is RecommendedAction.DEFLECT_INQUIRY
-    assert decision.rationale[-1].detail == (
-        "rule=inquiry_deflection recommended=DEFLECT_INQUIRY"
-    )
+    assert decision.rationale[-1].detail == ("rule=inquiry_deflection recommended=DEFLECT_INQUIRY")
     assert len(decision.rationale) == 5
 
 
@@ -85,7 +84,7 @@ def test_branch_b_offer_beats_fight() -> None:
     assert inputs.win.score == 0.53
     assert inputs.completeness == 0.5
     assert inputs.ev.ev_offer == Decimal("-29.70")
-    assert inputs.ev.ev_fight == Decimal("-83.58")
+    assert inputs.ev.ev_fight == Decimal("-76.53")
     decision = decide(inputs)
     assert decision.action is RecommendedAction.MAKE_OFFER
     assert decision.rationale[-1].detail == (
@@ -114,10 +113,9 @@ def test_branch_d_chargeback_provide_evidence() -> None:
         stage=DisputeStage.CHARGEBACK,
         amount="100.00",
         p_win=0.7,
-        claim_fee_attached=True,
     )
-    assert inputs.ev.ev_fight == Decimal("-64.50")
-    assert inputs.ev.ev_settle == Decimal("-115.00")
+    assert inputs.ev.ev_fight == Decimal("-60.00")
+    assert inputs.ev.ev_settle == Decimal("-130.00")
     decision = decide(inputs)
     assert decision.action is RecommendedAction.PROVIDE_EVIDENCE
     assert decision.rationale[-1].detail == (
@@ -131,19 +129,16 @@ def test_branch_e_chargeback_accept_claim() -> None:
     inputs = _triage(
         stage=DisputeStage.CHARGEBACK,
         amount="25.00",
-        p_win=0.7,
+        p_win=0.0,
         signals=THREE_SIGNALS,
-        sales_3mo=200,
-        disputes_3mo=1,
-        claim_fee_attached=True,
+        high_volume=False,
     )
-    assert inputs.ev.ev_fight == Decimal("-42.00")
+    # With no fight cost, settling only ties fighting at p=0: -(25 + 15).
+    assert inputs.ev.ev_fight == Decimal("-40.00")
     assert inputs.ev.ev_settle == Decimal("-40.00")
     decision = decide(inputs)
     assert decision.action is RecommendedAction.ACCEPT_CLAIM
-    assert decision.rationale[-1].detail == (
-        "rule=claim_settle_cheaper recommended=ACCEPT_CLAIM"
-    )
+    assert decision.rationale[-1].detail == ("rule=claim_settle_cheaper recommended=ACCEPT_CLAIM")
 
 
 def test_branch_f_pre_arbitration_monitor() -> None:
@@ -154,10 +149,9 @@ def test_branch_f_pre_arbitration_monitor() -> None:
         amount="100.00",
         p_win=0.3,
         signals=SignalSet(tos_accepted=True),
-        claim_fee_attached=True,
     )
-    assert inputs.ev.ev_fight == Decimal("-110.50")
-    assert inputs.ev.ev_settle == Decimal("-115.00")
+    assert inputs.ev.ev_fight == Decimal("-100.00")
+    assert inputs.ev.ev_settle == Decimal("-130.00")
     assert inputs.win.score == 0.25
     decision = decide(inputs)
     assert decision.action is RecommendedAction.MONITOR
@@ -173,15 +167,14 @@ def test_rationale_contains_concrete_numbers() -> None:
         "MERCHANDISE_OR_SERVICE_NOT_RECEIVED amount_usd=99.00 currency=USD"
     )
     assert details["win_probability"] == (
-        "p_win=0.6500 completeness=0.6667 reason_multiplier=1.0000"
+        "p_win=0.6500 completeness=0.6666 reason_multiplier=1.0000"
     )
     assert details["expected_value"] == (
-        "ev_fight=-69.90 ev_settle=-99.00 ev_offer=-29.70 "
-        "best_financial_action=MAKE_OFFER"
+        "ev_fight=-64.65 ev_settle=-99.00 ev_offer=-29.70 best_financial_action=MAKE_OFFER"
     )
     assert details["fee_cliff"] == (
-        "crosses_cliff=false penalty_ratio_usd=0.00 ratio_before=0.0000 "
-        "ratio_after=0.0020"
+        "crosses_cliff=false penalty_ratio_usd=0.00 hvd_ratio_before_ppm=20000 "
+        "hvd_ratio_if_claim_ppm=29900 threshold_ppm=15000 fee_tier_usd=30.00 sla_days=3"
     )
     assert len(decision.rationale) >= 3
 
@@ -236,7 +229,7 @@ def test_degrade_to_legal(
             preferred,
             stage=stage,
             channel=DisputeChannel.INTERNAL,
-            links={},
+            links=expected_rels(stage),
         )
         is expected
     )

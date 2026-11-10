@@ -518,7 +518,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"FAILED: could not load Settings: {exc}", file=sys.stderr)
         return 2
 
-    guard = SecretGuard([settings.paypal_client_id, settings.paypal_client_secret])
+    guard = SecretGuard(
+        [settings.effective_paypal_client_id, settings.effective_paypal_client_secret]
+    )
 
     proof: dict[str, Any] = {
         "timestamp": _iso(datetime.now(UTC)),
@@ -535,8 +537,8 @@ def main(argv: list[str] | None = None) -> int:
         "blocker": None,
         "result": None,
         "wait_for_approval_seconds": args.wait_for_approval,
-        "client_id_len": len(settings.paypal_client_id),
-        "client_secret_present": bool(settings.paypal_client_secret),
+        "client_id_len": len(settings.effective_paypal_client_id),
+        "client_secret_present": bool(settings.effective_paypal_client_secret),
     }
 
     guard.emit(RULE)
@@ -546,8 +548,8 @@ def main(argv: list[str] | None = None) -> int:
     guard.emit(f"mode         : {GatewayMode.PAYPAL_SANDBOX.value}")
     guard.emit(
         "credentials  : "
-        f"client_id(len={len(settings.paypal_client_id)}), "
-        f"client_secret=set(len={len(settings.paypal_client_secret)})"
+        f"client_id(len={len(settings.effective_paypal_client_id)}), "
+        f"client_secret=set(len={len(settings.effective_paypal_client_secret)})"
     )
     guard.emit(
         f"order        : intent=CAPTURE, {ORDER_CURRENCY} {ORDER_AMOUNT:.2f}, "

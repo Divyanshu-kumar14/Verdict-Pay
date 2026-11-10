@@ -24,9 +24,10 @@ def _settings(tmp_path) -> Settings:
 @pytest.mark.asyncio
 async def test_declared_oversized_body_is_rejected(tmp_path) -> None:
     app = create_app(_settings(tmp_path))
-    async with app.router.lifespan_context(app), AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://testserver"
-    ) as client:
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client,
+    ):
         client.headers["X-API-Key"] = "body_test_key"
         response = await client.post("/api/v1/telemetry/events", content=b"x" * 300_000)
     assert response.status_code == 413
@@ -37,9 +38,10 @@ async def test_declared_oversized_body_is_rejected(tmp_path) -> None:
 async def test_chunked_oversized_body_cannot_bypass_the_cap(tmp_path) -> None:
     """A generator body has no Content-Length; the ASGI cap must still fire."""
     app = create_app(_settings(tmp_path))
-    async with app.router.lifespan_context(app), AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://testserver"
-    ) as client:
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client,
+    ):
         client.headers["X-API-Key"] = "body_test_key"
 
         async def oversized_chunks():
@@ -58,9 +60,10 @@ async def test_chunked_oversized_body_cannot_bypass_the_cap(tmp_path) -> None:
 @pytest.mark.asyncio
 async def test_body_under_the_cap_still_reaches_the_route(tmp_path) -> None:
     app = create_app(_settings(tmp_path))
-    async with app.router.lifespan_context(app), AsyncClient(
-        transport=ASGITransport(app=app), base_url="http://testserver"
-    ) as client:
+    async with (
+        app.router.lifespan_context(app),
+        AsyncClient(transport=ASGITransport(app=app), base_url="http://testserver") as client,
+    ):
         client.headers["X-API-Key"] = "body_test_key"
         response = await client.get("/api/v1/health")
     assert response.status_code == 200

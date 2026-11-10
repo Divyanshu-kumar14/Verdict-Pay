@@ -16,7 +16,11 @@ from app.domain.disputes.state_machine import capabilities, to_allowed_actions
 from app.domain.enums import DisputeAction, DisputeChannel, DisputeStage, RecommendedAction
 
 _INQUIRY_STAGES = (DisputeStage.INQUIRY,)
-_CLAIM_STAGES = (DisputeStage.CHARGEBACK, DisputeStage.PRE_ARBITRATION)
+_CLAIM_STAGES = (
+    DisputeStage.CHARGEBACK,
+    DisputeStage.PRE_ARBITRATION,
+    DisputeStage.ARBITRATION,
+)
 
 # A recommendation needs this DisputeAction to be legal; MONITOR needs nothing.
 _REQUIRED_ACTION: dict[RecommendedAction, DisputeAction | None] = {
@@ -124,11 +128,7 @@ def _preferred_action(
         return RecommendedAction.MAKE_OFFER, "inquiry_offer_beats_fight"
     if stage is DisputeStage.INQUIRY and caps[DisputeAction.SEND_MESSAGE].allowed:
         return RecommendedAction.DEFLECT_INQUIRY, "inquiry_deflection_default"
-    if (
-        stage in _CLAIM_STAGES
-        and ev.ev_fight > ev.ev_settle
-        and score >= 0.35
-    ):
+    if stage in _CLAIM_STAGES and ev.ev_fight > ev.ev_settle and score >= 0.35:
         return RecommendedAction.PROVIDE_EVIDENCE, "claim_evidence_positive_ev"
     if stage in _CLAIM_STAGES and ev.ev_fight <= ev.ev_settle:
         return RecommendedAction.ACCEPT_CLAIM, "claim_settle_cheaper"
@@ -140,14 +140,12 @@ def decide(inputs: TriageInput) -> TriageDecision:
     _validate(inputs)
     stage = DisputeStage(inputs.stage)
     channel = DisputeChannel(inputs.channel)
-    caps = capabilities(stage=stage, channel=channel, links=inputs.links)
+    caps = capabilities(
+        stage=stage, channel=channel, links=inputs.links, high_volume=inputs.ev.high_volume
+    )
 
-    preferred, rule = _preferred_action(
-        inputs, stage=stage, channel=channel, caps=caps
-    )
-    final = degrade_to_legal(
-        preferred, stage=stage, channel=channel, links=inputs.links
-    )
+    preferred, rule = _preferred_action(inputs, stage=stage, channel=channel, caps=caps)
+    final = degrade_to_legal(preferred, stage=stage, channel=channel, links=inputs.links)
     rationale = _rationale(
         inputs,
         stage=stage,
@@ -158,7 +156,7 @@ def decide(inputs: TriageInput) -> TriageDecision:
         caps=caps,
     )
     allowed_actions = to_allowed_actions(
-        stage=stage, channel=channel, links=inputs.links
+        stage=stage, channel=channel, links=inputs.links, high_volume=inputs.ev.high_volume
     )
     return TriageDecision(
         action=final,
@@ -209,8 +207,11 @@ def _rationale(
             label="High-volume fee cliff",
             detail=(
                 f"crosses_cliff={str(ev.crosses_cliff).lower()} "
-                f"penalty_ratio_usd={ev.penalty_ratio} ratio_before={ev.ratio_before:.4f} "
-                f"ratio_after={ev.ratio_after:.4f}"
+                f"penalty_ratio_usd={ev.penalty_ratio} "
+                f"hvd_ratio_before_ppm={ev.ratio_before_ppm} "
+                f"hvd_ratio_if_claim_ppm={ev.ratio_after_ppm} "
+                f"threshold_ppm={ev.threshold_ppm} fee_tier_usd={ev.fee_tier} "
+                f"sla_days={ev.sla_days}"
             ),
         ),
     ]
@@ -221,10 +222,7 @@ def _rationale(
             schemas.RationaleItem(
                 key="legality",
                 label="Action legality",
-                detail=(
-                    f"preferred={preferred.value} degraded_to={final.value} "
-                    f"reason={reason}"
-                ),
+                detail=(f"preferred={preferred.value} degraded_to={final.value} reason={reason}"),
             )
         )
     items.append(

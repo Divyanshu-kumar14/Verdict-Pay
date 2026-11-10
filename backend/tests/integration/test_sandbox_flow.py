@@ -11,6 +11,7 @@ from decimal import Decimal
 from itertools import pairwise
 
 from app.db.models import PaypalTransaction
+from app.oracle.cliff_engine import full_calendar_months_window
 
 
 async def _checkout(client, plan: str = "pro") -> dict:
@@ -77,9 +78,7 @@ async def test_checkout_usage_dispute_flow(client) -> None:
     assert events[3]["units_consumed"] == 42000
 
     # the same four events are visible through the customer timeline surface
-    timeline = (
-        await client.get(f"/api/v1/customers/{checkout['payer_id']}/timeline")
-    ).json()
+    timeline = (await client.get(f"/api/v1/customers/{checkout['payer_id']}/timeline")).json()
     assert len(timeline["events"]) == 4
     assert timeline["summary"]["login_count"] == 1
     assert timeline["summary"]["total_units"] == 42000
@@ -106,7 +105,7 @@ async def test_checkout_usage_dispute_flow(client) -> None:
     assert dispute["subscription_id"] == checkout["subscription_id"]
     assert dispute["subscription_suspended"] is True
     assert dispute["recommended_action"] == "DEFLECT_INQUIRY"
-    assert dispute["p_win"] == 0.95
+    assert dispute["p_win"] == 0.8  # wallet INR: CE 3.0 is card-only (10.4), so 5 of 6 signals
     assert dispute["dossier_available"] is False
 
     assert simulation["webhook_event_id"] == f"WH-{dispute['dispute_id']}"
@@ -128,12 +127,10 @@ async def test_checkout_usage_dispute_flow(client) -> None:
     assert 0 <= containment["latency_ms"] < 500
 
     # --- the case room sees the four chained events -------------------------
-    detail = (
-        await client.get(f"/api/v1/disputes/{dispute['dispute_id']}")
-    ).json()
+    detail = (await client.get(f"/api/v1/disputes/{dispute['dispute_id']}")).json()
     assert detail["facts"]["event_count"] == 4
     assert detail["facts"]["chain_valid"] is True
-    assert detail["facts"]["completeness"] == 1.0
+    assert detail["facts"]["completeness"] == 0.8333
     assert detail["facts"]["payer_id"] == checkout["payer_id"]
     assert detail["facts"]["tos_version"] == "v2.4-2026-01"
     assert detail["facts"]["usage_units"] == 42000
@@ -144,29 +141,31 @@ async def test_checkout_usage_dispute_flow(client) -> None:
         "asset_delivered": True,
         "usage_metered": True,
         "chain_verified": True,
-        "ce3_historical_match": True,
+        # PayPal Wallet INR: Visa CE 3.0 applies to unbranded-card 10.4 only.
+        "ce3_historical_match": False,
     }
 
-    assert detail["telemetry_completeness"] == 1.0
+    assert detail["telemetry_completeness"] == 0.8333
     assert detail["breakdown"]["amount_usd"] == "99.00"
     assert detail["breakdown"]["high_volume"] is False
     assert detail["breakdown"]["high_volume_fee_usd"] == "0.00"
     assert detail["breakdown"]["standard_fee_usd"] == "15.00"
     assert detail["breakdown"]["penalty_ratio_usd"] == "0.00"
     assert detail["breakdown"]["ratio_before"] == 0.0
-    assert detail["breakdown"]["ratio_after"] == 1.0
+    assert detail["breakdown"]["ratio_after"] == 0.0  # no net sales, no ratio
     assert detail["breakdown"]["crosses_cliff"] is False
-    assert detail["breakdown"]["formula_notes"][0] == (
-        "ratio_before=0.0000 = disputes_3mo(0) / max(sales_3mo,1)(1)"
-    )
-    assert detail["breakdown"]["ev_fight_usd"] == "-5.70"
+    assert detail["breakdown"]["formula_notes"][0].startswith("hvd_ratio_before=0.000000 (0 ppm)")
+    # Standard tier: 0.8 x 0 + 0.2 x -(99 + 15) = -22.80
+    assert detail["breakdown"]["ev_fight_usd"] == "-22.80"
     assert detail["breakdown"]["ev_settle_usd"] == "-99.00"
     assert detail["breakdown"]["ev_offer_usd"] == "-29.70"
     assert detail["breakdown"]["best_action"] == "PROVIDE_EVIDENCE"
-    assert len(detail["breakdown"]["formula_notes"]) == 7
-    assert detail["win_probability"]["score"] == 0.95
+    assert len(detail["breakdown"]["formula_notes"]) == 8
+    assert (
+        detail["win_probability"]["score"] == 0.8
+    )  # wallet INR: CE 3.0 is card-only (10.4), so 5 of 6 signals
     assert detail["win_probability"]["base"] == 0.10
-    assert detail["win_probability"]["signal_sum"] == 0.9
+    assert detail["win_probability"]["signal_sum"] == 0.7
     assert detail["win_probability"]["reason_multiplier"] == 1.0
     assert len(detail["win_probability"]["signals"]) == 6
     assert detail["rationale"][-1]["detail"].startswith("rule=inquiry_deflection")
@@ -178,9 +177,7 @@ async def test_checkout_usage_dispute_flow(client) -> None:
     assert detail["facts"]["response_due_date"].endswith(("Z", "+00:00"))
 
     # the ledger survived a round trip through SQLite unchanged
-    chain = (
-        await client.get(f"/api/v1/telemetry/chain/{checkout['payer_id']}/verify")
-    ).json()
+    chain = (await client.get(f"/api/v1/telemetry/chain/{checkout['payer_id']}/verify")).json()
     assert chain["valid"] is True
     assert chain["event_count"] == 4
 
@@ -191,10 +188,14 @@ async def test_checkout_scale_plan_amount(client) -> None:
     assert Decimal(checkout["amount_usd"]) == Decimal("299.00")
 
 
-async def _seed_completed_sales(client, count: int) -> None:
-    """Insert completed sales inside the 90-day volume window."""
+async def _seed_completed_sales(client, count: int, *, disputed: int = 0) -> None:
+    """Insert settled wallet sales inside the HVD window (last full month).
+
+    The first ``disputed`` sales are flagged as countable wallet INR claims.
+    """
     settings = client.settings
-    created_at = datetime.now(UTC) - timedelta(days=10)
+    _, window_end = full_calendar_months_window(datetime.now(UTC), 3)
+    created_at = window_end - timedelta(days=15)
     async with client.app.state.db.session() as session:
         for index in range(count):
             session.add(
@@ -210,6 +211,7 @@ async def _seed_completed_sales(client, count: int) -> None:
                     device_fingerprint="fp_89a7c6d5e4f3",
                     source="seed",
                     created_at=created_at,
+                    disputed_claim=index < disputed,
                 )
             )
         await session.commit()
@@ -225,33 +227,38 @@ async def _open_dispute(client) -> dict:
 
 
 async def test_high_volume_merchant_pays_the_30_usd_fee(client) -> None:
-    """Only a >=100-sale merchant crossing 1.5% pays the non-refundable fee."""
-    await _seed_completed_sales(client, 200)
-
-    first = await _open_dispute(client)
-    first_detail = (await client.get(f"/api/v1/disputes/{first['dispute_id']}")).json()
-    assert first_detail["breakdown"]["high_volume"] is False
-    assert first_detail["breakdown"]["high_volume_fee_usd"] == "0.00"
-    assert first_detail["breakdown"]["crosses_cliff"] is False
-    assert first_detail["breakdown"]["formula_notes"][0] == (
-        "ratio_before=0.0000 = disputes_3mo(0) / max(sales_3mo,1)(200)"
+    """HVD is dollar-weighted over 3 full calendar months; $30 replaces $15."""
+    # 200 wallet sales of $99 ($19,800) last month; 2 became INR claims ($198, 1.0%).
+    await _seed_completed_sales(client, 200, disputed=2)
+    inquiry = await _open_dispute(client)
+    detail = (await client.get(f"/api/v1/disputes/{inquiry['dispute_id']}")).json()
+    breakdown = detail["breakdown"]
+    assert breakdown["high_volume"] is False
+    assert breakdown["ratio_before_ppm"] == 10_000
+    # Escalating this $99 inquiry would add $99: 297 / 19,800 = 1.5% exactly.
+    assert breakdown["ratio_after_ppm"] == 15_000
+    assert breakdown["crosses_cliff"] is True
+    assert breakdown["penalty_ratio_usd"] == "45.00"
+    assert breakdown["fee_tier_usd"] == "15.00"
+    assert breakdown["accept_fee_usd"] == "0.00"
+    assert breakdown["formula_notes"][0].startswith(
+        "hvd_ratio_before=0.010000 (10000 ppm) = disputed_3m(198.00) / net_sales_3m(19800.00)"
     )
 
-    second = await _open_dispute(client)
-    second_detail = (await client.get(f"/api/v1/disputes/{second['dispute_id']}")).json()
-    assert second_detail["breakdown"]["high_volume"] is False
-    assert second_detail["breakdown"]["ratio_after"] == 0.01
 
-    third = await _open_dispute(client)
-    detail = (await client.get(f"/api/v1/disputes/{third['dispute_id']}")).json()
-
-    # disputes_3mo excludes the case under triage, so it is 2 (not 3)
-    assert detail["breakdown"]["formula_notes"][0] == (
-        "ratio_before=0.0100 = disputes_3mo(2) / max(sales_3mo,1)(200)"
-    )
-    assert detail["breakdown"]["high_volume"] is True
-    assert detail["breakdown"]["high_volume_fee_usd"] == "30.00"
-    assert detail["breakdown"]["ratio_before"] == 0.01
-    assert detail["breakdown"]["ratio_after"] == 0.015
-    assert detail["breakdown"]["crosses_cliff"] is True
-    assert detail["breakdown"]["penalty_ratio_usd"] == "90.00"
+async def test_hvd_tier_fee_replaces_standard_fee(client) -> None:
+    # 3 claims of $99 over $19,800 = 1.5%: the merchant is in the HVD tier.
+    await _seed_completed_sales(client, 200, disputed=3)
+    case = await _open_dispute(client)
+    detail = (await client.get(f"/api/v1/disputes/{case['dispute_id']}")).json()
+    breakdown = detail["breakdown"]
+    assert breakdown["high_volume"] is True
+    assert breakdown["fee_tier_usd"] == "30.00"
+    assert breakdown["fee_reimbursable_on_win"] is False
+    assert breakdown["sla_response_days"] == 3
+    assert breakdown["crosses_cliff"] is False
+    assert breakdown["penalty_ratio_usd"] == "0.00"
+    summary = (await client.get("/api/v1/reporting/summary")).json()
+    assert summary["high_volume"]["flag"] is True
+    assert summary["high_volume"]["ratio_ppm"] == 15_000
+    assert summary["high_volume"]["active_fee_tier_usd_cents"] == 3000

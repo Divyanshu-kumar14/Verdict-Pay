@@ -1,0 +1,203 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "CliffMetricsSnapshot",
+  "type": "object",
+  "required": [
+    "snapshot_id",
+    "computed_at_utc",
+    "hvd_3m",
+    "vamp_monthly",
+    "ecp_monthly",
+    "data_provenance"
+  ],
+  "properties": {
+    "snapshot_id": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_-]{8,64}$"
+    },
+    "computed_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "hvd_3m": {
+      "type": "object",
+      "required": [
+        "settled_txns_3m",
+        "net_sales_amount_minor_3m",
+        "net_sales_amount_str_3m",
+        "disputed_amount_minor_3m",
+        "disputed_amount_str_3m",
+        "ratio_ppm",
+        "threshold_ppm",
+        "active_fee_tier_usd_cents",
+        "fee_reimbursable_on_win",
+        "sla_response_days",
+        "amount_until_cliff_minor"
+      ],
+      "properties": {
+        "settled_txns_3m": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "net_sales_amount_minor_3m": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "net_sales_amount_str_3m": {
+          "type": "string"
+        },
+        "disputed_amount_minor_3m": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "disputed_amount_str_3m": {
+          "type": "string"
+        },
+        "ratio_ppm": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "threshold_ppm": {
+          "const": 15000
+        },
+        "active_fee_tier_usd_cents": {
+          "enum": [
+            1500,
+            3000
+          ]
+        },
+        "fee_reimbursable_on_win": {
+          "type": "boolean"
+        },
+        "sla_response_days": {
+          "enum": [
+            3,
+            10
+          ]
+        },
+        "amount_until_cliff_minor": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "vamp_monthly": {
+      "type": "object",
+      "required": [
+        "tc05_settled_cnp",
+        "tc40_fraud_count",
+        "tc15_dispute_count",
+        "dual_counted_events",
+        "combined_events",
+        "monthly_floor_events",
+        "ratio_ppm",
+        "threshold_ppm",
+        "excessive_enforcement_active",
+        "projected_vamp_fines_usd_cents",
+        "events_until_cliff",
+        "source_plane"
+      ],
+      "properties": {
+        "tc05_settled_cnp": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tc40_fraud_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "tc15_dispute_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "dual_counted_events": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "combined_events": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "monthly_floor_events": {
+          "const": 1500
+        },
+        "ratio_ppm": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "threshold_ppm": {
+          "const": 15000
+        },
+        "excessive_enforcement_active": {
+          "type": "boolean"
+        },
+        "projected_vamp_fines_usd_cents": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "events_until_cliff": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_plane": {
+          "const": "SIMULATED_CARD_NETWORK_FEED"
+        }
+      }
+    },
+    "ecp_monthly": {
+      "type": "object",
+      "required": [
+        "prior_month_settled_mc",
+        "current_month_chargebacks_mc",
+        "ratio_ppm",
+        "threshold_ppm",
+        "warning",
+        "breached"
+      ],
+      "properties": {
+        "prior_month_settled_mc": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "current_month_chargebacks_mc": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ratio_ppm": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "threshold_ppm": {
+          "const": 15000
+        },
+        "warning": {
+          "type": "boolean"
+        },
+        "breached": {
+          "type": "boolean"
+        }
+      }
+    },
+    "data_provenance": {
+      "type": "object",
+      "required": [
+        "hvd_source_plane",
+        "tc40_source_plane"
+      ],
+      "properties": {
+        "hvd_source_plane": {
+          "const": "LIVE_PAYPAL_SANDBOX"
+        },
+        "tc40_source_plane": {
+          "const": "SIMULATED_CARD_NETWORK_FEED"
+        },
+        "reporting_api_last_reconciled_utc": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}

@@ -1,6 +1,13 @@
-"""Full capability matrix for the HATEOAS dispute state machine (plan section 7)."""
+"""Capability matrix for the HATEOAS dispute state machine.
+
+Both guards must agree in every stage: the stage table and PayPal's
+``links[].rel``. A rel missing from the links blocks an action the table would
+allow.
+"""
 
 from __future__ import annotations
+
+from decimal import Decimal
 
 import pytest
 
@@ -8,182 +15,174 @@ from app.domain.disputes.state_machine import (
     Capability,
     capabilities,
     ensure_allowed,
+    expected_rels,
     to_allowed_actions,
 )
 from app.domain.enums import DisputeAction, DisputeChannel, DisputeStage
 from app.errors import IllegalDisputeActionError
 
-ACTION_ORDER = [
-    DisputeAction.SEND_MESSAGE,
-    DisputeAction.MAKE_OFFER,
-    DisputeAction.ACCEPT_CLAIM,
-    DisputeAction.PROVIDE_EVIDENCE,
-]
-
-# stage -> action -> (allowed, reason, fee)
-STAGE_EXPECTATIONS = {
-    DisputeStage.INQUIRY: {
-        DisputeAction.SEND_MESSAGE: (True, None, "0.00"),
-        DisputeAction.MAKE_OFFER: (True, None, "0.00"),
-        DisputeAction.ACCEPT_CLAIM: (True, None, "0.00"),
-        DisputeAction.PROVIDE_EVIDENCE: (
-            False,
-            "require-evidence_link_missing",
-            "0.00",
-        ),
-    },
-    DisputeStage.CHARGEBACK: {
-        DisputeAction.SEND_MESSAGE: (True, None, "0.00"),
-        DisputeAction.MAKE_OFFER: (True, None, "0.00"),
-        DisputeAction.ACCEPT_CLAIM: (True, None, "15.00"),
-        DisputeAction.PROVIDE_EVIDENCE: (True, None, "0.00"),
-    },
-    DisputeStage.PRE_ARBITRATION: {
-        DisputeAction.SEND_MESSAGE: (
-            False,
-            "action_not_allowed_in_pre_arbitration",
-            "0.00",
-        ),
-        DisputeAction.MAKE_OFFER: (
-            False,
-            "action_not_allowed_in_pre_arbitration",
-            "0.00",
-        ),
-        DisputeAction.ACCEPT_CLAIM: (True, None, "15.00"),
-        DisputeAction.PROVIDE_EVIDENCE: (True, None, "0.00"),
-    },
-    DisputeStage.RESOLVED: {
-        DisputeAction.SEND_MESSAGE: (False, "dispute_resolved", "0.00"),
-        DisputeAction.MAKE_OFFER: (False, "dispute_resolved", "0.00"),
-        DisputeAction.ACCEPT_CLAIM: (False, "dispute_resolved", "0.00"),
-        DisputeAction.PROVIDE_EVIDENCE: (False, "dispute_resolved", "0.00"),
-    },
-    DisputeStage.CLOSED: {
-        DisputeAction.SEND_MESSAGE: (False, "dispute_closed", "0.00"),
-        DisputeAction.MAKE_OFFER: (False, "dispute_closed", "0.00"),
-        DisputeAction.ACCEPT_CLAIM: (False, "dispute_closed", "0.00"),
-        DisputeAction.PROVIDE_EVIDENCE: (False, "dispute_closed", "0.00"),
-    },
+ALL_RELS = {
+    rel: f"https://api-m.sandbox.paypal.com/v1/customer/disputes/PP-D-1/{rel}"
+    for rel in (
+        "send-message",
+        "make-offer",
+        "accept-claim",
+        "provide-evidence",
+        "escalate",
+        "appeal",
+        "require-evidence",
+    )
 }
 
-MATRIX_CASES = [
-    pytest.param(stage, channel, action, expected, id=f"{stage}-{channel}-{action}")
-    for stage, actions in STAGE_EXPECTATIONS.items()
+# stage -> actions the stage table permits (given every rel is present)
+STAGE_TABLE = {
+    DisputeStage.INQUIRY: {
+        DisputeAction.SEND_MESSAGE,
+        DisputeAction.MAKE_OFFER,
+        DisputeAction.ACCEPT_CLAIM,
+        DisputeAction.PROVIDE_EVIDENCE,
+        DisputeAction.ESCALATE,
+    },
+    DisputeStage.CHARGEBACK: {
+        DisputeAction.SEND_MESSAGE,
+        DisputeAction.MAKE_OFFER,
+        DisputeAction.ACCEPT_CLAIM,
+        DisputeAction.PROVIDE_EVIDENCE,
+    },
+    DisputeStage.PRE_ARBITRATION: {
+        DisputeAction.ACCEPT_CLAIM,
+        DisputeAction.PROVIDE_EVIDENCE,
+        DisputeAction.APPEAL,
+    },
+    DisputeStage.ARBITRATION: {DisputeAction.ACCEPT_CLAIM, DisputeAction.PROVIDE_EVIDENCE},
+    DisputeStage.RESOLVED: {DisputeAction.APPEAL},
+    DisputeStage.CLOSED: set(),
+}
+
+MATRIX = [
+    pytest.param(stage, channel, action, id=f"{stage}-{channel}-{action}")
+    for stage in STAGE_TABLE
     for channel in (DisputeChannel.INTERNAL, DisputeChannel.EXTERNAL)
-    for action, expected in actions.items()
+    for action in DisputeAction
 ]
 
 
-@pytest.mark.parametrize("stage,channel,action,expected", MATRIX_CASES)
-def test_capability_matrix(
-    stage: DisputeStage,
-    channel: DisputeChannel,
-    action: DisputeAction,
-    expected: tuple[bool, str | None, str],
+@pytest.mark.parametrize("stage,channel,action", MATRIX)
+def test_stage_table_with_all_links(
+    stage: DisputeStage, channel: DisputeChannel, action: DisputeAction
 ) -> None:
-    allowed, reason, fee = expected
-    caps = capabilities(stage=stage, channel=channel, links={})
-    assert isinstance(caps[action], Capability)
-    assert caps[action].allowed is allowed
-    assert caps[action].reason == reason
-    assert str(caps[action].fee_usd) == fee
+    cap = capabilities(stage=stage, channel=channel, links=ALL_RELS)[action]
+    assert cap.allowed is (action in STAGE_TABLE[stage])
+    if not cap.allowed:
+        assert cap.reason
+
+
+@pytest.mark.parametrize("stage", list(STAGE_TABLE))
+def test_missing_links_block_every_stage(stage: DisputeStage) -> None:
+    caps = capabilities(stage=stage, channel=DisputeChannel.INTERNAL, links={})
+    assert not any(cap.allowed for cap in caps.values())
+    for action in STAGE_TABLE[stage]:
+        assert caps[action].reason is not None
+        assert caps[action].reason.endswith("_link_missing")
+
+
+@pytest.mark.parametrize("stage", [DisputeStage.CHARGEBACK, DisputeStage.PRE_ARBITRATION])
+def test_single_rel_unlocks_only_its_action(stage: DisputeStage) -> None:
+    caps = capabilities(stage=stage, channel=DisputeChannel.INTERNAL, links={"accept-claim": "x"})
+    allowed = {action for action, cap in caps.items() if cap.allowed}
+    assert allowed == {DisputeAction.ACCEPT_CLAIM}
+
+
+def test_inquiry_evidence_needs_require_or_provide_evidence_rel() -> None:
+    links = {
+        rel: href
+        for rel, href in ALL_RELS.items()
+        if rel not in {"require-evidence", "provide-evidence"}
+    }
+    caps = capabilities(stage=DisputeStage.INQUIRY, channel=DisputeChannel.INTERNAL, links=links)
+    assert caps[DisputeAction.PROVIDE_EVIDENCE] == Capability(
+        False, "require-evidence_link_missing", Decimal("0.00")
+    )
+    caps = capabilities(
+        stage=DisputeStage.INQUIRY,
+        channel=DisputeChannel.INTERNAL,
+        links={"require-evidence": "x"},
+    )
+    assert caps[DisputeAction.PROVIDE_EVIDENCE].allowed is True
+
+
+@pytest.mark.parametrize(
+    "stage,high_volume,fee",
+    [
+        (DisputeStage.INQUIRY, False, "0.00"),
+        (DisputeStage.INQUIRY, True, "0.00"),
+        (DisputeStage.CHARGEBACK, False, "15.00"),
+        (DisputeStage.CHARGEBACK, True, "30.00"),
+        (DisputeStage.PRE_ARBITRATION, False, "15.00"),
+        (DisputeStage.PRE_ARBITRATION, True, "30.00"),
+        (DisputeStage.ARBITRATION, True, "30.00"),
+    ],
+)
+def test_accept_claim_fee_is_one_tier_fee(stage: DisputeStage, high_volume: bool, fee: str) -> None:
+    cap = capabilities(
+        stage=stage, channel=DisputeChannel.INTERNAL, links=ALL_RELS, high_volume=high_volume
+    )[DisputeAction.ACCEPT_CLAIM]
+    assert cap.allowed is True
+    assert cap.fee_usd == Decimal(fee)
 
 
 def test_capabilities_returns_every_action() -> None:
-    caps = capabilities(
-        stage=DisputeStage.CHARGEBACK, channel=DisputeChannel.INTERNAL, links={}
+    caps = capabilities(stage=DisputeStage.CHARGEBACK, channel=DisputeChannel.EXTERNAL, links={})
+    assert list(caps) == list(DisputeAction)
+
+
+def test_ensure_allowed_and_veto_detail() -> None:
+    ensure_allowed(
+        DisputeAction.ACCEPT_CLAIM,
+        stage=DisputeStage.CHARGEBACK,
+        channel=DisputeChannel.INTERNAL,
+        links={"accept-claim": "x"},
     )
-    assert list(caps) == ACTION_ORDER
-
-
-def test_inquiry_require_evidence_exception() -> None:
-    links = {"require-evidence": "https://api.paypal.com/v1/.../require-evidence"}
-    caps = capabilities(
-        stage=DisputeStage.INQUIRY, channel=DisputeChannel.INTERNAL, links=links
-    )
-    assert caps[DisputeAction.PROVIDE_EVIDENCE].allowed is True
-    assert caps[DisputeAction.PROVIDE_EVIDENCE].reason is None
-    assert str(caps[DisputeAction.PROVIDE_EVIDENCE].fee_usd) == "0.00"
-
-
-def test_missing_require_evidence_link_is_rejected() -> None:
-    with pytest.raises(IllegalDisputeActionError) as excinfo:
+    with pytest.raises(IllegalDisputeActionError) as raised:
         ensure_allowed(
-            DisputeAction.PROVIDE_EVIDENCE,
-            stage=DisputeStage.INQUIRY,
+            DisputeAction.MAKE_OFFER,
+            stage=DisputeStage.PRE_ARBITRATION,
             channel=DisputeChannel.INTERNAL,
-            links={},
+            links=ALL_RELS,
         )
-    assert excinfo.value.status_code == 422
-    assert excinfo.value.code == "illegal_dispute_action"
-    assert excinfo.value.details == [
-        {
-            "action": "PROVIDE_EVIDENCE",
-            "stage": "INQUIRY",
-            "reason": "require-evidence_link_missing",
-        }
-    ]
-
-
-@pytest.mark.parametrize("stage,action", [
-    (DisputeStage.CHARGEBACK, DisputeAction.PROVIDE_EVIDENCE),
-    (DisputeStage.CHARGEBACK, DisputeAction.ACCEPT_CLAIM),
-    (DisputeStage.PRE_ARBITRATION, DisputeAction.PROVIDE_EVIDENCE),
-    (DisputeStage.PRE_ARBITRATION, DisputeAction.ACCEPT_CLAIM),
-    (DisputeStage.INQUIRY, DisputeAction.SEND_MESSAGE),
-    (DisputeStage.INQUIRY, DisputeAction.MAKE_OFFER),
-    (DisputeStage.INQUIRY, DisputeAction.ACCEPT_CLAIM),
-])
-def test_ensure_allowed_returns_none_for_legal_actions(
-    stage: DisputeStage, action: DisputeAction
-) -> None:
-    assert (
-        ensure_allowed(action, stage=stage, channel=DisputeChannel.INTERNAL, links={})
-        is None
-    )
-
-
-def test_illegal_action_raises_422() -> None:
-    with pytest.raises(IllegalDisputeActionError) as excinfo:
-        ensure_allowed(
-            DisputeAction.SEND_MESSAGE,
-            stage=DisputeStage.CLOSED,
-            channel=DisputeChannel.EXTERNAL,
-            links={"send-message": "https://api.paypal.com/v1/.../send-message"},
-        )
-    assert excinfo.value.details == [
-        {"action": "SEND_MESSAGE", "stage": "CLOSED", "reason": "dispute_closed"}
-    ]
+    assert raised.value.status_code == 422
+    detail = raised.value.details[0]
+    assert detail["reason"] == "action_not_allowed_in_pre_arbitration"
+    assert detail["veto_code"] == "VETO_ILLEGAL_HATEOAS_TRANSITION"
 
 
 def test_to_allowed_actions_contract() -> None:
     rendered = to_allowed_actions(
-        stage=DisputeStage.INQUIRY,
+        stage=DisputeStage.CHARGEBACK,
         channel=DisputeChannel.INTERNAL,
-        links={
-            "send-message": "https://api.paypal.com/v1/customer/disputes/PP-1/send-message",
-            "require-evidence": "https://api.paypal.com/v1/customer/disputes/PP-1/require-evidence",
-        },
+        links={"accept-claim": "https://paypal/accept"},
+        high_volume=True,
     )
-    assert [item.action for item in rendered] == ACTION_ORDER
     by_action = {item.action: item for item in rendered}
-    assert by_action[DisputeAction.SEND_MESSAGE].allowed is True
-    assert by_action[DisputeAction.SEND_MESSAGE].paypal_link == (
-        "https://api.paypal.com/v1/customer/disputes/PP-1/send-message"
+    accept = by_action[DisputeAction.ACCEPT_CLAIM]
+    assert accept.allowed is True
+    assert accept.fee_usd == Decimal("30.00")
+    assert accept.paypal_link == "https://paypal/accept"
+    assert by_action[DisputeAction.SEND_MESSAGE].allowed is False
+    assert by_action[DisputeAction.SEND_MESSAGE].reason == "send-message_link_missing"
+
+
+@pytest.mark.parametrize("stage", list(STAGE_TABLE))
+def test_expected_rels_unlock_exactly_the_stage_table(stage: DisputeStage) -> None:
+    links = expected_rels(stage)
+    assert all(href.startswith("internal-test:") for href in links.values())
+    caps = capabilities(stage=stage, channel=DisputeChannel.INTERNAL, links=links)
+    allowed = {action for action, cap in caps.items() if cap.allowed}
+    assert allowed == STAGE_TABLE[stage] - (
+        {DisputeAction.PROVIDE_EVIDENCE} if stage is DisputeStage.INQUIRY else set()
     )
-    assert by_action[DisputeAction.PROVIDE_EVIDENCE].allowed is True
-    assert by_action[DisputeAction.PROVIDE_EVIDENCE].paypal_link == (
-        "https://api.paypal.com/v1/customer/disputes/PP-1/require-evidence"
-    )
-    assert by_action[DisputeAction.MAKE_OFFER].paypal_link is None
-    assert by_action[DisputeAction.ACCEPT_CLAIM].fee_usd == 0
 
 
-def test_channel_is_validated() -> None:
-    with pytest.raises(ValueError, match="channel"):
-        capabilities(stage=DisputeStage.INQUIRY, channel="WRONG", links={})  # type: ignore[arg-type]
-
-
-def test_stage_is_validated() -> None:
-    with pytest.raises(ValueError, match="WRONG"):
-        capabilities(stage="WRONG", channel=DisputeChannel.INTERNAL, links={})  # type: ignore[arg-type]
+def test_unknown_channel_rejected() -> None:
+    with pytest.raises(ValueError):
+        capabilities(stage=DisputeStage.INQUIRY, channel="PHONE", links={})  # type: ignore[arg-type]

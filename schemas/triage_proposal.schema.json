@@ -1,0 +1,189 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "TriageProposal",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "proposal_id",
+    "dispute_id",
+    "payment_rail",
+    "dispute_life_cycle_stage",
+    "reason",
+    "proposed_action",
+    "dispute_amount_minor",
+    "currency",
+    "candidate_mode"
+  ],
+  "properties": {
+    "proposal_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f-]{36}$"
+    },
+    "dispute_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9-]+$",
+      "maxLength": 64
+    },
+    "payment_rail": {
+      "type": "string",
+      "enum": [
+        "PAYPAL_WALLET",
+        "UNBRANDED_CARD"
+      ]
+    },
+    "dispute_channel": {
+      "enum": [
+        "INTERNAL",
+        "EXTERNAL"
+      ]
+    },
+    "dispute_life_cycle_stage": {
+      "type": "string",
+      "enum": [
+        "INQUIRY",
+        "CHARGEBACK",
+        "PRE_ARBITRATION",
+        "ARBITRATION",
+        "RESOLVED",
+        "CLOSED"
+      ]
+    },
+    "reason": {
+      "type": "string",
+      "enum": [
+        "MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
+        "MERCHANDISE_OR_SERVICE_NOT_AS_DESCRIBED",
+        "UNAUTHORISED",
+        "CREDIT_NOT_PROCESSED",
+        "DUPLICATE_TRANSACTION",
+        "INCORRECT_AMOUNT",
+        "PAYMENT_BY_OTHER_MEANS",
+        "CANCELED_RECURRING_BILLING",
+        "PROBLEM_WITH_REMITTANCE",
+        "OTHER"
+      ]
+    },
+    "external_reason_code": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "proposed_action": {
+      "enum": [
+        "MAKE_OFFER",
+        "PROVIDE_EVIDENCE",
+        "ACCEPT_CLAIM",
+        "SEND_MESSAGE",
+        "ESCALATE",
+        "APPEAL"
+      ]
+    },
+    "dispute_amount_minor": {
+      "type": "integer",
+      "exclusiveMinimum": 0
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$"
+    },
+    "estimated_cogs_minor": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "hateoas_rels": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "ai_forensics": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "claim_contradictions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "grounded_citations": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^E[0-9]+$"
+          }
+        },
+        "buyer_tone": {
+          "enum": [
+            "COOPERATIVE",
+            "HOSTILE",
+            "INJECTION_SUSPECTED"
+          ]
+        },
+        "injection_detected": {
+          "type": "boolean"
+        }
+      }
+    },
+    "offer_payload": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "offer_type": {
+          "enum": [
+            "REFUND",
+            "REFUND_WITH_RETURN",
+            "REFUND_WITH_REPLACEMENT",
+            "REPLACEMENT_WITHOUT_REFUND"
+          ]
+        },
+        "offer_amount_minor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "note": {
+          "type": "string",
+          "maxLength": 2000
+        }
+      }
+    },
+    "evidence_payload": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "claimed_ce3_manifest": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
+    "portfolio": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "cliff_metrics hvd_3m / vamp_monthly inputs (integers only)"
+    },
+    "untrusted_text": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "maxLength": 8000
+    },
+    "candidate_mode": {
+      "enum": [
+        "HARDENED",
+        "NAIVE",
+        "LLM_UNGUARDED"
+      ]
+    }
+  }
+}

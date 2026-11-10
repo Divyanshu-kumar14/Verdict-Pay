@@ -80,7 +80,12 @@ class Database:
             for column in table.columns:
                 if column.name in existing:
                     continue
-                if not column.nullable:
+                default_sql = ""
+                server_default = getattr(column.server_default, "arg", None)
+                if server_default is not None:
+                    literal = str(server_default).replace("'", "''")
+                    default_sql = f" NOT NULL DEFAULT '{literal}'"
+                if not column.nullable and not default_sql:
                     logger.error(
                         "schema_column_missing_required",
                         extra={"table": table.name, "column": column.name},
@@ -88,7 +93,7 @@ class Database:
                     continue
                 ddl = (
                     f'ALTER TABLE "{table.name}" ADD COLUMN "{column.name}" '
-                    f"{column.type.compile(dialect=connection.dialect)}"
+                    f"{column.type.compile(dialect=connection.dialect)}{default_sql}"
                 )
                 await connection.execute(text(ddl))
                 logger.warning(

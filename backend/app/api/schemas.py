@@ -181,9 +181,29 @@ class EvBreakdown(ApiModel):
     high_volume: bool
     high_volume_fee_usd: Decimal
     standard_fee_usd: Decimal
+    # The single fee PayPal charges in the active tier ($30 replaces $15).
+    fee_tier_usd: Decimal = Decimal("15.00")
+    accept_fee_usd: Decimal = Decimal("0.00")
+    win_fee_usd: Decimal = Decimal("0.00")
+    fee_reimbursable_on_win: bool = True
+    sla_response_days: int = 10
     penalty_ratio_usd: Decimal
+    # Legacy display ratios (derived from the exact ppm fields below).
     ratio_before: float
     ratio_after: float
+    # Exact ratios: integer parts-per-million plus a six-place string.
+    ratio_before_ppm: int = 0
+    ratio_after_ppm: int = 0
+    ratio_threshold_ppm: int = 15000
+    ratio_before_str: str = "0.000000"
+    ratio_after_str: str = "0.000000"
+    net_sales_minor_3m: int = 0
+    disputed_amount_minor_3m: int = 0
+    payment_rail: Literal["PAYPAL_WALLET", "UNBRANDED_CARD"] = "PAYPAL_WALLET"
+    hvd_countable: bool = True
+    source_plane: Literal["LIVE_PAYPAL_SANDBOX", "SIMULATED_CARD_NETWORK_FEED"] = (
+        "LIVE_PAYPAL_SANDBOX"
+    )
     # Threshold metadata: the policy line, plus a machine-checkable verdict.
     ratio_threshold: float
     ratio_relation: Literal["below", "at_or_above"]
@@ -251,6 +271,10 @@ class CaseFacts(ApiModel):
     response_due_date: datetime | None = None
     ce3_matches: list[dict[str, Any]] = Field(default_factory=list)
     ce3_window_days: int = 0
+    # Strict Visa CE 3.0 3-way proof (UNBRANDED_CARD + reason 10.4 only).
+    ce3_proof: dict[str, Any] | None = None
+    payment_rail: str = "PAYPAL_WALLET"
+    external_reason_code: str | None = None
     signals: dict[str, bool] = Field(default_factory=dict)
 
 
@@ -286,6 +310,14 @@ class DisputeSummary(ApiModel):
     seller_response_due_date: datetime | None
     created_at: datetime
     updated_at: datetime
+    payment_rail: Literal["PAYPAL_WALLET", "UNBRANDED_CARD"] = "PAYPAL_WALLET"
+    external_reason_code: str | None = None
+    amount_minor: int = 0
+    source_plane: Literal[
+        "LIVE_PAYPAL_SANDBOX", "SIMULATED_CARD_NETWORK_FEED", "INTERNAL_TEST_EVENT"
+    ] = "LIVE_PAYPAL_SANDBOX"
+    source_badge: str = "[LIVE PAYPAL SANDBOX]"
+    sla_response_days: int = 10
 
 
 class DecisionOption(ApiModel):
@@ -333,6 +365,20 @@ class ActionRequest(ApiModel):
     note: str | None = Field(default=None, max_length=2000)
     offer_ratio: Decimal | None = Field(default=None, gt=0, le=1)
     idempotency_key: str | None = Field(default=None, max_length=128)
+    offer_type: (
+        Literal[
+            "REFUND", "REFUND_WITH_RETURN", "REFUND_WITH_REPLACEMENT", "REPLACEMENT_WITHOUT_REFUND"
+        ]
+        | None
+    ) = None
+    accept_claim_type: (
+        Literal[
+            "REFUND", "REFUND_WITH_RETURN", "PARTIAL_REFUND", "REFUND_WITH_RETURN_SHIPMENT_LABEL"
+        ]
+        | None
+    ) = None
+    # Sentinel ApprovalToken (JSON) authorising this exact mutation.
+    approval_token: dict[str, Any] | None = None
 
 
 class ActionResponse(ApiModel):
@@ -513,6 +559,46 @@ class HighVolumeStatus(ApiModel):
     threshold: float
     sales_3mo: int
     disputes_3mo: int
+    ratio_ppm: int = 0
+    threshold_ppm: int = 15000
+    ratio_str: str = "0.000000"
+    net_sales_minor_3m: int = 0
+    disputed_amount_minor_3m: int = 0
+    amount_until_cliff_minor: int = 0
+    active_fee_tier_usd_cents: int = 1500
+    fee_reimbursable_on_win: bool = True
+    sla_response_days: int = 10
+    window_start: datetime | None = None
+    window_end: datetime | None = None
+    source_plane: Literal["LIVE_PAYPAL_SANDBOX"] = "LIVE_PAYPAL_SANDBOX"
+
+
+class VampStatus(ApiModel):
+    """Visa VAMP + Mastercard ECP state from the *simulated* acquirer feed."""
+
+    month: str | None
+    tc05_settled_cnp: int
+    tc40_fraud_count: int
+    tc15_dispute_count: int
+    ce3_remedied_tc15: int
+    dual_counted_events: int
+    combined_events: int
+    monthly_floor_events: int
+    ratio_ppm: int
+    ratio_str: str
+    threshold_ppm: int
+    excessive_enforcement_active: bool
+    projected_vamp_fines_usd_cents: int
+    projected_vamp_fines_str: str
+    events_until_cliff: int
+    ecp_ratio_ppm: int
+    ecp_threshold_ppm: int
+    ecp_warning: bool
+    ecp_breached: bool
+    mc_chargebacks: int
+    mc_prior_month_settled: int
+    source_plane: Literal["SIMULATED_CARD_NETWORK_FEED"] = "SIMULATED_CARD_NETWORK_FEED"
+    badge: str = "[VISA-TC40 / ACQUIRER-FEED SIMULATION]"
 
 
 class ReportingSummary(ApiModel):
@@ -528,6 +614,8 @@ class ReportingSummary(ApiModel):
     subscription_suspensions: int
     chain_verified_customers: int
     high_volume: HighVolumeStatus
+    vamp: VampStatus | None = None
+    rules_manifest_sha256: str | None = None
     generated_at: datetime
 
 

@@ -209,7 +209,9 @@ async def test_verify_detects_payload_tampered_at_sql_level(
 ) -> None:
     results = await service.record_many(
         [
-            make_event(event_id=f"evt_{index:03d}", occurred_at=OCCURRED_AT + timedelta(minutes=index))
+            make_event(
+                event_id=f"evt_{index:03d}", occurred_at=OCCURRED_AT + timedelta(minutes=index)
+            )
             for index in range(3)
         ]
     )

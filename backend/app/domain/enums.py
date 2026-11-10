@@ -19,6 +19,7 @@ class DisputeStage(StrEnum):
     INQUIRY = "INQUIRY"
     CHARGEBACK = "CHARGEBACK"
     PRE_ARBITRATION = "PRE_ARBITRATION"
+    ARBITRATION = "ARBITRATION"
     RESOLVED = "RESOLVED"
     CLOSED = "CLOSED"
 
@@ -56,6 +57,8 @@ class DisputeAction(StrEnum):
     MAKE_OFFER = "MAKE_OFFER"
     ACCEPT_CLAIM = "ACCEPT_CLAIM"
     PROVIDE_EVIDENCE = "PROVIDE_EVIDENCE"
+    ESCALATE = "ESCALATE"
+    APPEAL = "APPEAL"
 
 
 class ActionStatus(StrEnum):

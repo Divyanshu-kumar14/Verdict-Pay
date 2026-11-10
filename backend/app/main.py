@@ -33,6 +33,12 @@ from app.integrations.llm.factory import build_narrative_provider
 from app.integrations.paypal.factory import build_gateway
 from app.integrations.search.factory import build_search_index
 from app.logging_setup import configure_logging, get_logger, log_context
+from app.oracle.manifest import (
+    EXIT_FAIL_CLOSED,
+    ManifestError,
+    RulesManifest,
+    get_manifest,
+)
 from app.security import SlidingWindowLimiter
 from app.services.bootstrap import ensure_demo_merchant, restore_gateway_state
 
@@ -221,9 +227,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("shutdown")
 
 
+def verify_rules_manifest_or_exit() -> RulesManifest:
+    """Fail closed: a missing or tampered policy manifest stops the process (exit 2)."""
+    try:
+        return get_manifest()
+    except ManifestError as exc:
+        logger.critical(
+            "rules_manifest_rejected",
+            extra=log_context(veto_code=ManifestError.veto_code, error=str(exc)),
+        )
+        raise SystemExit(EXIT_FAIL_CLOSED) from exc
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     configure_logging(settings.log_level)
+    rules_manifest = verify_rules_manifest_or_exit()
 
     app = FastAPI(
         title="VerdictPay API",
@@ -237,6 +256,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url="/openapi.json",
     )
     app.state.settings = settings
+    app.state.rules_manifest = rules_manifest
 
     app.add_middleware(
         BodySizeLimitMiddleware,

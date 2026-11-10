@@ -91,6 +91,20 @@ class PaypalTransaction(Base):
     capture_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     run_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    # Two-axis rail split and CE 3.0 anchors (all hashes, never raw PII).
+    payment_rail: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="PAYPAL_WALLET", server_default="PAYPAL_WALLET"
+    )
+    payment_credential_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    account_login_id_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    shipping_address_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    has_tc40: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
+    # Historical sale that later became a countable wallet INR/SNAD claim.
+    disputed_claim: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="0"
+    )
 
 
 class DisputeCase(Base):
@@ -131,6 +145,19 @@ class DisputeCase(Base):
         DateTime(timezone=True), nullable=True
     )
     paypal_links: Mapped[dict[str, str]] = mapped_column(JSON, nullable=False, default=dict)
+    payment_rail: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="PAYPAL_WALLET", server_default="PAYPAL_WALLET"
+    )
+    external_reason_code: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    amount_minor: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    source_plane: Mapped[str] = mapped_column(
+        String(32),
+        nullable=False,
+        default="LIVE_PAYPAL_SANDBOX",
+        server_default="LIVE_PAYPAL_SANDBOX",
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utcnow, onupdate=utcnow
@@ -247,3 +274,49 @@ def _forbid_ledger_update(mapper: object, connection: object, target: TelemetryL
 @event.listens_for(TelemetryLedger, "before_delete")
 def _forbid_ledger_delete(mapper: object, connection: object, target: TelemetryLedger) -> None:
     raise RuntimeError("telemetry_ledger is append-only: deletes are forbidden")
+
+
+class CardNetworkMonthlyFeed(Base):
+    """Simulated Visa TC40/TC15/TC05 + Mastercard ECP acquirer feed, one row per month.
+
+    VerdictPay has no acquirer connection: every row is labelled
+    ``source_plane="SIMULATED_CARD_NETWORK_FEED"`` and the UI badges it as a
+    simulation, never as live PayPal data.
+    """
+
+    __tablename__ = "card_network_monthly_feed"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: new_id("cnf_"))
+    merchant_id: Mapped[str] = mapped_column(String(40), ForeignKey("merchants.id"), nullable=False)
+    month: Mapped[str] = mapped_column(String(7), nullable=False)
+    tc05_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    tc40_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    tc15_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    dual_counted: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ce3_remedied_tc15: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    mc_prior_month_settled: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    mc_chargebacks: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    source_plane: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="SIMULATED_CARD_NETWORK_FEED"
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class SentinelAuditRecord(Base):
+    """Every Sentinel verdict (ALLOW and VETO), linked into the telemetry chain."""
+
+    __tablename__ = "sentinel_audit_log"
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: new_id("sen_"))
+    merchant_id: Mapped[str] = mapped_column(String(40), ForeignKey("merchants.id"), nullable=False)
+    proposal_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    dispute_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    candidate_mode: Mapped[str] = mapped_column(String(16), nullable=False)
+    proposed_action: Mapped[str] = mapped_column(String(32), nullable=False)
+    verdict: Mapped[str] = mapped_column(String(8), nullable=False)
+    exit_code: Mapped[int] = mapped_column(Integer, nullable=False)
+    veto_codes: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    manifest_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    chain_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    paypal_debug_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
