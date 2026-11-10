@@ -60,6 +60,17 @@ SCRIPTED = {
 }
 
 
+def _describe_error(exc: BaseException) -> str:
+    """Class name plus the non-secret HTTP code/status (``ClientError 429 RESOURCE_EXHAUSTED``)."""
+    parts = [type(exc).__name__]
+    code, status = getattr(exc, "code", None), getattr(exc, "status", None)
+    if isinstance(code, int):
+        parts.append(str(code))
+    if isinstance(status, str) and status:
+        parts.append(status)
+    return " ".join(parts)
+
+
 def _call_llm(api_key: str, model: str) -> dict[str, object]:
     from google import genai
     from google.genai import types
@@ -97,7 +108,7 @@ def main() -> int:
                 source="scripted_llm_error",
                 proposal=SCRIPTED,
                 degraded=True,
-                degraded_reason=f"llm_error:{type(exc).__name__}",
+                degraded_reason=f"llm_error:{_describe_error(exc)}",
             )
     # The worker never needs the network after the model call.
     socket.socket = None  # type: ignore[assignment,misc]

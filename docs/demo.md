@@ -197,7 +197,8 @@ ALL 26 ASSERTIONS PASSED - the 60-second demo is real.
 print `executed` and `uploaded via multipart/related` instead. The
 CLI files **INR** (multiplier 1.00 → p(win) 0.80, EV_fight -$58.80 on a $99 claim that crosses the
 1.5% cliff with the $45.00 inquiry penalty, 5/6 signals — Visa CE 3.0 is card-only); the UI button
-files **SNAD** (multiplier 0.90 → p(win) 0.90). Both are computed live from the frozen model and
+omits `reason_code` too, so the API default applies and it files the same **INR**
+`MERCHANDISE_OR_SERVICE_NOT_RECEIVED` case (5/6 signals, p(win) 0.80, EV_fight -$58.80). Both are computed live from the frozen model and
 neither is hard-coded. The CLI run adds 2 E2E $99 cases on top of the 6 seeded cases (its escalated
 claim + its own dispute), which is why it ends at 8 cases / $695 exposure instead of the bare
 6 / $497 seed queue. Fees avoided stays $15.00 — the one seeded historical inquiry.

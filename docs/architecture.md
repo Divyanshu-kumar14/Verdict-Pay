@@ -85,7 +85,7 @@ sequenceDiagram
         PP-->>Hook: verified event
         Hook->>Case: ingest_webhook()
     else no webhook for this order
-        Web->>API: POST /sandbox/dispute (SNAD, INQUIRY, INTERNAL)
+        Web->>API: POST /sandbox/dispute (INR, INQUIRY, INTERNAL)
         API->>PP: create_sandbox_dispute(...)
         PP-->>API: dispute, or 401 for standard sandbox apps
         API->>Case: open_sandbox_dispute() (origin paypal_sandbox or internal_test_event)

@@ -10,7 +10,7 @@
 
 import { useCallback, useRef, useState } from "react";
 
-import { api, toApiError, type ApiError } from "../api";
+import { api, ApiError, toApiError } from "../api";
 import { DEMO_BUYER_CLAIM } from "../constants";
 import { parseContainment } from "../containment";
 import { formatCompactInteger, formatLatency, formatPercent, formatUsd, shortHash } from "../format";
@@ -479,7 +479,7 @@ export function useSandboxFlow(): SandboxFlow {
           ...prev,
           dossierVerify: verification,
           dossierStatus: "error",
-          error: toApiError({
+          error: new ApiError({
             code: "dossier_verification_failed",
             message: "Dossier verification FAILED: re-rendered bytes differ from the frozen snapshot.",
           }),

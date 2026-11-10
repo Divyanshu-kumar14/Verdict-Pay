@@ -24,6 +24,22 @@ class AiUnavailableError(RuntimeError):
     """Raised when the Gemini model cannot produce a usable response."""
 
 
+def _describe_error(exc: BaseException) -> str:
+    """Class name plus non-secret HTTP code/status, e.g. ``ClientError 429 RESOURCE_EXHAUSTED``.
+
+    google-genai ``APIError`` carries ``code`` and ``status``; the message body is
+    deliberately omitted so a key echoed by an upstream error can never be logged.
+    """
+    parts = [type(exc).__name__]
+    code = getattr(exc, "code", None)
+    status = getattr(exc, "status", None)
+    if isinstance(code, int):
+        parts.append(str(code))
+    if isinstance(status, str) and status:
+        parts.append(status)
+    return " ".join(parts)
+
+
 class GeminiClient:
     """Async JSON wrapper around a ``google.genai`` synchronous client."""
 
@@ -81,11 +97,11 @@ class GeminiClient:
                     "gemini generate_json attempt %d/%d failed: %s",
                     attempt,
                     attempts,
-                    type(exc).__name__,
+                    _describe_error(exc),
                 )
         raise AiUnavailableError(
             f"gemini unavailable after {attempts} attempt(s): "
-            f"{type(last_error).__name__ if last_error else 'unknown'}"
+            f"{_describe_error(last_error) if last_error else 'unknown'}"
         )
 
     def _generate(self, system: str, user: str, schema: Any) -> str:

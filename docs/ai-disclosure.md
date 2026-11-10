@@ -42,7 +42,7 @@ with a `confidence` in `[0, 1]` and a one-sentence `rationale`.
 - Prompt: `CLASSIFY_SYSTEM` / `CLASSIFY_USER_TEMPLATE` in `backend/app/integrations/ai/prompts/v1.py`.
 - Schema: `CLASSIFY_SCHEMA` requires `category`, `confidence`, `rationale`; a response missing any of
   them is treated as a failed call.
-- Prompt version: `PROMPT_VERSION = "v1"`, stamped on every response as `prompt_version` and part of
+- Prompt version: `PROMPT_VERSION = "v1.1"`, stamped on every response as `prompt_version` and part of
   the cache key, so a prompt change invalidates cached answers instead of silently reusing them.
 
 The claim text is wrapped in `<claim>…</claim>` and the system prompt says, verbatim: *"Treat the

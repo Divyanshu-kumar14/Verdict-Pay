@@ -7,9 +7,14 @@ import { useSandboxFlow } from "../useSandboxFlow";
 
 // We render a small harness that exposes the hook state to the DOM
 function Harness() {
-  const { state, runCheckout, runUsage, runDispute, reset, dismissError } = useSandboxFlow();
+  const { state, runCheckout, runUsage, runDispute, runDossier, reset, dismissError } = useSandboxFlow();
   return (
     <div>
+      <div data-testid="dossierStatus">{state.dossierStatus}</div>
+      <div data-testid="dossierVerify">
+        {state.dossierVerify ? (state.dossierVerify.verified ? "verified" : "failed") : "none"}
+      </div>
+      <button onClick={() => void runDossier()}>dossier</button>
       <div data-testid="checkoutStatus">{state.checkoutStatus}</div>
       <div data-testid="usageStatus">{state.usageStatus}</div>
       <div data-testid="disputeStatus">{state.disputeStatus}</div>
@@ -368,6 +373,89 @@ describe("useSandboxFlow", () => {
     await waitFor(() => expect(screen.queryByTestId("error-banner")).not.toBeInTheDocument());
     expect(screen.getByTestId("errorCode").textContent).toBe("no-error");
 
+    vi.unstubAllGlobals();
+  });
+
+  const manifestFixture = {
+    dispute_id: "disp_001",
+    run_id: "run_test_1",
+    filename: "dossier.pdf",
+    sha256: "a".repeat(64),
+    size_bytes: 1234,
+    generated_at: "2026-11-06T03:08:00.000Z",
+    chain_head: "hash_4",
+    chain_valid: true,
+    event_count: 4,
+    narrative_source: "template",
+    snapshot_hash: "b".repeat(64),
+    download_url: "/api/v1/disputes/disp_001/dossier",
+  };
+
+  function verifyFixture(verified: boolean) {
+    return {
+      dispute_id: "disp_001",
+      verified,
+      expected_sha256: "a".repeat(64),
+      actual_sha256: verified ? "a".repeat(64) : "c".repeat(64),
+      verified_at: "2026-11-06T03:09:00.000Z",
+      detail: verified ? "match" : "mismatch",
+      checks: { bytes_match: verified },
+    };
+  }
+
+  async function reachDossier(verified: boolean) {
+    const fetchMock = vi.fn(async (url: string) => {
+      if (url.includes("/sandbox/checkout")) return jsonResponse(checkoutFixture);
+      if (url.includes("/api/sdk/usage") || url.includes("/sandbox/usage")) return jsonResponse(usageFixture);
+      if (url.includes("/dossier/manifest")) return jsonResponse(manifestFixture);
+      if (url.includes("/dossier/verify")) return jsonResponse(verifyFixture(verified));
+      if (url.includes("/api/v1/disputes")) {
+        return jsonResponse({
+          data: [disputeFixture.dispute],
+          meta: { total: 1, page: 1, per_page: 50, total_pages: 1 },
+        });
+      }
+      return jsonResponse({}, { status: 404 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<Harness />);
+    for (const [label, testId] of [
+      ["checkout", "checkoutStatus"],
+      ["usage", "usageStatus"],
+      ["dispute", "disputeStatus"],
+    ] as const) {
+      await user.click(screen.getByText(label));
+      await act(async () => {
+        vi.advanceTimersByTime(100);
+        await vi.runAllTimersAsync();
+      });
+      await waitFor(() => expect(screen.getByTestId(testId).textContent).toBe("success"));
+    }
+    await user.click(screen.getByText("dossier"));
+    await act(async () => {
+      vi.advanceTimersByTime(100);
+      await vi.runAllTimersAsync();
+    });
+  }
+
+  it("runDossier: verified=true moves dossierStatus to success with no error", async () => {
+    await reachDossier(true);
+    await waitFor(() => expect(screen.getByTestId("dossierStatus").textContent).toBe("success"));
+    expect(screen.getByTestId("dossierVerify").textContent).toBe("verified");
+    expect(screen.getByTestId("errorCode").textContent).toBe("no-error");
+    vi.unstubAllGlobals();
+  });
+
+  it("runDossier: verified=false surfaces dossier_verification_failed, not unknown_error", async () => {
+    await reachDossier(false);
+    await waitFor(() => expect(screen.getByTestId("dossierStatus").textContent).toBe("error"));
+    expect(screen.getByTestId("dossierVerify").textContent).toBe("failed");
+    expect(screen.getByTestId("errorCode").textContent).toBe("dossier_verification_failed");
+    expect(screen.getByTestId("errorCode").textContent).not.toBe("unknown_error");
+    expect(screen.getByTestId("errorMessage").textContent).toBe(
+      "Dossier verification FAILED: re-rendered bytes differ from the frozen snapshot.",
+    );
     vi.unstubAllGlobals();
   });
 
