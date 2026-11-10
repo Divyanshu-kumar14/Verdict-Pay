@@ -222,3 +222,22 @@ async def test_template_provider_truncates_to_max_chars() -> None:
     short = await provider.compose(_request(facts, max_chars=100))
     assert len(short) <= 100
     assert short == full[:100].rstrip()
+
+
+def test_numbers_hidden_inside_a_digest_are_not_allowed() -> None:
+    """A figure that only appears inside a SHA-256 hex string must not validate."""
+    from app.api import schemas
+    from app.domain.evidence.narrative import validate_narrative
+
+    head = "ab4521cd" + "0" * 56
+    facts = schemas.CaseFacts(
+        payer_id="PAYER1", chain_valid=True, chain_head=head, event_count=3, completeness=0.5
+    )
+    ok, reason = validate_narrative("The buyer was refunded 4521 dollars.", facts)
+    assert ok is False
+    assert reason == "unverified_number:4521"
+    ok, _ = validate_narrative(f"The chain head is {head} across 3 events.", facts)
+    assert ok is True
+    ok, reason = validate_narrative(f"The chain head is {'f' * 64}.", facts)
+    assert ok is False
+    assert reason.startswith("unverified_digest:")

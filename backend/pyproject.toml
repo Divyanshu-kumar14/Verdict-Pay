@@ -25,6 +25,7 @@ dev = [
     "respx>=0.21.1",
     "pypdf>=5.1.0",
     "ruff>=0.7.0",
+    "hypothesis>=6.170.15",
 ]
 
 [tool.pytest.ini_options]
