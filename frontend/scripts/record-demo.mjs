@@ -85,7 +85,7 @@ try {
   await page.goto('http://localhost:3000/veto-lab', { waitUntil: 'networkidle' });
   await page.waitForTimeout(2000);
   await shot('10-veto-lab');
-  await clickAction('Run veto lab');
+  await page.getByTestId('run-veto-lab').click();
   await page.getByTestId('control-llm').waitFor({ timeout: 120000 });
   await page.waitForTimeout(2500);
   await shot('11-veto-lab-results');

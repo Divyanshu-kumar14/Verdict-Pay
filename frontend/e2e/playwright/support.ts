@@ -110,6 +110,11 @@ export async function capture(
   return postJson(request, `/sandbox/orders/${orderId}/capture`, {});
 }
 
+/** Buyer approval is a human action in the PayPal UI — there is no approve endpoint.
+ * This helper is kept as a throwing stub so tests that accidentally call it fail loudly
+ * instead of silently succeeding. Tests that need an approved order must set
+ * `E2E_APPROVED_ORDER_ID` and skip the approval step.
+ */
 export async function approve(
   _request: APIRequestContext,
   _orderId: string,
@@ -119,23 +124,24 @@ export async function approve(
   );
 }
 
-export const USAGE_EVENTS = [
-  { event_type: "TOS_ACCEPTED", occurred_at: "2026-11-06T18:00:00Z" },
-  { event_type: "SESSION_AUTH", occurred_at: "2026-11-06T18:00:01Z" },
-  { event_type: "ASSET_DELIVERED", occurred_at: "2026-11-06T18:00:02Z" },
-  { event_type: "USAGE_METERED", occurred_at: "2026-11-06T18:00:03Z" },
-];
-
-/** Ingest the four-event usage chain for an order that has already been captured. */
+/** Ingest the four-event usage chain for an order that has already been captured.
+ *
+ * The backend `UsageRequest` schema takes `logins`, `tokens`, `export_name` — not
+ * an `events` array. The chain is built server-side from those fields.
+ */
 export async function ingestUsage(
   request: APIRequestContext,
   order: Checkout,
+  plan: "pro" | "scale" = "pro",
 ): Promise<Json> {
   const { status, body } = await postJson(request, "/sandbox/usage", {
     payer_id: order.payer_id,
     order_id: order.order_id,
     run_id: order.run_id,
-    events: USAGE_EVENTS,
+    logins: 15,
+    tokens: 42_000,
+    export_name: "q3_financial_model.xlsx",
+    plan,
   });
   if (status !== 200) {
     throw new Error(`POST /sandbox/usage -> HTTP ${status}: ${JSON.stringify(body).slice(0, 800)}`);
@@ -170,9 +176,9 @@ export async function fileDispute(
 }
 
 /**
- * A full, self-contained judge run: order -> (refused capture) -> approval -> capture ->
- * telemetry -> dispute. Returns every identifier the later assertions need, so a test
- * that only cares about the dossier does not have to re-drive the whole flow.
+ * A full, self-contained judge run: order -> (refused capture) -> telemetry -> dispute.
+ * Returns every identifier the later assertions need, so a test that only cares about
+ * the dossier does not have to re-drive the whole flow.
  */
 export type JudgeRun = {
   order: Checkout;
@@ -200,63 +206,7 @@ export async function runJudgeFlow(request: APIRequestContext): Promise<JudgeRun
   };
 }
 
-/**
- * The HMAC secret the API verifies webhooks with.
- *
- * Read from the environment, else from the repo `.env` that the API process itself
- * loads — a webhook test that cannot sign is a webhook test that proves nothing. The
- * value is never logged, never asserted on, and never written to a report; only the
- * resulting signature travels.
- */
-let cachedSecret: string | null = null;
-
-export async function webhookSecret(): Promise<string> {
-  if (cachedSecret) return cachedSecret;
-  const fromEnv = process.env.VERDICTPAY_WEBHOOK_SECRET;
-  if (fromEnv && fromEnv.length >= 8) {
-    cachedSecret = fromEnv;
-    return cachedSecret;
-  }
-  const { readFile } = await import("node:fs/promises");
-  const { join } = await import("node:path");
-  // frontend/ -> repo root
-  const envPath = join(process.cwd(), "..", ".env");
-  let text: string;
-  try {
-    text = await readFile(envPath, "utf8");
-  } catch (error) {
-    throw new Error(
-      `E2E BLOCKED: no VERDICTPAY_WEBHOOK_SECRET in the environment and ${envPath} is unreadable ` +
-        `(${error instanceof Error ? error.message : String(error)}). ` +
-        "The signed-webhook scenarios need the same secret the API process verifies with.",
-    );
-  }
-  for (const line of text.split("\n")) {
-    const match = /^\s*VERDICTPAY_WEBHOOK_SECRET\s*=\s*(.+?)\s*$/.exec(line);
-    if (match && match[1]) {
-      cachedSecret = match[1].replace(/^["']|["']$/g, "");
-      return cachedSecret;
-    }
-  }
-  throw new Error(`E2E BLOCKED: VERDICTPAY_WEBHOOK_SECRET is not defined in ${envPath}.`);
-}
-
-/** Deterministic body bytes so the signature covers exactly what is sent. */
-export function webhookBody(payload: Json): string {
-  return JSON.stringify(payload);
-}
-
-/** HMAC-SHA256 over `timestamp.body`, exactly as `app/security.py:compute_signature`. */
-export async function signWebhook(
-  secret: string,
-  timestamp: string,
-  body: string,
-): Promise<string> {
-  const { createHmac } = await import("node:crypto");
-  return createHmac("sha256", secret).update(`${timestamp}.`).update(body).digest("hex");
-}
-
-/** A PayPal-shaped dispute event, used for the signed/replay scenarios. */
+/** A PayPal-shaped dispute event, used for the unsigned/replay scenarios. */
 export function disputeEvent(eventId: string, disputeId: string, amount = "99.00"): Json {
   return {
     id: eventId,
@@ -281,23 +231,21 @@ export function disputeEvent(eventId: string, disputeId: string, amount = "99.00
   };
 }
 
-/** Deliver one signed webhook. Returns the status and decoded body. */
+/** Deliver one *unsigned* webhook. PayPal's verify-webhook-signature requires
+ * the five PAYPAL-TRANSMISSION-* headers; without them the backend returns
+ * `missing_transmission_headers` and rejects with `webhook_verification_failed`.
+ * No HMAC forgery is attempted — the test asserts honest rejection.
+ */
 export async function deliverWebhook(
   request: APIRequestContext,
   payload: Json,
 ): Promise<{ status: number; body: Json }> {
-  const secret = await webhookSecret();
-  const body = webhookBody(payload);
-  const timestamp = String(Math.floor(Date.now() / 1000));
-  const signature = await signWebhook(secret, timestamp, body);
   const response = await request.post(`${API_BASE}/api/v1/webhooks/paypal`, {
     headers: {
       ...AUTH_HEADERS,
       "Content-Type": "application/json",
-      "X-VerdictPay-Timestamp": timestamp,
-      "X-VerdictPay-Signature": signature,
     },
-    data: body,
+    data: payload,
   });
   const text = await response.text();
   let decoded: Json = {};

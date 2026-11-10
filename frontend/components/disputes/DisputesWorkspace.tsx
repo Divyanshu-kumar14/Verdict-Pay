@@ -318,7 +318,7 @@ export function DisputesWorkspace() {
 
         <motion.article variants={staggerItem} className="panel">
           <KpiTile
-            label="EV recovered"
+            label="Exposure defended"
             tone="positive"
             status={summaryStatus}
             valueNumber={summaryData ? summaryData.protected_usd : 0}

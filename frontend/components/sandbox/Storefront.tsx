@@ -286,9 +286,14 @@ function buildSteps(
       index: 6,
       title: "Generate dossier",
       subtitle: "PDF + SHA-256 manifest + tamper verification",
-      successDetail: state.dossierStatus === "success"
-        ? "Dossier verified"
-        : null,
+      successDetail:
+        state.dossierStatus === "success"
+          ? state.dossierVerify?.verified === true
+            ? "Dossier verified"
+            : "Verification failed"
+          : state.dossierVerify?.verified === false
+            ? "Verification failed"
+            : null,
       action: "Generate dossier",
       status: state.dossierStatus,
       canRun: canDossier || state.dossierStatus === "error",

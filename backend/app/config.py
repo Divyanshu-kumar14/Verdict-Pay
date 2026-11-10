@@ -99,6 +99,9 @@ class Settings(BaseSettings):
     # --- secrets / auth ---------------------------------------------------
     verdictpay_api_key: str = "vp_demo_sk_local"
     verdictpay_signing_secret: str = "dev-signing-secret-change-me"
+    # Legacy HMAC secret for test/fake webhook signing. NOT wired to PayPal's
+    # verify-webhook-signature (which uses transmission headers + webhook ID),
+    # and NOT checked in production — a dead secret must not fail boot.
     verdictpay_webhook_secret: str = "dev-webhook-secret-change-me"
     webhook_tolerance_seconds: int = 300
     allow_unsigned_webhooks: bool = False
@@ -214,7 +217,6 @@ class Settings(BaseSettings):
             for name, value in (
                 ("verdictpay_api_key", self.verdictpay_api_key),
                 ("verdictpay_signing_secret", self.verdictpay_signing_secret),
-                ("verdictpay_webhook_secret", self.verdictpay_webhook_secret),
             )
             if not value or value.startswith(_DEV_SECRET_PREFIX)
         ]

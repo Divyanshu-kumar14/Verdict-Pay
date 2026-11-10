@@ -50,18 +50,21 @@ const SECTIONS = [
 
 const WEBHOOK_REQUEST_LINES = [
   "POST /api/v1/webhooks/paypal",
-  "X-VerdictPay-Signature: sha256=<hex>",
-  "clock skew: +/-300s | replay-safe on event_id",
+  "PAYPAL-TRANSMISSION-ID: <id>",
+  "PAYPAL-TRANSMISSION-TIME: <timestamp>",
+  "PAYPAL-CERT-URL: <cert-url>",
+  "PAYPAL-AUTH-ALGO: <algo>",
+  "PAYPAL-TRANSMISSION-SIG: <signature>",
 ];
 
 /* The signed-webhook verification pipeline, rendered as a CONFIGURATION
    ILLUSTRATION: every stage carries its real deployment config, and no live
    event is being verified, so nothing here invents a passing checkmark. */
 const WEBHOOK_STEPS: SignalStep[] = [
-  { id: "event", label: "PayPal Event", state: "active", meta: "inbound payload + signature header" },
-  { id: "signature", label: "Signature Verification", state: "pending", meta: "HMAC-SHA256 enabled" },
-  { id: "clock", label: "Clock Tolerance", state: "pending", meta: "reject when skew > ±300s" },
-  { id: "replay", label: "Replay Protection", state: "pending", meta: "event_id must be unseen" },
+  { id: "event", label: "PayPal Event", state: "active", meta: "inbound payload + transmission headers" },
+  { id: "signature", label: "Signature Verification", state: "pending", meta: "verify-webhook-signature endpoint" },
+  { id: "webhook_id", label: "Webhook ID", state: "pending", meta: "PAYPAL_SANDBOX_WEBHOOK_ID / PAYPAL_WEBHOOK_ID" },
+  { id: "replay", label: "Replay Protection", state: "pending", meta: "transmission_id must be unseen" },
   { id: "terminal", label: "Accepted / Rejected", state: "failed", meta: "unsigned or invalid traffic → rejected" },
 ];
 
@@ -743,7 +746,7 @@ export function SettingsPanel() {
               actions={
                 <Badge tone="accent" size="sm">
                   <Webhook size={12} aria-hidden />
-                  HMAC-SHA256
+                  PayPal verify-webhook-signature
                 </Badge>
               }
             />
@@ -773,9 +776,9 @@ export function SettingsPanel() {
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
-                <Field label="Algorithm" value="HMAC-SHA256" mono />
-                <Field label="Clock tolerance" value="+/-300s" mono />
-                <Field label="Replay cache" value="event_id unique" mono />
+                <Field label="Algorithm" value="PayPal verify-webhook-signature" mono />
+                <Field label="Webhook id" value="PAYPAL_SANDBOX_WEBHOOK_ID / PAYPAL_WEBHOOK_ID" mono />
+                <Field label="Replay cache" value="transmission_id unique" mono />
                 <Field label="Unsigned traffic" value="rejected" tone="negative" />
               </div>
 
@@ -783,8 +786,10 @@ export function SettingsPanel() {
                 <p className="flex max-w-[60ch] items-start gap-2 text-sm text-muted">
                   <ShieldCheck size={14} className="mt-0.5 shrink-0 text-muted" aria-hidden />
                   <span>
-                    In sandbox and live modes the PayPal verify-webhook-signature endpoint is called. Unsigned
-                    traffic is rejected unless ALLOW_UNSIGNED_WEBHOOKS is true and APP_ENV is local.
+                    In sandbox and live modes the PayPal verify-webhook-signature endpoint is called
+                    with the five PAYPAL-TRANSMISSION-* headers plus PAYPAL_SANDBOX_WEBHOOK_ID /
+                    PAYPAL_WEBHOOK_ID. Unsigned traffic is rejected unless ALLOW_UNSIGNED_WEBHOOKS
+                    is true and APP_ENV is local.
                   </span>
                 </p>
               </Accordion>

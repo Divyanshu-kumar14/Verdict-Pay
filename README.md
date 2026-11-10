@@ -71,7 +71,9 @@ not-as-described 0.90, unauthorized 0.75, other 0.95) and clamped to 0.02–0.95
 Three processes, no broker, no cloud dependency on the demo path.
 
 - **Frontend** — Next.js 15 App Router, React 19, TypeScript, Tailwind 4. Pages: landing, the
-  seven-step `/demo` workflow, disputes list and detail, customer timeline, analytics, settings.
+  seven-step `/demo` workflow, disputes list and detail, customer timeline, analytics, settings,
+  and the `/veto-lab` negative-control suite (CliffGuard: three executable controls against the
+  isolated Sentinel, each with veto/allow provenance).
   One route handler (`/api/sdk/usage`) runs the SDK server-side so the HMAC signing secret never
   reaches the browser.
 - **Backend** — FastAPI on Python 3.12, SQLAlchemy 2 async, SQLite by default (Postgres optional via
@@ -292,7 +294,6 @@ Every variable below is documented in [.env.example](.env.example). Values shown
 |---|---|---|
 | `VERDICTPAY_API_KEY` | Demo tenant key (public in the browser bundle by design) | `vp_demo_sk_local` |
 | `VERDICTPAY_SIGNING_SECRET` | HMAC key for telemetry signatures | `openssl rand -hex 32` |
-| `VERDICTPAY_WEBHOOK_SECRET` | HMAC key for the internal webhook | `openssl rand -hex 32` |
 | `REQUIRE_SIGNED_TELEMETRY` | Reject unsigned batches; keep `true` | `true` |
 | `WEBHOOK_TOLERANCE_SECONDS` | Replay window for signed timestamps | `300` |
 | `RATE_LIMIT_PER_MINUTE` | In-process limiter, per key | `600` |
@@ -529,9 +530,11 @@ Stated plainly, because a judge should not have to discover these.
 - **Subscription containment needs a real subscription.** The demo payer's fallback subscription id
   does not exist in your sandbox, so containment on a demo dispute reports `suspended: false` with
   PayPal's error rather than claiming a suspension.
-- **Impact metrics are estimates.** `fees_avoided_usd`, `protected_usd` and `win_rate_estimate` in
-  `/reporting/summary` extrapolate the modelled EV over the seeded case set. They are not observed
-  PayPal outcomes.
+- **Impact metrics are exact aggregates, not PayPal observations.** `fees_avoided_usd` counts
+  one active-tier fee per INQUIRY case closed amicably after an executed SEND_MESSAGE or MAKE_OFFER
+  (the seeded historical inquiry contributes one $15.00); `protected_usd` sums open-case amounts with
+  a protected recommendation; `win_rate_estimate` averages confident p(win) scores. They are computed
+  from the seeded case set, not observed PayPal outcomes.
 - **The win probability is a prior, not a prediction.** The weights are a hand-set, documented model.
   They are not fitted to real dispute outcomes, and they should not be read as a calibrated forecast.
 - **`PAYPAL_SANDBOX` is the default (sandbox credentials required).** Order ids and captures are PayPal-assigned sandbox values. The seeded sales history and CE 3.0 lookback rows are synthetic and labelled `source: "seed"`.

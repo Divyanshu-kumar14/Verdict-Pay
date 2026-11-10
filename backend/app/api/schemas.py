@@ -484,6 +484,7 @@ class UsageRequest(ApiModel):
     logins: int = Field(default=15, ge=0, le=1000)
     tokens: int = Field(default=42000, ge=0, le=10_000_000)
     export_name: str = "q3_financial_model.xlsx"
+    plan: str = Field(default="pro", pattern="^(pro|scale)$")
     client_ip: str | None = None
     device_fingerprint: str | None = None
 

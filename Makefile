@@ -4,7 +4,7 @@ PY := uv run --directory backend
 API_PORT ?= 8000
 WEB_PORT ?= 3000
 
-.PHONY: help install env api web serve seed stack reset-db test test-backend test-frontend test-sdk test-e2e lint format typecheck check verify verify-live demo e2e design-gate docker-build docker-up docker-down clean
+.PHONY: help install env api web serve seed stack reset-db test test-backend test-frontend test-sdk test-e2e lint format typecheck check verify verify-live verify-full demo e2e design-gate docker-build docker-up docker-down clean
 E2E_PORT ?= 8199
 
 help: ## Show available targets
@@ -79,8 +79,12 @@ verify: ## Full quality gate (run before every demo)
 	pnpm -C packages/verdictpay-sdk build
 	$(PY) python scripts/run_demo.py --port $(E2E_PORT)
 
-verify-live: ## Prove real PayPal sandbox credentials work (forces live mode)
-	PAYPAL_MODE=live $(PY) python scripts/verify_paypal_live.py
+verify-live: ## Prove real PayPal sandbox credentials work (forces sandbox mode)
+	PAYPAL_MODE=PAYPAL_SANDBOX $(PY) python scripts/verify_paypal_live.py
+
+verify-full: verify ## Full gate + E2E contract + automated Playwright specs
+	pnpm -C frontend test:e2e
+	PW_EXECUTABLE=/usr/bin/chromium pnpm -C frontend exec playwright test e2e/playwright/api/judge-scenarios.spec.ts e2e/playwright/api/demo-timing.spec.ts e2e/playwright/browser/veto-lab.spec.ts
 
 e2e: ## Run the three-button judge flow against an API you already started
 	$(PY) python scripts/e2e_demo.py

@@ -87,9 +87,9 @@ network call. The constructor never logs and never puts the key in an error.
 
 | Method | Wire event | Notes |
 |---|---|---|
-| `trackCheckout(input)` | `TOS_ACCEPTED` | Requires `tosVersion` and `tosContentSha256`; `userEmail` goes into `metadata.user_email`. |
-| `trackDelivery(input)` | `ASSET_DELIVERED` | Requires `resourceId` + `resourceSha256`; `computeUnitsConsumed` becomes `units_consumed`. |
-| `trackUsage(input)` | `USAGE_METERED` | Requires a non-negative integer `units`. |
+| `trackCheckout(input)` | `TOS_ACCEPTED` | Requires `tosVersion` and `tosContentSha256`; `userEmail` goes into `metadata.user_email`. Optional `metadata` carries extra JSON (e.g. demo `run_id`). |
+| `trackDelivery(input)` | `ASSET_DELIVERED` | Requires `resourceId` + `resourceSha256`; `computeUnitsConsumed` becomes `units_consumed`. Optional `paypalOrderId` / `paypalSubscriptionId` bind the event to the PayPal order/subscription; optional `metadata` carries extra JSON. |
+| `trackUsage(input)` | `USAGE_METERED` | Requires a non-negative integer `units`. Optional `paypalOrderId` / `paypalSubscriptionId` bind the event to the PayPal order/subscription; optional `metadata` carries extra JSON. |
 | `trackEvent(event)` | caller chooses | Low-level typed event, e.g. `SESSION_AUTH` with custom `metadata`. |
 | `flush()` | — | Sends every buffered event now, in `batchSize` requests. Resolves to `{ accepted, duplicates, rejected, events, chain }`. On a transient failure the unsent events stay buffered and a typed error is thrown. |
 | `verifyChain(payerId)` | — | `GET /api/v1/telemetry/chain/{payerId}/verify`. |

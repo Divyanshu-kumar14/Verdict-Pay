@@ -10,7 +10,7 @@ import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { Panel, PanelHeader } from "@/components/ui/Panel";
 import { api, toApiError, type ApiError } from "@/lib/api";
-import { formatLatency, formatUsd, shortHash } from "@/lib/format";
+import { formatLatency, formatPercent, formatUsd, shortHash } from "@/lib/format";
 import {
   DISPUTE_ACTIONS,
   type ActionRecord,
@@ -86,9 +86,13 @@ export function ActionRail({
         return "Lose the disputed " + formatUsd(detail.amount_usd) + " — settle at a loss.";
       case "MAKE_OFFER":
         return (
-          "Settle at a fraction of the claim, costing roughly " +
-          formatUsd(feeUsd) +
-          " in fees."
+          "Settle at " +
+          formatUsd(detail.breakdown.ev_offer_usd > 0 ? -detail.breakdown.ev_offer_usd : 0) +
+          " — a " +
+          formatPercent(detail.breakdown.offer_ratio ?? 0, 0) +
+          " goodwill offer costing " +
+          formatUsd(Math.abs(detail.breakdown.ev_offer_usd)) +
+          "; PayPal charges a $0.00 offer fee."
         );
       case "PROVIDE_EVIDENCE":
         return (

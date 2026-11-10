@@ -119,19 +119,22 @@ the Disputes API is labelled `paypal_sandbox` instead, and its actions call PayP
 
 | Field | Expected (seeded, sandbox) |
 |---|---|
-| p(win) | `90.0%` (SNAD multiplier 0.90, all six signals present) |
-| EV · Fight | `-$41.40` |
+| p(win) | `80.0%` (INR multiplier 1.00, 5 of 6 signals — Visa CE 3.0 is card-only) |
+| EV · Fight | `-$58.80` |
 | EV · Settle | `-$99.00` |
 | EV · Offer | `-$29.70` |
-| Ratio | `1.37% → 1.50%`, `ratio_relation=at_or_above`, `threshold_crossed_now=false` |
-| Penalty | `$0.00` — the merchant was already above 1.5% before this dispute |
+| Ratio | `1.3728% < 1.5000%`, `ratio_relation=below`, `threshold_crossed_now=false` |
+| Penalty | `$45.00` — an INQUIRY that crosses the 1.5% cliff pays the ($30 − $15) × 3 penalty; a seeded inquiry below the line has `$0.00` |
 | Policy | `DEFLECT_INQUIRY` |
 | Decision comparison | policy choice `Deflect inquiry`; cheapest modelled loss `Make offer` |
 
-The ratio row is the defect that was fixed. The merchant sits at 1.37% against a 1.50% threshold, so
-the copy must read **at or above**, never "1.37% below 1.50%". The renderer reads
-`breakdown.ratio_relation`; it never infers position from `crosses_cliff`, which is `false` both
-below the line and already above it.
+The ratio row is the defect that was fixed. Below the line the copy reads **below**;
+above it **at or above** — never "3.00% below 1.50%". The renderer reads
+`breakdown.ratio_relation`; it never infers position from `crosses_cliff`, which is `false`
+both below the line and already above it.
+
+The $45.00 cliff penalty prices *escalation*: only fighting an INQUIRY can turn it into a
+countable claim. In a claim stage the crossing is sunk and unpriced.
 
 The policy choice and the cheapest outcome are different numbers here, and the API says so plainly.
 Deflecting an inquiry carries no fee and can end the case before escalation, so policy prefers it even
@@ -177,14 +180,14 @@ confused on screen.
 ## CLI variant: `make demo`
 
 ```
-[0] Health + gateway mode              ok v0.1.0 - gateway=PAYPAL_SANDBOX - demo_mode=True
+[0] Health + gateway mode              ok v0.1.1 - gateway=PAYPAL_SANDBOX - demo_mode=True
 [1] Buyer checks out the Pro plan      ok order=<paypal-assigned> sub=None payer=YRZ829104KLA
 [2] Buyer burns 42k tokens…            ok 4 events - chain … - 42000 tokens
 [3] Buyer files an INR dispute         ok <dispute_id> - DEFLECT_INQUIRY - origin=internal_test_event - ingest …ms
-[4] Command center loads the case room ok p(win)=0.80 - EV_fight=$-52.80 - EV_offer=$-29.70 - 5/6 signals
+[4] Command center loads the case room ok p(win)=0.80 - EV_fight=$-58.80 - EV_offer=$-29.70 - 5/6 signals
 [5] Zero-fee action                    ok SEND_MESSAGE skipped in 0ms
 [6] Claim + dossier + upload           ok 7KB dossier - %PDF verified - upload skipped (internal test dispute, unknown to PayPal)
-[7] Reporting                          ok 7 cases - $695.00 exposure - $60.00 fees avoided
+[7] Reporting                          ok 6 cases - $497.00 exposure - $15.00 fees avoided - ratio 1.3728% vs 1.5000%
 
 ALL 26 ASSERTIONS PASSED - the 60-second demo is real.
 ```
@@ -192,10 +195,11 @@ ALL 26 ASSERTIONS PASSED - the 60-second demo is real.
 `make demo` seeds a clean database, boots the API against PayPal Sandbox with the credentials from
 `.env`, runs `backend/scripts/e2e_demo.py` and exits. With a `paypal_sandbox` origin, steps 5 and 6
 print `executed` and `uploaded via multipart/related` instead. The
-CLI files **INR** (multiplier 1.00 → p(win) 0.95, EV_fight -$35.70); the UI button files **SNAD**
-(multiplier 0.90 → p(win) 0.90, EV_fight -$41.40). Both are computed live from the frozen model and
+CLI files **INR** (multiplier 1.00 → p(win) 0.80, EV_fight -$58.80 on a $99 claim that crosses the
+1.5% cliff with the $45.00 inquiry penalty); the UI button files **SNAD**
+(multiplier 0.90 → p(win) 0.90, EV_fight -$41.40 when below the cliff). Both are computed live from the frozen model and
 neither is hard-coded. The CLI also escalates a second $99 claim to CHARGEBACK and submits the
-dossier, which is why it ends at 7 cases / $695 instead of 6 / $596.
+dossier, which is why it ends at 6 cases / $497 instead of the bare seed queue.
 
 ## If something looks wrong
 

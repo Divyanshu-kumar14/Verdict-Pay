@@ -209,7 +209,7 @@ def _usage_events(
             event_type=TelemetryEventType.TOS_ACCEPTED,
             tos_version=TOS_VERSION,
             tos_content_sha256=_sha256_hex(TOS_TEXT),
-            metadata={"plan": "pro", **run_meta},
+            metadata={"plan": payload.plan, **run_meta},
         ),
         schemas.TelemetryEventIn(
             **common,

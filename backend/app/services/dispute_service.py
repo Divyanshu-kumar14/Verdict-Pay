@@ -1439,7 +1439,9 @@ class DisputeService:
                 else self.settings.offer_ratio
             )
             amount = quantize_money(as_decimal(case.amount_usd) * as_decimal(ratio))
-            note = f"Goodwill offer of {amount} USD to resolve dispute {case.dispute_id}."
+            note = (request.note or "").strip() or (
+                f"Goodwill offer of {amount} USD to resolve dispute {case.dispute_id}."
+            )
             return await self.gateway.make_offer(
                 case.dispute_id,
                 amount,

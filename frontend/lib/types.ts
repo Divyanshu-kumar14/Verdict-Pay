@@ -381,6 +381,7 @@ export type UsageRequestInput = {
   logins?: number;
   tokens?: number;
   export_name?: string;
+  plan?: "pro" | "scale";
   client_ip?: string;
   device_fingerprint?: string;
 };

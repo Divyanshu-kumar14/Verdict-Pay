@@ -719,7 +719,7 @@ export function AnalyticsWorkspace(): React.JSX.Element {
           <Panel className="min-w-0">
             <PanelHeader
               title="Portfolio exposure"
-              description="The money in play and how much of it was recovered or waived."
+              description="The money in play and how much of it was defended before a fee attached."
             />
             <PanelBody>
               {report === null ? (

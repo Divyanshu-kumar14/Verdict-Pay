@@ -1,4 +1,4 @@
-# VerdictPay Render Blueprint — two Docker web services, no PayPal account needed.
+# VerdictPay Render Blueprint — two Docker web services for the PayPal Sandbox demo. Sandbox credentials required; see PAYPAL_* keys below.
 #
 #   Dashboard: New + > Blueprint > connect this repo > Apply.
 #
@@ -41,8 +41,6 @@ envVarGroups:
         sync: false
       # Generated once here and shared, so the API and the web signing route agree.
       - key: VERDICTPAY_SIGNING_SECRET
-        generateValue: true
-      - key: VERDICTPAY_WEBHOOK_SECRET
         generateValue: true
 
 services:

@@ -3,11 +3,11 @@
 import { EvidenceSignal, type SignalStep } from "@/components/evidence/EvidenceSignal";
 
 /**
- * The five-stage pipeline indicator: Checkout → Usage telemetry → Dispute →
- * Evidence verification → Verdict. A single read-only progress bar rendered
- * once above the demo grid; on desktop it is the full evidence-signal chain,
- * on mobile it collapses to "Step X of 5" with a fill bar. States are derived
- * from real flow + case state, never invented.
+ * The pipeline indicator: Checkout → Usage telemetry → Dispute → Evidence
+ * verification → AI analysis → Verdict → Evidence dossier. A single read-only
+ * progress bar rendered once above the demo grid; on desktop it is the full
+ * evidence-signal chain, on mobile it collapses to "Step X of N" with a fill
+ * bar. States are derived from real flow + case state, never invented.
  */
 export function DemoPipeline({ steps }: { steps: SignalStep[] }) {
   const verifiedCount = steps.filter((step) => step.state === "verified").length;

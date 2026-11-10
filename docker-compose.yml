@@ -24,10 +24,12 @@ services:
       ALLOW_UNSIGNED_WEBHOOKS: ${ALLOW_UNSIGNED_WEBHOOKS:-false}
       VERDICTPAY_API_KEY: ${VERDICTPAY_API_KEY:-vp_demo_sk_local}
       VERDICTPAY_SIGNING_SECRET: ${VERDICTPAY_SIGNING_SECRET:-dev-signing-secret-change-me}
-      VERDICTPAY_WEBHOOK_SECRET: ${VERDICTPAY_WEBHOOK_SECRET:-dev-webhook-secret-change-me}
-      PAYPAL_CLIENT_ID: ${PAYPAL_CLIENT_ID:-}
-      PAYPAL_CLIENT_SECRET: ${PAYPAL_CLIENT_SECRET:-}
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      AI_ENABLED: ${AI_ENABLED:-true}
+      # PayPal credentials and provider API keys come from `env_file: .env` only.
+      # They are intentionally NOT listed here: an `environment:` entry like
+      # `PAYPAL_CLIENT_ID: ${PAYPAL_CLIENT_ID:-}` resolves the empty shell default
+      # first and wipes a key the operator set in `.env`.
     command:
       - /bin/sh
       - -c
