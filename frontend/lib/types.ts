@@ -857,3 +857,70 @@ export const DossierVerificationSchema = z.object({
   checks: z.record(z.boolean()).default({}),
 });
 export type DossierVerification = z.infer<typeof DossierVerificationSchema>;
+
+
+/* ----------------------------------------------------------------- Veto Lab */
+export const SentinelVerdictSchema = z
+  .object({
+    verdict: z.enum(["ALLOW", "VETO"]),
+    exit_code: z.union([z.literal(0), z.literal(2)]),
+    veto_codes: z.array(z.string()),
+    reasons: z.array(z.string()).default([]),
+    proposal_id: z.string().default(""),
+    dispute_id: z.string().default(""),
+    proposed_action: z.string().default(""),
+    candidate_mode: z.string().default("HARDENED"),
+    manifest_sha256: z.string(),
+    banner: z.string().default(""),
+    audit_id: z.string().optional(),
+    chain_hash: z.string().nullable().optional(),
+    portfolio_ev_analysis: z.record(z.unknown()).nullable().optional(),
+    ce3_proof: z.record(z.unknown()).nullable().optional(),
+    hmac_approval_token: z
+      .object({
+        proposal_id: z.string(),
+        action: z.string(),
+        dispute_id: z.string(),
+        expires_at_epoch: z.number().int(),
+        sig_hmac_sha256: z.string(),
+      })
+      .passthrough()
+      .nullable()
+      .default(null),
+  })
+  .passthrough();
+export type SentinelVerdict = z.infer<typeof SentinelVerdictSchema>;
+
+const VetoCaseSchema = z
+  .object({
+    id: z.string().optional(),
+    axis: z.string().optional(),
+    title: z.string().optional(),
+    source_plane: z.string().optional(),
+    unguarded: z.record(z.unknown()).nullable().optional(),
+    shield: z.record(z.unknown()).nullable().optional(),
+    sentinel: SentinelVerdictSchema,
+    hardened: SentinelVerdictSchema.optional(),
+  })
+  .passthrough();
+
+export const VetoLabResponseSchema = z.object({
+  generated_at: z.string(),
+  rules_manifest_sha256: z.string(),
+  paypal_probe: z.record(z.unknown()),
+  controls: z.array(
+    z
+      .object({
+        id: z.string(),
+        title: z.string(),
+        cases: z.array(VetoCaseSchema).optional(),
+        worker: z.record(z.unknown()).optional(),
+        thread: z.array(z.record(z.unknown())).nullable().optional(),
+        unguarded: z.record(z.unknown()).optional(),
+        sentinel: SentinelVerdictSchema.optional(),
+        hardened: SentinelVerdictSchema.optional(),
+      })
+      .passthrough(),
+  ),
+});
+export type VetoLabResponse = z.infer<typeof VetoLabResponseSchema>;

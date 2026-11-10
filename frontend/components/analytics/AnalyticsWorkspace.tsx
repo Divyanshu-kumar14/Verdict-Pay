@@ -34,6 +34,7 @@ import { EvidenceSignal, type SignalStep } from "@/components/evidence/EvidenceS
 import { SealMark } from "@/components/evidence/SealMark";
 import { Magnetic } from "@/components/motion/Magnetic";
 import { PageHeader } from "@/components/PageHeader";
+import { TwoAxisCliffs } from "@/components/analytics/TwoAxisCliffs";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { EmptyState } from "@/components/ui/EmptyState";
@@ -531,7 +532,7 @@ export function AnalyticsWorkspace(): React.JSX.Element {
                 value={report?.fees_avoided_usd ?? 0}
                 format={formatUsd}
                 prefix="+"
-                sub="Waived on won claims"
+                sub="Inquiries closed before a claim"
               />
             }
           />
@@ -559,6 +560,11 @@ export function AnalyticsWorkspace(): React.JSX.Element {
         />
       ) : null}
 
+      {highVolume !== null ? (
+        <Reveal>
+          <TwoAxisCliffs hvd={highVolume} vamp={report?.vamp ?? null} />
+        </Reveal>
+      ) : null}
       <Reveal>
         {highVolume !== null ? (
           <Panel>

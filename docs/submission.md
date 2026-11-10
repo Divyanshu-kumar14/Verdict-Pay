@@ -90,10 +90,11 @@ before a claim fee can attach.
 **The demo is seven steps and it is not a video.** Two panes: a buyer storefront on the left, the
 merchant command center on the right. The steps run checkout, telemetry, chain verification, dispute
 creation, deterministic triage, Gemini analysis and dossier verification, each showing its real
-identifiers and response data. The seeded SNAD claim prices live: p(win) 90.0%, EV fight -$41.40, EV
-settle -$99.00, EV offer -$29.70, policy recommendation DEFLECT_INQUIRY at a $0.00 fee, and a
-decision-comparison panel that names the cheapest modelled loss separately from the policy choice. The
-CLI variant files INR instead and asserts p(win) 0.95, EV fight -$35.70. Behind those screens: the
+identifiers and response data. Every claim prices live from the two-tier fee model: in PayPal's high-volume tier the $30 fee
+replaces the $15 fee (a lost $100 claim costs -$130, a won one still costs -$30), accepting in
+INQUIRY is fee-free, and the policy recommendation is shown next to a decision-comparison panel that
+names the cheapest modelled loss separately from the policy choice. A PayPal Wallet INR scores 5 of 6
+telemetry signals (Visa CE 3.0 applies only to unbranded-card 10.4 fraud). Behind those screens: the
 backend pytest suite, the frontend unit and component suites, the HTTP contract tests that drive a real
 server, the SDK tests and the 26 end-to-end assertions against PayPal Sandbox, all reproducible
 with `make test` (offline, using a test-only fake gateway) and `make demo` (sandbox credentials from `.env`).

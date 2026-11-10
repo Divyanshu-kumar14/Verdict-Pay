@@ -14,6 +14,7 @@ import {
   Scale,
   Search,
   Settings,
+  ShieldAlert,
   type LucideIcon,
 } from "lucide-react";
 
@@ -39,12 +40,13 @@ type NavItem = {
   exact?: boolean;
 };
 
-/* Five destinations, so the rail needs no words when collapsed. */
+/* Six destinations, so the rail needs no words when collapsed. */
 const NAV: NavItem[] = [
   { href: "/demo", label: "Live demo", short: "Demo", icon: Play, exact: true },
   { href: "/disputes", label: "Disputes", short: "Disputes", icon: Scale },
   { href: "/timeline", label: "SLA board", short: "SLA", icon: CalendarClock },
   { href: "/analytics", label: "Analytics", short: "Analytics", icon: BarChart3 },
+  { href: "/veto-lab", label: "Veto Lab", short: "Veto", icon: ShieldAlert },
   { href: "/settings", label: "Connection", short: "Settings", icon: Settings },
 ];
 
@@ -61,6 +63,7 @@ function sectionName(pathname: string): string {
   if (pathname.startsWith("/disputes")) return "Disputes";
   if (pathname.startsWith("/timeline")) return "SLA board";
   if (pathname.startsWith("/analytics")) return "Analytics";
+  if (pathname.startsWith("/veto-lab")) return "Veto Lab";
   if (pathname.startsWith("/settings")) return "Connection";
   return "Dashboard";
 }
