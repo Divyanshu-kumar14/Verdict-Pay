@@ -48,6 +48,7 @@ TOOL_TO_ACTION = {
     "make_offer": "MAKE_OFFER",
     "send_message": "SEND_MESSAGE",
     "escalate": "ESCALATE",
+    "get_dispute": "GET_DISPUTE",
 }
 CARD = "cred-lab-visa-4242"
 ANCHORS = {
@@ -217,7 +218,8 @@ async def run_veto_lab(
         args = item.get("arguments") or {}
         proposal = bridge.build_proposal(
             dispute_id=str(args.get("dispute_id") or ""),
-            action="ACCEPT_CLAIM" if item.get("tool") == "accept_dispute_claim" else "SEND_MESSAGE",
+            action=TOOL_TO_ACTION.get(str(item.get("tool") or ""), "SEND_MESSAGE"),
+            candidate_mode="TOOLKIT_RAW",
             stage="CHARGEBACK",
             channel="INTERNAL",
             reason_code="MERCHANDISE_OR_SERVICE_NOT_RECEIVED",

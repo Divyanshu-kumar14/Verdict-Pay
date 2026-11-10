@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/Button";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
 import { Panel, PanelBody, PanelHeader } from "@/components/ui/Panel";
 import { api, toApiError, type ApiError } from "@/lib/api";
-import { shortHash } from "@/lib/format";
+import { formatUsd, shortHash } from "@/lib/format";
 import type { SentinelVerdict, VetoLabResponse } from "@/lib/types";
 
 type Json = Record<string, unknown>;
@@ -124,12 +124,15 @@ export function VetoLabWorkspace() {
   const naive = controls.get("naive_cliff");
   const toolkit = controls.get("toolkit_hazards");
   const llm = controls.get("llm_attack");
+  const llmWorker = asJson(llm?.worker);
+  const envKeys = (llmWorker.env_keys as string[] | undefined) ?? [];
+  const credentialLeaks = (llmWorker.credential_env_leaks as string[] | undefined) ?? [];
 
   return (
     <div className="space-y-4 p-4 md:p-6">
       <PageHeader
         className="pb-0"
-        title="Veto Lab — crime vs exorcism"
+        title="Veto Lab — Guardrail Negative Controls"
         description="Three executable negative controls. Left: what an unguarded system does. Right: the isolated Sentinel (python -I -B, env={}, CPU/memory/file limits, no sockets) returns EXIT CODE 2 before any PayPal write; the hardened alternative returns EXIT CODE 0 with a signed ApprovalToken. Lab disputes are synthetic; no PayPal write is made."
         actions={
           <Button variant="primary" onClick={run} disabled={busy} data-testid="run-veto-lab">
@@ -185,7 +188,7 @@ export function VetoLabWorkspace() {
                       lines={[
                         ["reasoning", str(unguarded.reasoning)],
                         ["proposes", str(proposal.proposed_action)],
-                        ["amount", `${str(proposal.dispute_amount_minor)} minor units`],
+                        ["amount", formatUsd(Number(proposal.dispute_amount_minor) / 100)],
                       ]}
                     />
                     <Verdict verdict={item.sentinel} label="Sentinel on that proposal" />
@@ -202,9 +205,9 @@ export function VetoLabWorkspace() {
         <Panel data-testid="control-toolkit">
           <PanelHeader
             title={`2 · ${TOOLKIT_TRACE_LABEL}`}
-            description={`Live Sentinel evaluation of the recorded run of tools/toolkit-probe against the real published package (${str(
+            description={`${TOOLKIT_TRACE_LABEL} (recorded ${str(
               toolkit.recorded_at,
-            )}; ${str(toolkit.network)}). Stale OAuth: token refreshed after expires_in = ${str(
+            )}, offline axios capture — zero network calls). Stale OAuth check: token refresh attempted = ${str(
               asJson(toolkit.stale_oauth).refreshed,
             )}.`}
           />
@@ -241,10 +244,12 @@ export function VetoLabWorkspace() {
         <Panel data-testid="control-llm">
           <PanelHeader
             title={`3 · ${llm.title}`}
-            description={`Worker env keys: ${str(asJson(llm.worker).env_keys)} · credential leaks: ${str(
-              asJson(llm.worker).credential_env_leaks,
-            )} · source ${str(asJson(llm.worker).source)}${
-              asJson(llm.worker).degraded ? " (degraded: no live model)" : ""
+            description={`env: ${envKeys.join(", ") || "none"} · PayPal/HMAC env leaks: ${
+              credentialLeaks.length
+            } · source ${str(llmWorker.source)}${
+              llmWorker.degraded
+                ? ` · fallback: ${str(llmWorker.degraded_reason, "no live model")}`
+                : ""
             }`}
           />
           <PanelBody className="space-y-3">

@@ -31,6 +31,8 @@ async def test_veto_lab_runs_three_controls(client) -> None:
     assert "VETO_TOOLKIT_ACL_BYPASS" in toolkit["acl_bypass"]["sentinel"]["veto_codes"]
     assert "VETO_PATH_TRAVERSAL_BLOCKED" in toolkit["path_traversal"]["sentinel"]["veto_codes"]
     assert "VETO_PATH_TRAVERSAL_BLOCKED" in toolkit["query_leakage"]["sentinel"]["veto_codes"]
+    assert toolkit["acl_bypass"]["sentinel"]["candidate_mode"] == "TOOLKIT_RAW"
+    assert toolkit["query_leakage"]["sentinel"]["proposed_action"] == "GET_DISPUTE"
     assert controls["toolkit_hazards"]["stale_oauth"]["refreshed"] is False
 
     llm = controls["llm_attack"]

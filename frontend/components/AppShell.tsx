@@ -294,6 +294,9 @@ function TopBar({
   const gateway = gatewayMeta(health);
   const lastRefresh = useLastRefresh(health.updatedAt);
   const waking = useWaking(health.loading);
+  // The Veto Lab is a VerdictPay surface, not a merchant workspace: the
+  // breadcrumb names the product there and the demo merchant elsewhere.
+  const merchant = pathname.startsWith("/veto-lab") ? "VerdictPay" : DEMO_MERCHANT_NAME;
 
   return (
     <header className="sticky top-0 z-sticky border-b border-line bg-ground/80 backdrop-blur-sm">
@@ -304,7 +307,7 @@ function TopBar({
           </Link>
           <span className="truncate text-base font-semibold text-ink lg:hidden">VerdictPay</span>
           <span className="hidden truncate text-base text-muted lg:block">
-            <span className="text-ink">{DEMO_MERCHANT_NAME}</span>
+            <span className="text-ink">{merchant}</span>
             <span aria-hidden className="px-2 text-muted">
               /
             </span>
