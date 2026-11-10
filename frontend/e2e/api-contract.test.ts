@@ -77,7 +77,7 @@ describe("api-contract", () => {
     const detail = DisputeDetailSchema.parse(res.payload);
     expect(detail.facts.chain_valid).toBe(true);
     expect(detail.win_probability.signals).toHaveLength(6);
-    expect(detail.allowed_actions).toHaveLength(4);
+    expect(detail.allowed_actions).toHaveLength(6);
     expect(Number(detail.breakdown.ev_fight_usd)).toBeLessThan(0);
   });
 

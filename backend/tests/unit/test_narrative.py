@@ -241,3 +241,24 @@ def test_numbers_hidden_inside_a_digest_are_not_allowed() -> None:
     ok, reason = validate_narrative(f"The chain head is {'f' * 64}.", facts)
     assert ok is False
     assert reason.startswith("unverified_digest:")
+
+
+def test_formatted_counts_and_percents_of_facts_validate() -> None:
+    from app.api import schemas
+    from app.domain.evidence.narrative import validate_narrative
+
+    facts = schemas.CaseFacts(
+        payer_id="PAYER1",
+        chain_valid=True,
+        chain_head="",
+        event_count=4,
+        completeness=0.8333,
+        usage_units=42000,
+    )
+    ok, reason = validate_narrative(
+        "The account consumed 42,000 metered units; telemetry completeness is 83.33%.", facts
+    )
+    assert ok, reason
+    ok, reason = validate_narrative("The account consumed 43,000 metered units.", facts)
+    assert not ok
+    assert reason == "unverified_number:43000"

@@ -24,6 +24,8 @@ _TIMESTAMP_RE: Final[re.Pattern[str]] = re.compile(
 )
 _DATE_RE: Final[re.Pattern[str]] = re.compile(r"\d{4}-\d{2}-\d{2}")
 _NUMBER_RE: Final[re.Pattern[str]] = re.compile(r"\d+(?:\.\d+)?")
+_ALGORITHM_RE: Final[re.Pattern[str]] = re.compile(r"\bSHA[-_ ]?256\b", re.IGNORECASE)
+_THOUSANDS_RE: Final[re.Pattern[str]] = re.compile(r"\d{1,3}(?:,\d{3})+")
 
 _COUNT_WORDS: Final[dict[int, str]] = {
     0: "no",
@@ -235,6 +237,12 @@ def _facts_tokens(facts: schemas.CaseFacts) -> tuple[set[str], set[str], set[str
             numbers.add(str(value))
             if isinstance(value, float) and value.is_integer():
                 numbers.add(str(int(value)))
+            if isinstance(value, (float, Decimal)) and 0 <= value <= 1:
+                # A fraction may be cited as a percent: 0.8333 -> 83, 83.3, 83.33.
+                percent = Decimal(str(value)) * 100
+                for places in ("1", "0.1", "0.01"):
+                    for rounding in ("ROUND_DOWN", "ROUND_HALF_UP"):
+                        numbers.add(str(percent.quantize(Decimal(places), rounding=rounding)))
         elif isinstance(value, str):
             dates.update(match.group(0) for match in _DATE_RE.finditer(value))
             numbers.update(_NUMBER_RE.findall(value))
@@ -283,12 +291,14 @@ def validate_narrative(text: str, facts: schemas.CaseFacts) -> tuple[bool, str]:
             return False, f"unverified_date:{match.group(0)}"
 
     # "SHA-256" is a fixed algorithm label, not a numeric claim.
-    scratch = scratch.replace("SHA-256", " ").replace("sha-256", " ")
+    scratch = _ALGORITHM_RE.sub(" ", scratch)
     for match in _TIMESTAMP_RE.finditer(scratch):
         if match.group(0)[:10] not in date_tokens:
             return False, f"unverified_date:{match.group(0)[:10]}"
     scratch = _TIMESTAMP_RE.sub(" ", scratch)
     scratch = _DATE_RE.sub(" ", scratch)
+    # "42,000" is the number 42000, not the two numbers 42 and 000.
+    scratch = _THOUSANDS_RE.sub(lambda m: m.group(0).replace(",", ""), scratch)
     for match in _NUMBER_RE.finditer(scratch):
         token = match.group(0)
         if token not in number_tokens:
