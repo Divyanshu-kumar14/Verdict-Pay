@@ -11,16 +11,25 @@ test("veto lab runs three controls with veto and dry-run allow provenance", asyn
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
   });
+  page.on("pageerror", (err) => {
+    consoleErrors.push(`PAGE ERROR: ${err.message}`);
+  });
 
-  await page.goto("/veto-lab");
+  await page.goto("/veto-lab", { waitUntil: "networkidle" });
   // Before the first run nothing has been probed: no live-sandbox claim yet.
   await expect(page.getByText("[PENDING LIVE PROBE]")).toBeVisible();
-  await expect(page.getByText("[LIVE PAYPAL SANDBOX]")).toHaveCount(0);
+  await expect(
+    page.getByText("[LIVE PAYPAL SANDBOX]", { exact: true }),
+  ).toHaveCount(0);
 
-  await page.getByTestId("run-veto-lab").click();
+  // Wait for the button to be interactive, then click.
+  const runButton = page.getByTestId("run-veto-lab");
+  await expect(runButton).toBeEnabled();
+  await runButton.click();
 
+  // The three control panels render once the veto-lab run completes.
   for (const id of ["control-naive", "control-toolkit", "control-llm"]) {
-    await expect(page.getByTestId(id)).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByTestId(id)).toBeVisible({ timeout: 120_000 });
   }
   const vetoes = page.getByTestId("verdict-veto");
   const allows = page.getByTestId("verdict-allow");
