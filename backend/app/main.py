@@ -24,6 +24,7 @@ from app.api.routers import (
     reporting,
     sandbox,
     telemetry,
+    veto_lab,
     webhooks,
 )
 from app.config import Settings, get_settings
@@ -279,7 +280,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
 
     prefix = settings.api_v1_prefix
-    for module in (health, telemetry, sandbox, disputes, evidence, webhooks, reporting, ai):
+    for module in (
+        health,
+        telemetry,
+        sandbox,
+        disputes,
+        evidence,
+        webhooks,
+        reporting,
+        ai,
+        veto_lab,
+    ):
         app.include_router(module.router, prefix=prefix)
 
     @app.exception_handler(VerdictPayError)

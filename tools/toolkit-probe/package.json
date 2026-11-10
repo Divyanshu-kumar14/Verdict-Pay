@@ -1,0 +1,13 @@
+{
+  "name": "verdictpay-toolkit-probe",
+  "private": true,
+  "type": "module",
+  "description": "Negative control 2: reproduces @paypal/agent-toolkit dispute hazards offline and shows CliffGuardToolkitShield blocking them.",
+  "scripts": {
+    "probe": "node toolkit_audit_probe.ts"
+  },
+  "dependencies": {
+    "@paypal/agent-toolkit": "1.11.0",
+    "axios": "^1.8.4"
+  }
+}

@@ -47,8 +47,8 @@ def build_proposal(
     candidate_mode: str = "HARDENED",
     extra: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    reason = "UNAUTHORISED" if reason_code.upper() in {"UNAUTHORIZED", "UNAUTHORISED"} else (
-        reason_code
+    reason = (
+        "UNAUTHORISED" if reason_code.upper() in {"UNAUTHORIZED", "UNAUTHORISED"} else (reason_code)
     )
     proposal: dict[str, Any] = {
         "proposal_id": str(uuid.uuid4()),

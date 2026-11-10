@@ -90,6 +90,9 @@ class UnconfiguredGateway:
     async def accept_claim(self, *_args: Any, **_kwargs: Any) -> GatewayResponse:
         raise self._refuse()
 
+    async def probe(self) -> GatewayResponse:
+        raise self._refuse()
+
     async def escalate(self, *_args: Any, **_kwargs: Any) -> GatewayResponse:
         raise self._refuse()
 

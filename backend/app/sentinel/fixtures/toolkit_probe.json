@@ -1,0 +1,129 @@
+{
+  "generated_at": "2026-11-10T15:11:04.234Z",
+  "toolkit": "@paypal/agent-toolkit@1.11.0",
+  "network": "none (axios adapter recorder; no request left this process)",
+  "exposed_tools": [
+    "list_disputes"
+  ],
+  "results": [
+    {
+      "id": "acl_bypass",
+      "title": "Disabled tool executed through handleToolCall()",
+      "tool": "accept_dispute_claim",
+      "arguments": {
+        "dispute_id": "PP-D-1",
+        "note": "accepted"
+      },
+      "unguarded": {
+        "exit_code": 0,
+        "executed": true,
+        "request": {
+          "method": "POST",
+          "url": "https://api.sandbox.paypal.com/v1/customer/disputes/PP-D-1/accept-claim"
+        },
+        "toolkit_output": "{\"probe\":true}"
+      },
+      "shielded": {
+        "exit_code": 2,
+        "verdict": "VETO",
+        "veto_codes": [
+          "VETO_TOOLKIT_ACL_BYPASS"
+        ],
+        "reasons": [
+          "tool accept_dispute_claim is not in the configured allow-list"
+        ]
+      }
+    },
+    {
+      "id": "path_traversal",
+      "title": "dispute_id '../' rewrites the PayPal URL",
+      "tool": "accept_dispute_claim",
+      "arguments": {
+        "dispute_id": "../../v1/vault/payment-tokens",
+        "note": "x"
+      },
+      "unguarded": {
+        "exit_code": 0,
+        "executed": true,
+        "request": {
+          "method": "POST",
+          "url": "https://api.sandbox.paypal.com/v1/customer/disputes/../../v1/vault/payment-tokens/accept-claim"
+        },
+        "toolkit_output": "{\"probe\":true}"
+      },
+      "shielded": {
+        "exit_code": 2,
+        "verdict": "VETO",
+        "veto_codes": [
+          "VETO_TOOLKIT_ACL_BYPASS",
+          "VETO_PATH_TRAVERSAL_BLOCKED"
+        ],
+        "reasons": [
+          "tool accept_dispute_claim is not in the configured allow-list",
+          "dispute_id=\"../../v1/vault/payment-tokens\" is not a PayPal id (no '/', '..', '?', '&')"
+        ]
+      }
+    },
+    {
+      "id": "query_leakage",
+      "title": "dispute_id '?' / '&' injects query parameters",
+      "tool": "get_dispute",
+      "arguments": {
+        "dispute_id": "PP-D-1?fields=all&page_size=500"
+      },
+      "unguarded": {
+        "exit_code": 0,
+        "executed": true,
+        "request": {
+          "method": "GET",
+          "url": "https://api.sandbox.paypal.com/v1/customer/disputes/PP-D-1?fields=all&page_size=500"
+        },
+        "toolkit_output": "{\"probe\":true}"
+      },
+      "shielded": {
+        "exit_code": 2,
+        "verdict": "VETO",
+        "veto_codes": [
+          "VETO_TOOLKIT_ACL_BYPASS",
+          "VETO_PATH_TRAVERSAL_BLOCKED"
+        ],
+        "reasons": [
+          "tool get_dispute is not in the configured allow-list",
+          "dispute_id=\"PP-D-1?fields=all&page_size=500\" is not a PayPal id (no '/', '..', '?', '&')"
+        ]
+      }
+    }
+  ],
+  "three_action_limit": {
+    "dispute_tools": [
+      "list_disputes",
+      "get_dispute",
+      "accept_dispute_claim"
+    ],
+    "missing": [
+      "make-offer",
+      "provide-evidence",
+      "send-message",
+      "escalate",
+      "appeal"
+    ],
+    "all_tools_enabled_keys": [
+      "invoices",
+      "products",
+      "subscriptionPlans",
+      "subscriptions",
+      "shipment",
+      "orders",
+      "disputes",
+      "transactions",
+      "plan",
+      "payments",
+      "insights"
+    ]
+  },
+  "stale_oauth": {
+    "token_expires_in_seconds": 1,
+    "oauth_requests_after_expiry": 1,
+    "refreshed": false
+  }
+}

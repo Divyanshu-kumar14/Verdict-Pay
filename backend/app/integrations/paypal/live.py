@@ -312,6 +312,10 @@ class LivePayPalGateway:
         response = await self._request("GET", f"{DISPUTES_PATH}/{quote(dispute, safe='')}")
         return wire.parse_dispute(response.body)
 
+    async def probe(self) -> GatewayResponse:
+        """GET /v1/customer/disputes?page_size=1 — a read proving live connectivity."""
+        return await self._request("GET", DISPUTES_PATH, params={"page_size": 1}, retry=False)
+
     async def list_disputes(self, *, page_size: int = 50) -> list[PayPalDisputeRecord]:
         """GET /v1/customer/disputes?page_size=..."""
         if not isinstance(page_size, int) or isinstance(page_size, bool):

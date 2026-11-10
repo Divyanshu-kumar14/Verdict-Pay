@@ -239,13 +239,19 @@ def evaluate(proposal: Any, *, manifest: RulesManifest | None = None) -> dict[st
             proposal, ["VETO_FAIL_CLOSED_ORACLE_MISSING"], [str(exc)], "0" * 64, None, None
         )
     if not isinstance(proposal, dict):
-        return _verdict({}, ["VETO_SCHEMA_INVALID"], ["proposal must be an object"],
-                        manifest_sha, None, None)
+        return _verdict(
+            {}, ["VETO_SCHEMA_INVALID"], ["proposal must be an object"], manifest_sha, None, None
+        )
 
     dispute_id = proposal.get("dispute_id")
     if not isinstance(dispute_id, str) or not DISPUTE_ID_RE.match(dispute_id):
         codes.append("VETO_PAYPAL_ID_PATH_TRAVERSAL")
         reasons.append("dispute_id must match ^[A-Za-z0-9-]+$")
+        if isinstance(dispute_id, str) and any(
+            part in dispute_id for part in ("/", "..", "?", "&", "%")
+        ):
+            codes.append("VETO_PATH_TRAVERSAL_BLOCKED")
+            reasons.append(f"dispute_id {dispute_id[:80]!r} would rewrite the PayPal URL")
     action = proposal.get("proposed_action")
     stage = proposal.get("dispute_life_cycle_stage")
     if _int(proposal.get("dispute_amount_minor")) is None:
@@ -253,9 +259,15 @@ def evaluate(proposal: Any, *, manifest: RulesManifest | None = None) -> dict[st
         reasons.append("dispute_amount_minor must be an integer of minor units")
 
     requested_tool = proposal.get("requested_tool", action)
-    if requested_tool not in ALLOWED_TOOLS or action not in ALLOWED_TOOLS:
+    acl = proposal.get("tool_acl")
+    allowed_here = set(acl) if isinstance(acl, list) else ALLOWED_TOOLS
+    if (
+        requested_tool not in allowed_here
+        or action not in ALLOWED_TOOLS
+        or (requested_tool != action and requested_tool not in allowed_here)
+    ):
         codes.append("VETO_TOOLKIT_ACL_BYPASS")
-        reasons.append(f"tool {requested_tool!r} is not on the Disputes action allow-list")
+        reasons.append(f"tool {requested_tool!r} is not on the configured tool allow-list")
 
     marker = _injection(proposal)
     if marker is not None:

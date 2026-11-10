@@ -532,6 +532,11 @@ class FakePayPalGateway:
                 latency_ms=0,
             )
 
+    async def probe(self) -> GatewayResponse:
+        return GatewayResponse(
+            status_code=200, body={"items": []}, latency_ms=0, request_id="fake-debug-id"
+        )
+
     async def escalate(self, dispute_id: str, note: str) -> GatewayResponse:
         async with self._lock:
             self._require_dispute(dispute_id)
