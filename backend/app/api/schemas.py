@@ -185,6 +185,8 @@ class EvBreakdown(ApiModel):
     fee_tier_usd: Decimal = Decimal("15.00")
     accept_fee_usd: Decimal = Decimal("0.00")
     win_fee_usd: Decimal = Decimal("0.00")
+    # The fee a lost fight pays (the tier the claim would land in).
+    fight_fee_usd: Decimal = Decimal("15.00")
     fee_reimbursable_on_win: bool = True
     sla_response_days: int = 10
     penalty_ratio_usd: Decimal

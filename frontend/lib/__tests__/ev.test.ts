@@ -8,6 +8,7 @@ import {
   fightEvNote,
   highVolumeRuleNote,
   offerEvNote,
+  ppmPercent,
   ratioExplain,
   ratioRelationNote,
   ratioVerdict,
@@ -23,6 +24,22 @@ function makeBreakdown(overrides: Partial<EvBreakdown> = {}): EvBreakdown {
     high_volume_fee_usd: 10,
     standard_fee_usd: 20,
     penalty_ratio_usd: 5,
+    fee_tier_usd: 15,
+    accept_fee_usd: 0,
+    win_fee_usd: 0,
+    fight_fee_usd: 15,
+    fee_reimbursable_on_win: true,
+    sla_response_days: 10,
+    ratio_before_ppm: 10000,
+    ratio_after_ppm: 20000,
+    ratio_threshold_ppm: 15000,
+    ratio_before_str: "0.010000",
+    ratio_after_str: "0.020000",
+    net_sales_minor_3m: 0,
+    disputed_amount_minor_3m: 0,
+    payment_rail: "PAYPAL_WALLET",
+    hvd_countable: true,
+    source_plane: "LIVE_PAYPAL_SANDBOX",
     ratio_before: 0.01,
     ratio_after: 0.02,
     ratio_threshold: 0.015,
@@ -129,11 +146,22 @@ describe("fightEvNote", () => {
     expect(note).toContain("$0.00");
   });
 
-  it("includes high_volume fee when high_volume true", () => {
-    const bd = makeBreakdown({ high_volume: true, high_volume_fee_usd: 15 });
+  it("HVD tier: $30 replaces $15, loss -$130 on $100 and a -$30 win", () => {
+    const bd = makeBreakdown({
+      amount_usd: 100,
+      high_volume: true,
+      win_fee_usd: 30,
+      fight_fee_usd: 30,
+      standard_fee_usd: 15,
+      penalty_ratio_usd: 0,
+    });
     const note = fightEvNote(bd);
-    expect(note).toContain("-$15.00");
-    expect(note).not.toContain("NaN");
+    expect(note).toBe("win -$30.00 · loss -$130.00");
+    expect(note).not.toContain("-$145.00");
+  });
+  it("standard tier: loss -(amount + $15) and a free win", () => {
+    const bd = makeBreakdown({ amount_usd: 100, win_fee_usd: 0, fight_fee_usd: 15, penalty_ratio_usd: 0 });
+    expect(fightEvNote(bd)).toBe("win $0.00 · loss -$115.00");
   });
 
   it("includes cliff annotation when crosses_cliff true", () => {
@@ -143,8 +171,8 @@ describe("fightEvNote", () => {
     expect(note).toContain("$12.50");
   });
 
-  it("omits cliff annotation when crosses_cliff false", () => {
-    const bd = makeBreakdown({ crosses_cliff: false });
+  it("omits cliff annotation when no penalty applies", () => {
+    const bd = makeBreakdown({ crosses_cliff: false, penalty_ratio_usd: 0 });
     const note = fightEvNote(bd);
     expect(note).not.toContain("cliff");
   });
@@ -168,23 +196,21 @@ describe("settleEvNote", () => {
     const bd = makeBreakdown({ standard_fee_usd: 20 });
     const note = settleEvNote(bd, "INQUIRY");
     expect(note).toContain("principal only");
-    expect(note).toContain("no claim fee yet");
+    expect(note).toContain("$0 fee in inquiry");
     expect(note).not.toContain("NaN");
   });
 
   it("returns principal + claim fee for CHARGEBACK", () => {
-    const bd = makeBreakdown({ standard_fee_usd: 20 });
+    const bd = makeBreakdown({ accept_fee_usd: 30, high_volume: true });
     const note = settleEvNote(bd, "CHARGEBACK");
     expect(note).toContain("principal");
-    expect(note).toContain("$20.00");
-    expect(note).toContain("claim fee");
+    expect(note).toContain("$30.00");
+    expect(note).toContain("HVD claim fee");
   });
 
   it("returns claim fee for PRE_ARBITRATION and others", () => {
-    const bd = makeBreakdown({ standard_fee_usd: 15 });
-    expect(settleEvNote(bd, "PRE_ARBITRATION")).toContain("$15.00");
-    expect(settleEvNote(bd, "RESOLVED")).toContain("$15.00");
-    expect(settleEvNote(bd, "CLOSED")).toContain("$15.00");
+    const bd = makeBreakdown({ accept_fee_usd: 15 });
+    expect(settleEvNote(bd, "PRE_ARBITRATION")).toContain("$15.00 standard claim fee");
   });
 
   it("never contains NaN", () => {
@@ -230,23 +256,23 @@ describe("feeComponents", () => {
     const bd = makeBreakdown();
     const comps = feeComponents(bd, "CHARGEBACK");
     expect(comps.map((c) => c.label)).toEqual([
-      "Standard fee",
-      "High-volume fee",
+      "Standard dispute fee",
+      "Response SLA",
       "Cliff penalty",
       "Offer ratio",
     ]);
   });
 
-  it("high_volume true affects notes", () => {
-    const bdTrue = makeBreakdown({ high_volume: true, high_volume_fee_usd: 10 });
-    const compsTrue = feeComponents(bdTrue, "INQUIRY");
-    expect(compsTrue[1]?.note).toBe("never refunded");
-
-    const bdFalse = makeBreakdown({ high_volume: false, high_volume_fee_usd: 10 });
-    const compsFalse = feeComponents(bdFalse, "INQUIRY");
-    expect(compsFalse[1]?.note).toBe("not applied");
+  it("HVD tier shows one $30 fee that replaces $15 and the 3-day SLA", () => {
+    const bd = makeBreakdown({ fight_fee_usd: 30, standard_fee_usd: 15, sla_response_days: 3 });
+    const comps = feeComponents(bd, "CHARGEBACK");
+    expect(comps[0]).toEqual({
+      label: "HVD dispute fee",
+      value: "$30.00",
+      note: "replaces $15.00 · charged even on a win",
+    });
+    expect(comps[1]?.note).toBe("HVD tier: 10 -> 3 days");
   });
-
   it("names the crossing state from the payload's own threshold", () => {
     const bdCross = makeBreakdown({
       crosses_cliff: true,
@@ -297,8 +323,8 @@ describe("feeComponents", () => {
       expect(c.value).not.toContain("NaN");
       expect(c.value.length).toBeGreaterThan(0);
     }
-    expect(comps[0]?.value).toBe("$20.00");
-    expect(comps[1]?.value).toBe("$10.00");
+    expect(comps[0]?.value).toBe("$15.00");
+    expect(comps[1]?.value).toBe("10 days");
     expect(comps[2]?.value).toBe("$5.00");
     expect(comps[3]?.value).toBe("50%");
   });
@@ -354,9 +380,14 @@ describe("evRatioState", () => {
 
 describe("thresholdLabel", () => {
   it("renders the payload threshold, not a literal", () => {
-    expect(thresholdLabel(makeBreakdown({ ratio_threshold: 0.015 }))).toBe("1.50%");
-    expect(thresholdLabel(makeBreakdown({ ratio_threshold: 0.01 }))).toBe("1.00%");
-    expect(thresholdLabel(makeBreakdown({ ratio_threshold: 0.025 }))).toBe("2.50%");
+    expect(thresholdLabel(makeBreakdown({ ratio_threshold_ppm: 15000 }))).toBe("1.50%");
+    expect(thresholdLabel(makeBreakdown({ ratio_threshold_ppm: 10000 }))).toBe("1.00%");
+    expect(thresholdLabel(makeBreakdown({ ratio_threshold_ppm: 25000 }))).toBe("2.50%");
+  });
+  it("truncates ppm instead of rounding up across the cliff", () => {
+    expect(ppmPercent(14999)).toBe("1.49%");
+    expect(ppmPercent(15000)).toBe("1.50%");
+    expect(ppmPercent(0)).toBe("0.00%");
   });
 });
 
@@ -398,6 +429,8 @@ describe("ratioExplain", () => {
     const bd = makeBreakdown({
       ratio_before: 0.03,
       ratio_after: 0.0302,
+      ratio_before_ppm: 30000,
+      ratio_after_ppm: 30200,
       ratio_threshold: 0.015,
       ratio_relation: "at_or_above",
       threshold_crossed_now: false,
@@ -410,7 +443,7 @@ describe("ratioExplain", () => {
     expect(text).toContain("already at or above");
     expect(text).toContain("3.00%");
     expect(text).toContain("1.50%");
-    expect(text).toContain("no new cliff penalty");
+    expect(text).toContain("$30 fee replaces $15");
   });
 
   it("renders a non-default threshold from the payload", () => {
@@ -467,7 +500,7 @@ describe("highVolumeRuleNote", () => {
     const bd = makeBreakdown({ ratio_threshold: 0.015, high_volume_min_sales: 100 });
     const text = highVolumeRuleNote(bd);
     expect(text).toContain("1.50%");
-    expect(text).toContain("100+");
+    expect(text).toContain("more than 100 sales");
     expect(text).not.toContain("NaN");
   });
 });

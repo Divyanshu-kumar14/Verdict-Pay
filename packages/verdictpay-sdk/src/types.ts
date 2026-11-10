@@ -140,6 +140,8 @@ export interface CheckoutTrackingInput {
   deviceFingerprint?: string;
   tosVersion: string;
   tosContentSha256: string;
+  /** Extra JSON metadata stored on the event (for example a demo run_id). */
+  metadata?: Record<string, unknown>;
 }
 
 /**
@@ -153,8 +155,12 @@ export interface DeliveryTrackingInput {
   resourceId: string;
   resourceSha256: string;
   computeUnitsConsumed?: number;
+  paypalOrderId?: string;
+  paypalSubscriptionId?: string;
   clientIp?: string;
   deviceFingerprint?: string;
+  /** Extra JSON metadata stored on the event (for example a demo run_id). */
+  metadata?: Record<string, unknown>;
 }
 
 /** Metered consumption. Maps to a USAGE_METERED event. */
@@ -162,8 +168,12 @@ export interface UsageTrackingInput {
   paypalPayerId: string;
   units: number;
   resourceId?: string;
+  paypalOrderId?: string;
+  paypalSubscriptionId?: string;
   clientIp?: string;
   deviceFingerprint?: string;
+  /** Extra JSON metadata stored on the event (for example a demo run_id). */
+  metadata?: Record<string, unknown>;
 }
 
 /** Fully explicit event for callers that need to emit SESSION_AUTH or extra fields. */

@@ -83,9 +83,7 @@ async def _approve(client: AsyncClient, order_id: str):
 
 
 async def _capture(client: AsyncClient, order_id: str, **payload):
-    return await client.post(
-        f"/api/v1/sandbox/orders/{order_id}/capture", json=payload or {}
-    )
+    return await client.post(f"/api/v1/sandbox/orders/{order_id}/capture", json=payload or {})
 
 
 # --------------------------------------------------------------- run isolation
@@ -171,9 +169,7 @@ async def test_capture_before_approval_is_409(demo_client: AsyncClient) -> None:
     async with demo_client.app.state.db.session() as session:
         transactions = (
             await session.scalars(
-                select(PaypalTransaction).where(
-                    PaypalTransaction.run_id == order["run_id"]
-                )
+                select(PaypalTransaction).where(PaypalTransaction.run_id == order["run_id"])
             )
         ).all()
     assert transactions == []
@@ -207,9 +203,7 @@ async def test_approve_then_capture_yields_a_recorded_payment(
 
     async with demo_client.app.state.db.session() as session:
         transaction = await session.scalar(
-            select(PaypalTransaction).where(
-                PaypalTransaction.transaction_id == body["capture_id"]
-            )
+            select(PaypalTransaction).where(PaypalTransaction.transaction_id == body["capture_id"])
         )
         assert transaction is not None
         assert transaction.run_id == order["run_id"]
@@ -250,9 +244,7 @@ async def test_capture_is_idempotent(demo_client: AsyncClient) -> None:
     async with demo_client.app.state.db.session() as session:
         rows = (
             await session.scalars(
-                select(PaypalTransaction).where(
-                    PaypalTransaction.run_id == order["run_id"]
-                )
+                select(PaypalTransaction).where(PaypalTransaction.run_id == order["run_id"])
             )
         ).all()
     assert len(rows) == 1
@@ -352,9 +344,7 @@ async def test_approve_in_network_mode_is_409_without_touching_the_gateway(
 
     # Refused before any gateway call, so the order is still unapproved.
     async with sandbox_client.app.state.db.session() as session:
-        row = await session.scalar(
-            select(PaypalOrder).where(PaypalOrder.order_id == order_id)
-        )
+        row = await session.scalar(select(PaypalOrder).where(PaypalOrder.order_id == order_id))
     assert row is not None
     assert row.lifecycle_stage == "CREATED"
 
@@ -435,9 +425,7 @@ async def test_reset_clears_demo_runs_but_preserves_the_merchant(
     order = await _checkout(demo_client)
     await _approve(demo_client, order["order_id"])
     await _capture(demo_client, order["order_id"])
-    await _open_dispute(
-        demo_client, order["run_id"], "The export arrived corrupted and unusable."
-    )
+    await _open_dispute(demo_client, order["run_id"], "The export arrived corrupted and unusable.")
 
     # Two non-demo records that reset must keep: one real sale, one old case.
     async with demo_client.app.state.db.session() as session:
@@ -498,9 +486,7 @@ async def test_reset_clears_demo_runs_but_preserves_the_merchant(
             )
         ) is None, "demo transaction should be gone"
         assert (
-            await session.scalar(
-                select(DisputeCase).where(DisputeCase.run_id == order["run_id"])
-            )
+            await session.scalar(select(DisputeCase).where(DisputeCase.run_id == order["run_id"]))
         ) is None, "demo case should be gone"
         assert (
             await session.scalar(
@@ -509,9 +495,7 @@ async def test_reset_clears_demo_runs_but_preserves_the_merchant(
         ) is None, "demo run should be gone"
 
         kept_transaction = await session.scalar(
-            select(PaypalTransaction).where(
-                PaypalTransaction.transaction_id == "TXNREAL0000001"
-            )
+            select(PaypalTransaction).where(PaypalTransaction.transaction_id == "TXNREAL0000001")
         )
         assert kept_transaction is not None, "non-demo transaction must survive"
         kept_case = await session.get(DisputeCase, "PP-D-REAL-1")
@@ -530,9 +514,7 @@ async def test_reset_rejects_a_non_demo_run_id_at_the_boundary(
     demo_client: AsyncClient,
 ) -> None:
     """Only run_* ids are accepted, so reset can never be pointed at real data."""
-    response = await demo_client.post(
-        CHECKOUT, json={"plan": "pro", "run_id": "not-a-demo-run"}
-    )
+    response = await demo_client.post(CHECKOUT, json={"plan": "pro", "run_id": "not-a-demo-run"})
     assert response.status_code == 422, response.text
     assert response.json()["error"]["code"] == "validation_error"
 
@@ -547,3 +529,57 @@ async def test_usage_with_an_unknown_run_is_404(demo_client: AsyncClient) -> Non
         },
     )
     assert response.status_code == 404, response.text
+
+
+async def test_sdk_route_events_tagged_with_run_id_complete_the_run(
+    demo_client: AsyncClient,
+) -> None:
+    """The /api/sdk/usage route signs four events carrying metadata.run_id."""
+    import json as _json
+
+    from tests.integration.test_telemetry_api import signed_headers
+
+    checkout = await _checkout(demo_client)
+    run_id = checkout["run_id"]
+    assert run_id
+    common = {
+        "paypal_payer_id": checkout["payer_id"],
+        "paypal_order_id": checkout["order_id"],
+        "client_ip": "203.0.113.42",
+        "device_fingerprint": "fp_89a7c6d5e4f3",
+    }
+    events = [
+        {
+            **common,
+            "event_type": "TOS_ACCEPTED",
+            "tos_version": "v2.4-2026-01",
+            "tos_content_sha256": "a" * 64,
+            "metadata": {"run_id": run_id},
+        },
+        {**common, "event_type": "SESSION_AUTH", "metadata": {"logins": 15, "run_id": run_id}},
+        {
+            **common,
+            "event_type": "USAGE_METERED",
+            "units_consumed": 42_000,
+            "metadata": {"run_id": run_id},
+        },
+        {
+            **common,
+            "event_type": "ASSET_DELIVERED",
+            "resource_id": "q3_financial_model.xlsx",
+            "resource_sha256": "b" * 64,
+            "metadata": {"run_id": run_id},
+        },
+    ]
+    raw = _json.dumps({"events": events}).encode()
+    ingest = await demo_client.post(
+        "/api/v1/telemetry/events",
+        content=raw,
+        headers=signed_headers(demo_client.settings, raw),  # type: ignore[attr-defined]
+    )
+    assert ingest.status_code == 200, ingest.text
+
+    run = (await demo_client.get(f"{RUNS}/{run_id}")).json()
+    assert run["event_count"] == 4
+    assert run["steps"]["telemetry"] == "done"
+    assert run["chain_valid"] is True

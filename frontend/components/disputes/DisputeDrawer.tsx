@@ -103,7 +103,12 @@ function CaseOverview({ detail, now }: { detail: DisputeDetail; now: number }) {
       <dl className="grid grid-cols-2 gap-x-6 gap-y-4">
         <Fact label="Payer" value={shortHash(detail.payer_id, 12, 4)} title={detail.payer_id} />
         <Fact label="p(win)" value={formatPercent(detail.p_win)} />
-        <Fact label="Expected loss" value={formatUsd(detail.ev_settle_usd)} />
+        <Fact label="Settle cost (accept)" value={formatUsd(detail.ev_settle_usd)} />
+        <Fact
+          label="Response SLA"
+          value={`${detail.sla_response_days} days${detail.sla_response_days <= 3 ? " · HVD tier" : ""}`}
+        />
+        <Fact label="Source" value={detail.source_badge} />
         <Fact label="EV to fight" value={formatUsd(detail.ev_fight_usd)} />
         <Fact label="EV to offer" value={formatUsd(detail.ev_offer_usd)} />
         <div className="min-w-0">

@@ -119,6 +119,11 @@ export type SandboxFlow = {
   dismissError: () => void;
 };
 
+/** True when the Next.js SDK route is absent or the network failed (no status / 404). */
+export function isRouteUnavailable(error: { status: number | null }): boolean {
+  return error.status === null || error.status === 0 || error.status === 404;
+}
+
 export function useSandboxFlow(): SandboxFlow {
   const [state, setState] = useState<SandboxFlowState>(() => ({
     ...INITIAL_STATE,
@@ -253,6 +258,10 @@ export function useSandboxFlow(): SandboxFlow {
       } catch (caught) {
         if (attempt !== attemptRef.current || signal.aborted) return;
         const sdkError = toApiError(caught);
+        // Fall back only when the route itself is missing or unreachable. A
+        // real answer (bad signature, validation, contract error) is shown, not
+        // hidden behind a second, different telemetry path.
+        if (!isRouteUnavailable(sdkError)) throw caught;
         appendLog(
           "warn",
           `SDK route unavailable — ${errorLine(sdkError)} · falling back to /api/v1/sandbox/usage`,

@@ -89,7 +89,7 @@ function ExpectedLossCell({ params }: { params: ICellRendererParams<DisputeSumma
   const data = params.data;
   if (!data) return null;
   return (
-    <span className="num block truncate text-right font-mono text-sm text-muted" title="Expected loss">
+    <span className="num block truncate text-right font-mono text-sm text-muted" title="Cost to settle (accept claim): principal plus the active tier fee in a claim stage">
       {formatUsd(data.ev_settle_usd)}
     </span>
   );
@@ -127,7 +127,12 @@ function DueCell({ params }: { params: ICellRendererParams<DisputeSummary> }) {
         "num block truncate font-mono text-sm",
         overdue ? "text-negative" : soon ? "text-warning" : "text-muted",
       )}
-      title={formatAbsolute(due) + " · " + formatDueIn(due, now)}
+      title={
+        formatAbsolute(due) +
+        " · " +
+        formatDueIn(due, now) +
+        ` · ${data.sla_response_days}-day SLA${data.sla_response_days <= 3 ? " (HVD tier)" : ""}`
+      }
     >
       {label}
     </span>
@@ -190,7 +195,7 @@ export function DisputesGrid({
       cellRenderer: (params: ICellRendererParams<DisputeSummary>) => <AmountCell params={params} />,
     };
     const lossColumn: ColDef<DisputeSummary> = {
-      headerName: "Expected loss",
+      headerName: "Settle cost",
       field: "ev_settle_usd",
       width: 152,
       minWidth: 94,
@@ -200,6 +205,24 @@ export function DisputesGrid({
       cellRenderer: (params: ICellRendererParams<DisputeSummary>) => (
         <ExpectedLossCell params={params} />
       ),
+    };
+    const sourceColumn: ColDef<DisputeSummary> = {
+      headerName: "Rail · source",
+      field: "source_plane",
+      width: 210,
+      minWidth: 150,
+      cellRenderer: (params: ICellRendererParams<DisputeSummary>) =>
+        params.data ? (
+          <span
+            className={cn(
+              "block truncate font-mono text-xs",
+              params.data.source_plane === "SIMULATED_CARD_NETWORK_FEED" ? "text-warning" : "text-muted",
+            )}
+            title={`${params.data.payment_rail}${params.data.external_reason_code ? " · reason " + params.data.external_reason_code : ""}`}
+          >
+            {params.data.source_badge}
+          </span>
+        ) : null,
     };
     const dueColumn: ColDef<DisputeSummary> = {
       headerName: "Deadline",
@@ -234,6 +257,7 @@ export function DisputesGrid({
       reasonColumn,
       amountColumn,
       lossColumn,
+      sourceColumn,
       dueColumn,
       recommendedColumn,
     ];

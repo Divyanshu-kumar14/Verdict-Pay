@@ -92,11 +92,14 @@ export function ActionRail({
         );
       case "PROVIDE_EVIDENCE":
         return (
-          "Contest with evidence — win " +
+          "Contest with evidence — keep " +
           formatUsd(detail.amount_usd) +
-          " or lose " +
-          formatUsd(feeUsd) +
-          " more."
+          (detail.breakdown.win_fee_usd > 0
+            ? " less the non-refundable " + formatUsd(detail.breakdown.win_fee_usd) + " HVD fee"
+            : "") +
+          ", or lose it plus one " +
+          formatUsd(detail.breakdown.fight_fee_usd + feeUsd) +
+          " dispute fee."
         );
       case "SEND_MESSAGE":
       default:

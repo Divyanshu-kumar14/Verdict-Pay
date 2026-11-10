@@ -58,6 +58,9 @@ STEP_CHECKOUT = "checkout"
 STEP_APPROVAL = "approval"
 STEP_CAPTURE = "capture"
 STEP_TELEMETRY = "telemetry"
+REQUIRED_TELEMETRY_TYPES = frozenset(
+    {"TOS_ACCEPTED", "SESSION_AUTH", "USAGE_METERED", "ASSET_DELIVERED"}
+)
 STEP_EVIDENCE = "evidence"
 STEP_DISPUTE = "dispute"
 STEP_TRIAGE = "triage"
@@ -361,6 +364,12 @@ class DemoRunService:
         ai_analyzed = await self._ai_analyzed(dispute_id, tagged)
 
         steps = {**empty_steps(), **(record.steps or {})}
+        # Telemetry sent through the SDK route is tagged with metadata.run_id
+        # instead of passing through /sandbox/usage, so derive the step from the
+        # ledger: all four evidence events present means the step is done.
+        tagged_types = {row.event_type for row in tagged}
+        if tagged_types >= REQUIRED_TELEMETRY_TYPES:
+            steps[STEP_TELEMETRY] = STEP_DONE
         if ai_analyzed:
             steps[STEP_AI] = STEP_DONE
         if case is not None and case.dossier_pdf_url:

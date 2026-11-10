@@ -110,6 +110,7 @@ class EvOutcome:
     high_volume_fee: Decimal
     accept_fee: Decimal
     win_fee: Decimal
+    fight_fee: Decimal
     high_volume: bool
     hvd_countable: bool
     ratio_before_ppm: int
@@ -254,6 +255,7 @@ def compute_ev(inputs: EvInputs) -> EvOutcome:
         high_volume_fee=high_volume_fee,
         accept_fee=accept_fee,
         win_fee=win_fee,
+        fight_fee=fee_if_claim,
         high_volume=tier_now,
         hvd_countable=countable,
         ratio_before_ppm=before.ratio_ppm,
@@ -296,6 +298,7 @@ def to_breakdown(inputs: EvInputs, outcome: EvOutcome) -> schemas.EvBreakdown:
         fee_tier_usd=outcome.fee_tier,
         accept_fee_usd=outcome.accept_fee,
         win_fee_usd=outcome.win_fee,
+        fight_fee_usd=outcome.fight_fee,
         fee_reimbursable_on_win=outcome.win_fee == _ZERO,
         sla_response_days=outcome.sla_days,
         penalty_ratio_usd=outcome.penalty_ratio,
