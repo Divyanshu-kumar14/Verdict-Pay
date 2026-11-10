@@ -502,6 +502,11 @@ class DisputeSimulationRequest(ApiModel):
     channel: DisputeChannel = DisputeChannel.INTERNAL
     amount_usd: Decimal | None = None
     claim_text: str | None = Field(default=None, max_length=4000)
+    # UNBRANDED_CARD cases are labelled [VISA-TC40 / ACQUIRER-FEED SIMULATION].
+    payment_rail: Literal["PAYPAL_WALLET", "UNBRANDED_CARD"] = "PAYPAL_WALLET"
+    external_reason_code: str | None = Field(
+        default=None, max_length=16, pattern=r"^[A-Za-z0-9.]{1,16}$"
+    )
 
 
 class DisputeSimulationResponse(ApiModel):

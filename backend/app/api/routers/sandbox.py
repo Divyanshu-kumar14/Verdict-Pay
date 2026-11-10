@@ -778,6 +778,8 @@ async def open_dispute(
         channel=payload.channel,
         amount=amount,
         buyer_claim_text=payload.claim_text,
+        payment_rail=payload.payment_rail,
+        external_reason_code=payload.external_reason_code,
     )
     if run_id is not None:
         # The tag that makes this case invisible to every other run.
