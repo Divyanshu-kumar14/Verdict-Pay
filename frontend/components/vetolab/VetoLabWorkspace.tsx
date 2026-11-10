@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ShieldAlert, ShieldCheck } from "lucide-react";
 
+import { PageHeader } from "@/components/PageHeader";
 import { Badge } from "@/components/ui/Badge";
 import { Button } from "@/components/ui/Button";
 import { ErrorBanner } from "@/components/ui/ErrorBanner";
@@ -126,16 +127,17 @@ export function VetoLabWorkspace() {
 
   return (
     <div className="space-y-4 p-4 md:p-6">
+      <PageHeader
+        className="pb-0"
+        title="Veto Lab — crime vs exorcism"
+        description="Three executable negative controls. Left: what an unguarded system does. Right: the isolated Sentinel (python -I -B, env={}, CPU/memory/file limits, no sockets) returns EXIT CODE 2 before any PayPal write; the hardened alternative returns EXIT CODE 0 with a signed ApprovalToken. Lab disputes are synthetic; no PayPal write is made."
+        actions={
+          <Button variant="primary" onClick={run} disabled={busy} data-testid="run-veto-lab">
+            {busy ? "Running…" : result ? "Run again" : "Run all three"}
+          </Button>
+        }
+      />
       <Panel>
-        <PanelHeader
-          title="Veto Lab — crime vs exorcism"
-          description="Three executable negative controls. Left: what an unguarded system does. Right: the isolated Sentinel (python -I -B, env={}, CPU/memory/file limits, no sockets) returns EXIT CODE 2 before any PayPal write; the hardened alternative returns EXIT CODE 0 with a signed ApprovalToken. Lab disputes are synthetic; no PayPal write is made."
-          actions={
-            <Button variant="primary" onClick={run} disabled={busy} data-testid="run-veto-lab">
-              {busy ? "Running…" : result ? "Run again" : "Run all three"}
-            </Button>
-          }
-        />
         <PanelBody className="flex flex-wrap gap-2 text-xs">
           {result === null ? (
             <Badge tone="neutral">[PENDING LIVE PROBE]</Badge>

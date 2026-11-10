@@ -19,7 +19,7 @@ from fastapi import APIRouter, Body
 from app.api.routers.disputes import DisputeId, ServiceDep
 from app.domain.telemetry.service import TelemetryService
 from app.integrations.ai import claim_classifier, explain, fallback
-from app.integrations.ai.client import GeminiClient
+from app.integrations.ai.client import GeminiClient, safe_error_reason
 from app.integrations.ai.evidence_drafter import draft_evidence
 from app.integrations.ai.prompts.v1 import (
     CLASSIFY_SYSTEM,
@@ -205,8 +205,10 @@ async def _analyze(
         )
         return _finish(classification, narrative, provenance, False, None)
     except Exception as exc:
-        # Log the type only: provider errors can echo request content.
-        logger.warning("ai analyze degraded for %s: %s", dispute_id, type(exc).__name__)
+        # Log the class + HTTP code/status only: provider messages can echo
+        # request content or a key, so the message body is never used.
+        reason = safe_error_reason(exc)
+        logger.warning("ai analyze degraded for %s: %s", dispute_id, reason)
         classification = _classify_deterministic(claim_text)
         narrative = fallback.draft_narrative(
             facts=detail.facts,
@@ -220,7 +222,7 @@ async def _analyze(
             narrative,
             ProvenanceRecord(recorded=False, note="model_error"),
             True,
-            f"model_error:{type(exc).__name__}",
+            f"model_error:{reason}",
         )
 
 

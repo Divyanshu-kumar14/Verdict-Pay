@@ -45,9 +45,9 @@ const NAV: NavItem[] = [
   { href: "/demo", label: "Live demo", short: "Demo", icon: Play, exact: true },
   { href: "/disputes", label: "Disputes", short: "Disputes", icon: Scale },
   { href: "/timeline", label: "SLA board", short: "SLA", icon: CalendarClock },
-  { href: "/analytics", label: "Analytics", short: "Analytics", icon: BarChart3 },
+  { href: "/analytics", label: "Analytics", short: "Stats", icon: BarChart3 },
   { href: "/veto-lab", label: "Veto Lab", short: "Veto", icon: ShieldAlert },
-  { href: "/settings", label: "Connection", short: "Settings", icon: Settings },
+  { href: "/settings", label: "Connection", short: "Setup", icon: Settings },
 ];
 
 const SIDEBAR_EXPANDED = 240;
@@ -356,7 +356,7 @@ function PhoneBar({ pathname, cases }: { pathname: string; cases: PolledQuery<Di
   return (
     <nav
       aria-label="Primary"
-      className="fixed inset-x-0 bottom-0 z-sticky flex border-t border-line bg-surface lg:hidden"
+      className="fixed inset-x-0 bottom-0 z-sticky flex border-t border-line bg-surface px-3 lg:hidden"
     >
       {NAV.map(function (item) {
         const active = isActive(pathname, item);
@@ -382,7 +382,7 @@ function PhoneBar({ pathname, cases }: { pathname: string; cases: PolledQuery<Di
               />
             ) : null}
             <Icon size={17} strokeWidth={1.7} aria-hidden />
-            <span className="max-w-full px-1 truncate">{item.short}</span>
+            <span className="max-w-full truncate text-[11px] leading-tight">{item.short}</span>
             {count !== null ? (
               <span
                 aria-hidden

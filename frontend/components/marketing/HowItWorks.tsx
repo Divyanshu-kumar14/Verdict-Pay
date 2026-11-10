@@ -9,8 +9,8 @@ function TraceDiagram() {
       <circle cx="8" cy="52" r="3" fill="var(--color-ground)" stroke="var(--color-accent-soft)" strokeWidth="1.5" />
       <circle cx="126" cy="44" r="3" fill="var(--color-accent)" />
       <circle cx="212" cy="44" r="3" fill="var(--color-ground)" stroke="var(--color-positive)" strokeWidth="1.5" />
-      <text x="8" y="68" fill="var(--color-muted)" fontSize="9" fontFamily="monospace">evt_tos_8f3a</text>
-      <text x="150" y="68" fill="var(--color-muted)" fontSize="9" fontFamily="monospace">evt_dlv_07be</text>
+      <text x="8" y="68" fill="var(--color-muted)" fontSize="11" fontFamily="monospace">evt_tos_8f3a</text>
+      <text x="132" y="68" fill="var(--color-muted)" fontSize="11" fontFamily="monospace">evt_dlv_07be</text>
     </svg>
   );
 }
@@ -21,11 +21,11 @@ function ForkDiagram() {
       <circle cx="20" cy="42" r="4" fill="var(--color-accent)" />
       <path d="M24 42 H76 L120 20 H196" fill="none" stroke="var(--color-positive)" strokeWidth="1.5" />
       <path d="M24 42 H76 L120 64 H196" fill="none" stroke="var(--color-negative)" strokeWidth="1.5" strokeDasharray="4 3" />
-      <rect x="150" y="8" width="62" height="18" rx="9" fill="rgba(52,211,153,0.12)" />
-      <text x="158" y="21" fill="var(--color-positive)" fontSize="10" fontFamily="monospace">+$131.44</text>
-      <rect x="150" y="58" width="62" height="18" rx="9" fill="rgba(248,113,113,0.10)" />
-      <text x="158" y="71" fill="var(--color-negative)" fontSize="10" fontFamily="monospace">−$184.20</text>
-      <text x="8" y="78" fill="var(--color-muted)" fontSize="9" fontFamily="monospace">ev_calc_01</text>
+      <rect x="144" y="8" width="72" height="18" rx="9" fill="rgba(52,211,153,0.12)" />
+      <text x="151" y="21" fill="var(--color-positive)" fontSize="11" fontFamily="monospace">+$131.44</text>
+      <rect x="144" y="58" width="72" height="18" rx="9" fill="rgba(248,113,113,0.10)" />
+      <text x="151" y="71" fill="var(--color-negative)" fontSize="11" fontFamily="monospace">−$184.20</text>
+      <text x="8" y="80" fill="var(--color-muted)" fontSize="11" fontFamily="monospace">ev_calc_01</text>
     </svg>
   );
 }
@@ -39,7 +39,7 @@ function SealDiagram() {
       <line x1="84" y1="34" x2="136" y2="34" stroke="var(--color-muted)" strokeWidth="1.5" />
       <line x1="84" y1="43" x2="136" y2="43" stroke="var(--color-muted)" strokeWidth="1.5" opacity="0.6" />
       <line x1="84" y1="52" x2="118" y2="52" stroke="var(--color-positive)" strokeWidth="1.5" />
-      <text x="70" y="80" fill="var(--color-muted)" fontSize="9" fontFamily="monospace">pkg_sha256 · sealed</text>
+      <text x="48" y="80" fill="var(--color-muted)" fontSize="11" fontFamily="monospace">pkg_sha256 · sealed</text>
     </svg>
   );
 }

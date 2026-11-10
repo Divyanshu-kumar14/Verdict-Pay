@@ -21,7 +21,15 @@ logger = logging.getLogger(__name__)
 
 
 class AiUnavailableError(RuntimeError):
-    """Raised when the Gemini model cannot produce a usable response."""
+    """Raised when the Gemini model cannot produce a usable response.
+
+    ``upstream`` holds the safe ``_describe_error`` summary of the last SDK
+    failure (class name + HTTP code/status only), or None.
+    """
+
+    def __init__(self, message: str, *, upstream: str | None = None) -> None:
+        super().__init__(message)
+        self.upstream = upstream
 
 
 def _describe_error(exc: BaseException) -> str:
@@ -38,6 +46,18 @@ def _describe_error(exc: BaseException) -> str:
     if isinstance(status, str) and status:
         parts.append(status)
     return " ".join(parts)
+
+
+def safe_error_reason(exc: BaseException) -> str:
+    """Key-safe reason for a degraded response: never includes an error message.
+
+    An ``AiUnavailableError`` that wraps an SDK failure reports that failure
+    (``ClientError 429 RESOURCE_EXHAUSTED``); anything else reports its own
+    class name plus any HTTP code/status attributes.
+    """
+    if isinstance(exc, AiUnavailableError) and exc.upstream:
+        return exc.upstream
+    return _describe_error(exc)
 
 
 class GeminiClient:
@@ -99,9 +119,10 @@ class GeminiClient:
                     attempts,
                     _describe_error(exc),
                 )
+        upstream = _describe_error(last_error) if last_error else None
         raise AiUnavailableError(
-            f"gemini unavailable after {attempts} attempt(s): "
-            f"{_describe_error(last_error) if last_error else 'unknown'}"
+            f"gemini unavailable after {attempts} attempt(s): {upstream or 'unknown'}",
+            upstream=upstream,
         )
 
     def _generate(self, system: str, user: str, schema: Any) -> str:

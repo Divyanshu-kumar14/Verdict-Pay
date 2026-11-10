@@ -150,7 +150,7 @@ against api-m.sandbox.paypal.com.
 **How the codebase was built — disclosed, not implied:** VerdictPay was implemented by an AI coding
 agent (DeepSeek-based DSH) working under human direction, with the human owning scope, the frozen
 spec and every merge decision. The agent did not self-certify: each phase closed on executable
-gates, `make verify` runs Ruff, pytest (471), ESLint, `tsc --noEmit`, `next build`, Vitest (230 frontend + 36 SDK) and the
+gates, `make verify` runs Ruff, pytest (473), ESLint, `tsc --noEmit`, `next build`, Vitest (230 frontend + 36 SDK) and the
 26-assertion E2E script, and an adversarial QA pass ([docs/qa/backend-findings.md](qa/backend-findings.md))
 filed 36 probes, found 2 HIGH bugs, and those two now have regression tests
 (`test_chunked_oversized_body_cannot_bypass_the_cap`,
@@ -298,7 +298,7 @@ Sandbox credentials are required: `PAYPAL_SANDBOX_CLIENT_ID` / `PAYPAL_SANDBOX_C
 
 **Is the data real?**
 
-The 200 trailing-90-day sales and 15 CE 3.0 lookback rows are synthetic demo data from [seed_demo.py](../backend/scripts/seed_demo.py), labelled `source="seed"`, not scraped. The seed's checkouts are real PayPal sandbox orders, and its five disputes go through `POST /api/v1/sandbox/dispute`. Every number derived from it is computed live by the EV engine and the reporting endpoint. The chain hashes are real SHA-256 over the stored rows; the PDF is a real PDF.
+The 200 trailing-90-day sales and 18 CE 3.0 lookback rows are synthetic demo data from [seed_demo.py](../backend/scripts/seed_demo.py), labelled `source="seed"`, not scraped. The seed's checkouts are real PayPal sandbox orders, and its five disputes go through `POST /api/v1/sandbox/dispute`. Every number derived from it is computed live by the EV engine and the reporting endpoint. The chain hashes are real SHA-256 over the stored rows; the PDF is a real PDF.
 
 **What is deterministic and what is generated?**
 
