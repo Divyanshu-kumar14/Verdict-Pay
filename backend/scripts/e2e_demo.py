@@ -171,7 +171,7 @@ def run(client: httpx.Client) -> int:
         "DEFLECT_INQUIRY": "SEND_MESSAGE",
         "MAKE_OFFER": "MAKE_OFFER",
         "ACCEPT_CLAIM": "ACCEPT_CLAIM",
-        "PROVIDE_EVIDENCE": "ACCEPT_CLAIM",
+        "PROVIDE_EVIDENCE": "PROVIDE_EVIDENCE",
         "MONITOR": "SEND_MESSAGE",
     }[recommended]
     executed = call(

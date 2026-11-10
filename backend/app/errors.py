@@ -99,3 +99,11 @@ class WebhookVerificationError(VerdictPayError):
     code = "webhook_verification_failed"
     status_code = 401
     default_message = "Webhook signature could not be verified."
+
+
+class SentinelVetoError(VerdictPayError):
+    """The Sentinel returned exit code 2: the PayPal write is blocked."""
+
+    code = "sentinel_veto"
+    status_code = 422
+    default_message = "EXIT CODE 2 - VETO: the Sentinel blocked this PayPal write."

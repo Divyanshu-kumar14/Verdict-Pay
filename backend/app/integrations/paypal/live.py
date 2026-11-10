@@ -18,7 +18,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import httpx
 
@@ -34,8 +34,9 @@ from app.domain.protocols import (
     SandboxOrder,
     WebhookVerification,
 )
-from app.errors import UpstreamError
+from app.errors import SentinelVetoError, UpstreamError
 from app.integrations.paypal import wire
+from app.sentinel import token as sentinel_token
 
 TOKEN_PATH = "/v1/oauth2/token"
 DISPUTES_PATH = "/v1/customer/disputes"
@@ -59,6 +60,15 @@ ACCEPT_CLAIM_TYPES = frozenset(
     {"REFUND", "REFUND_WITH_RETURN", "PARTIAL_REFUND", "REFUND_WITH_RETURN_SHIPMENT_LABEL"}
 )
 ADJUDICATION_OUTCOMES = frozenset({"BUYER_FAVOR", "SELLER_FAVOR"})
+# Seller dispute writes that need a Sentinel ApprovalToken (path suffix -> action).
+_GATED_SUFFIXES: dict[str, str] = {
+    "send-message": "SEND_MESSAGE",
+    "make-offer": "MAKE_OFFER",
+    "accept-claim": "ACCEPT_CLAIM",
+    "provide-evidence": "PROVIDE_EVIDENCE",
+    "escalate": "ESCALATE",
+    "appeal": "APPEAL",
+}
 TRANSACTION_FIELDS = "transaction_info,payer_info"
 # PayPal's Reporting API rejects windows greater than 31 days; exactly 31 is
 # accepted, so every request window is capped at this many days and merged.
@@ -201,6 +211,7 @@ class LivePayPalGateway:
         idempotency_key: str | None = None,
         retry: bool = True,
     ) -> GatewayResponse:
+        self._require_approval(method, path)
         token = await self._access_token()
         request_headers: dict[str, str] = {
             "Authorization": f"Bearer {token}",
@@ -256,6 +267,27 @@ class LivePayPalGateway:
             latency_ms=latency_ms,
             request_id=request_id,
         )
+
+    def _require_approval(self, method: str, path: str) -> None:
+        """Refuse a seller dispute write that carries no valid Sentinel token."""
+        if method.upper() != "POST" or not path.startswith(DISPUTES_PATH + "/"):
+            return
+        tail = path[len(DISPUTES_PATH) + 1 :]
+        dispute_part, _, suffix = tail.partition("/")
+        action = _GATED_SUFFIXES.get(suffix)
+        if action is None:
+            return
+        try:
+            sentinel_token.verify(
+                sentinel_token.current_approval.get(),
+                secret=self._settings.verdictpay_signing_secret,
+                action=action,
+                dispute_id=unquote(dispute_part),
+            )
+        except sentinel_token.ApprovalError as exc:
+            raise SentinelVetoError(
+                details=[{"exit_code": 2, "veto_code": exc.veto_code, "reason": str(exc)}]
+            ) from exc
 
     @staticmethod
     def _require_text(value: Any, code: str, *, max_chars: int | None = None) -> str:

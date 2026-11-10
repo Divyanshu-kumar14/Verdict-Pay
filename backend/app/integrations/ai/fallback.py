@@ -39,11 +39,61 @@ _KEYWORDS: tuple[tuple[ClaimCategory, tuple[str, ...]], ...] = (
 )
 
 
+VETO_PROMPT_INJECTION_BLOCKED = "VETO_PROMPT_INJECTION_BLOCKED"
+
+# Phrases that address the model instead of describing a purchase. Their
+# presence means the text is an instruction attempt; the keyword classifier
+# must not obey whatever category the text asks for.
+_INJECTION_MARKERS: tuple[str, ...] = (
+    "ignore previous",
+    "ignore all previous",
+    "ignore the previous",
+    "ignore instructions",
+    "ignore your instructions",
+    "disregard",
+    "system override",
+    "system prompt",
+    "you are now",
+    "new instructions",
+    "category=",
+    "category:",
+    "accept claim",
+    "accept_claim",
+    "accept_dispute_claim",
+    "accept the claim",
+    "</claim>",
+    "<claim>",
+    "act as",
+    "developer mode",
+)
+
+
+def detect_injection(claim_text: str | None) -> str | None:
+    """Return the first injection marker found in the text, else None."""
+    text = (claim_text or "").lower()
+    for marker in _INJECTION_MARKERS:
+        if marker in text:
+            return marker
+    return None
+
+
 def classify_claim(claim_text: str | None) -> tuple[ClaimCategory, float, str]:
-    """Keyword classification with a conservative default to OTHER."""
+    """Keyword classification with a conservative default to OTHER.
+
+    Text carrying a prompt-injection marker is never classified by keyword:
+    it returns OTHER with zero confidence and the veto code in the rationale.
+    """
     text = (claim_text or "").lower()
     if not text.strip():
         return ClaimCategory.OTHER, 0.0, "No claim text supplied."
+    marker = detect_injection(text)
+    if marker is not None:
+        return (
+            ClaimCategory.OTHER,
+            0.0,
+            f"{VETO_PROMPT_INJECTION_BLOCKED}: claim text contains an instruction "
+            f"marker ('{marker}'); keyword classification refused.",
+        )
     for category, keywords in _KEYWORDS:
         for keyword in keywords:
             if keyword in text:

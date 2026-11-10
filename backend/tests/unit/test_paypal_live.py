@@ -8,6 +8,7 @@ and retry behaviour are exercised for real.
 from __future__ import annotations
 
 import base64
+import contextlib
 import json
 import math
 from datetime import UTC, datetime, timedelta
@@ -22,9 +23,10 @@ import respx
 from app.config import Settings
 from app.domain.enums import DisputeChannel, DisputeStage, DisputeStatus
 from app.domain.protocols import EvidenceDocument, EvidenceSubmission
-from app.errors import UpstreamError
+from app.errors import SentinelVetoError, UpstreamError
 from app.integrations.paypal.live import LivePayPalGateway
 from app.integrations.paypal.wire import build_auth_assertion
+from app.sentinel import token as sentinel_token
 
 BASE = "https://api-m.sandbox.paypal.com"
 TOKEN_URL = f"{BASE}/v1/oauth2/token"
@@ -182,7 +184,8 @@ async def test_429_is_retried_with_stable_idempotency_key(
         ]
     )
 
-    response = await live.send_message("PP-D-1", "We have server-side logs.")
+    with approved(live, "SEND_MESSAGE"):
+        response = await live.send_message("PP-D-1", "We have server-side logs.")
 
     assert response.status_code == 200
     assert response.body == {"message_id": "MSG-1"}
@@ -222,7 +225,8 @@ async def test_provide_evidence_posts_multipart_related(
         idempotency_key="idem-evidence-1",
     )
 
-    response = await live.provide_evidence(submission)
+    with approved(live, 'PROVIDE_EVIDENCE'):
+        response = await live.provide_evidence(submission)
 
     assert response.status_code == 200
     request = route.calls[0].request
@@ -807,3 +811,72 @@ def test_error_payload_never_leaks_a_credential() -> None:
     )
 
     assert detail == "upstream error redacted"
+
+
+@contextlib.contextmanager
+def approved(live: LivePayPalGateway, action: str, dispute_id: str = "PP-D-1"):
+    """Install a Sentinel ApprovalToken for one gated write."""
+    token = sentinel_token.issue(
+        secret=live._settings.verdictpay_signing_secret,
+        proposal_id="p-1",
+        action=action,
+        dispute_id=dispute_id,
+        manifest_sha256="0" * 64,
+    )
+    reset = sentinel_token.current_approval.set(token)
+    try:
+        yield token
+    finally:
+        sentinel_token.current_approval.reset(reset)
+
+
+@respx.mock
+async def test_gated_write_without_approval_token_is_vetoed(live: LivePayPalGateway) -> None:
+    route = respx.post(f"{BASE}/v1/customer/disputes/PP-D-1/accept-claim").mock(
+        return_value=httpx.Response(200, json={})
+    )
+    with pytest.raises(SentinelVetoError) as raised:
+        await live.accept_claim("PP-D-1", "note")
+    assert raised.value.details[0]["veto_code"] == "VETO_MISSING_APPROVAL_TOKEN"
+    assert route.called is False
+
+
+@respx.mock
+async def test_token_for_another_action_or_dispute_is_rejected(live: LivePayPalGateway) -> None:
+    respx.post(TOKEN_URL).mock(return_value=_token_ok())
+    route = respx.post(f"{BASE}/v1/customer/disputes/PP-D-1/accept-claim").mock(
+        return_value=httpx.Response(200, json={})
+    )
+    with approved(live, "SEND_MESSAGE"), pytest.raises(SentinelVetoError):
+        await live.accept_claim("PP-D-1", "note")
+    with approved(live, "ACCEPT_CLAIM", dispute_id="PP-D-2"), pytest.raises(SentinelVetoError):
+        await live.accept_claim("PP-D-1", "note")
+    assert route.called is False
+    with approved(live, "ACCEPT_CLAIM"):
+        await live.accept_claim("PP-D-1", "note", accept_claim_type="REFUND")
+    body = json.loads(route.calls.last.request.content)
+    assert body == {"note": "note", "accept_claim_type": "REFUND"}
+
+
+@respx.mock
+async def test_make_offer_sends_offer_type(live: LivePayPalGateway) -> None:
+    respx.post(TOKEN_URL).mock(return_value=_token_ok())
+    route = respx.post(f"{BASE}/v1/customer/disputes/PP-D-1/make-offer").mock(
+        return_value=httpx.Response(200, json={})
+    )
+    with approved(live, "MAKE_OFFER"):
+        await live.make_offer("PP-D-1", Decimal("29.70"), "goodwill", offer_type="REFUND")
+    body = json.loads(route.calls.last.request.content)
+    assert body["offer_type"] == "REFUND"
+    with pytest.raises(UpstreamError):
+        await live.make_offer("PP-D-1", Decimal("1.00"), "x", offer_type="FREE_MONEY")
+
+
+@respx.mock
+async def test_order_id_is_url_quoted(live: LivePayPalGateway) -> None:
+    respx.post(TOKEN_URL).mock(return_value=_token_ok())
+    route = respx.get(f"{BASE}/v2/checkout/orders/..%2Fv1%2Foauth2").mock(
+        return_value=httpx.Response(200, json={"id": "x", "status": "CREATED"})
+    )
+    await live.get_order("../v1/oauth2")
+    assert route.called is True

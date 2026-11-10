@@ -186,40 +186,75 @@ def build_template_narrative(
     return _ascii(text)
 
 
-def _facts_tokens(facts: schemas.CaseFacts) -> tuple[set[str], str]:
-    """Return the date tokens present in the facts plus their serialized form."""
-    python_view = facts.model_dump(mode="python")
-    json_view = facts.model_dump(mode="json")
-    serialized = (
-        json.dumps(python_view, default=str, sort_keys=True)
-        + "\n"
-        + json.dumps(json_view, default=str, sort_keys=True)
-    )
-    dates: set[str] = set()
+_HEX_DIGEST_RE: Final[re.Pattern[str]] = re.compile(
+    r"(?<![0-9A-Za-z])[0-9a-fA-F]{32,64}(?![0-9A-Za-z])"
+)
+# Fields that hold digests. Their characters are never a source of "allowed
+# numbers": a 64-char hex string contains almost every short digit run, which
+# used to let an invented figure pass the substring check.
+_HASH_FIELDS: Final[frozenset[str]] = frozenset(
+    {"chain_head", "tos_hash", "sha256", "sha256_manifest", "resource_hash"}
+)
 
-    def walk(value: Any) -> None:
+
+def _hashes(facts: schemas.CaseFacts) -> set[str]:
+    found: set[str] = set()
+    for value in (facts.chain_head, facts.tos_hash):
+        if value:
+            found.add(value.lower())
+    for delivery in facts.deliveries:
+        digest = delivery.get("sha256") if isinstance(delivery, Mapping) else None
+        if isinstance(digest, str) and digest:
+            found.add(digest.lower())
+    proof = facts.ce3_proof or {}
+    if isinstance(proof.get("sha256_manifest"), str):
+        found.add(proof["sha256_manifest"].lower())
+    return found
+
+
+def _facts_tokens(facts: schemas.CaseFacts) -> tuple[set[str], set[str], set[str]]:
+    """Dates, numbers and digests a narrative may cite, from structured fields only.
+
+    Numbers come from numeric fields (counts, completeness, amounts, days) and
+    from identifier/date/IP strings, never from digest fields. Membership is
+    exact-token, not substring.
+    """
+    dates: set[str] = set()
+    numbers: set[str] = set()
+
+    def walk(value: Any, key: str | None = None) -> None:
+        if key in _HASH_FIELDS:
+            return
+        if isinstance(value, bool) or value is None:
+            return
         if isinstance(value, datetime):
-            if value.tzinfo is not None:
-                dates.add(value.date().isoformat())
-            dates.add(_utc(value).date().isoformat())
+            moment = _utc(value)
+            dates.add(moment.date().isoformat())
+            numbers.update(_NUMBER_RE.findall(_iso(moment)))
+        elif isinstance(value, (int, Decimal, float)):
+            numbers.add(str(value))
+            if isinstance(value, float) and value.is_integer():
+                numbers.add(str(int(value)))
         elif isinstance(value, str):
             dates.update(match.group(0) for match in _DATE_RE.finditer(value))
+            numbers.update(_NUMBER_RE.findall(value))
         elif isinstance(value, Mapping):
-            for item in value.values():
-                walk(item)
+            for item_key, item in value.items():
+                walk(item, str(item_key))
         elif isinstance(value, (list, tuple)):
             for item in value:
-                walk(item)
+                walk(item, key)
 
-    walk(python_view)
-    return dates, serialized
+    walk(facts.model_dump(mode="python"))
+    return dates, numbers, _hashes(facts)
 
 
 def validate_narrative(text: str, facts: schemas.CaseFacts) -> tuple[bool, str]:
     """Check a narrative against the locked facts; return (ok, reason).
 
-    Rejects empty/oversized text, banned marketing phrases, non-ASCII text, and
-    any date or number token that is not present in the serialized facts.
+    Rejects empty/oversized text, banned marketing phrases, non-ASCII text, any
+    digest that is not one of the fact pack's digests, and any date or number
+    token that is not an exact value of a structured fact field.
     """
     if not isinstance(text, str) or not text.strip():
         return False, "empty_narrative"
@@ -234,19 +269,29 @@ def validate_narrative(text: str, facts: schemas.CaseFacts) -> tuple[bool, str]:
     if not isinstance(facts, schemas.CaseFacts):
         return False, "invalid_facts"
 
-    date_tokens, serialized = _facts_tokens(facts)
-    for match in _DATE_RE.finditer(text):
+    date_tokens, number_tokens, digests = _facts_tokens(facts)
+    scratch = text
+    for match in _HEX_DIGEST_RE.finditer(text):
+        token = match.group(0)
+        if not any(ch.isalpha() for ch in token):
+            continue  # a long plain number, judged below
+        if token.lower() not in digests:
+            return False, f"unverified_digest:{token[:12]}"
+    scratch = _HEX_DIGEST_RE.sub(" ", scratch)
+    for match in _DATE_RE.finditer(scratch):
         if match.group(0) not in date_tokens:
             return False, f"unverified_date:{match.group(0)}"
 
-    # "SHA-256" is a fixed algorithm label, not a numeric claim, so it is not
-    # required to appear in the fact pack (sparse facts legitimately omit hashes).
-    scratch = text.replace("SHA-256", " ").replace("sha-256", " ")
+    # "SHA-256" is a fixed algorithm label, not a numeric claim.
+    scratch = scratch.replace("SHA-256", " ").replace("sha-256", " ")
+    for match in _TIMESTAMP_RE.finditer(scratch):
+        if match.group(0)[:10] not in date_tokens:
+            return False, f"unverified_date:{match.group(0)[:10]}"
     scratch = _TIMESTAMP_RE.sub(" ", scratch)
     scratch = _DATE_RE.sub(" ", scratch)
     for match in _NUMBER_RE.finditer(scratch):
         token = match.group(0)
-        if token not in serialized:
+        if token not in number_tokens:
             return False, f"unverified_number:{token}"
     return True, "ok"
 

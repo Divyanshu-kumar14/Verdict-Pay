@@ -70,7 +70,7 @@ def test_one_document_round_trip() -> None:
 def test_two_documents_get_file_parts() -> None:
     documents = (
         EvidenceDocument(name="dossier.pdf", content=PDF_BYTES, content_type="application/pdf"),
-        EvidenceDocument(name="timeline.csv", content=CSV_BYTES, content_type="text/csv"),
+        EvidenceDocument(name="timeline.png", content=CSV_BYTES, content_type="image/png"),
     )
     payload = build_multipart_related(_submission(documents=documents))
     parts = list(_parse(payload).iter_parts())
@@ -79,7 +79,7 @@ def test_two_documents_get_file_parts() -> None:
     assert parts[2].get_param("name", header="content-disposition") == "file2"
     assert parts[1].get_payload(decode=True) == PDF_BYTES
     assert parts[2].get_payload(decode=True) == CSV_BYTES
-    assert parts[2].get_content_type() == "text/csv"
+    assert parts[2].get_content_type() == "image/png"
 
 
 def test_content_type_and_boundary() -> None:
@@ -168,3 +168,74 @@ def test_json_body_matches_expected_bytes() -> None:
         ]
     }
     assert body_part == json.dumps(expected, separators=(",", ":")).encode("utf-8")
+
+
+# ---------------------------------------------------------- PayPal constraints
+def _submission_with(*documents: object, **extra: object) -> object:
+    from app.domain.protocols import EvidenceDocument, EvidenceSubmission
+
+    return EvidenceSubmission(
+        dispute_id="PP-D-1",
+        evidence_type="PROOF_OF_FULFILLMENT",
+        notes="n",
+        documents=[EvidenceDocument(*doc) for doc in documents],  # type: ignore[misc]
+        idempotency_key="k",
+        **extra,  # type: ignore[arg-type]
+    )
+
+
+@pytest.mark.parametrize(
+    "name,ctype",
+    [("a.exe", "application/pdf"), ("a.svg", "image/svg+xml"), ("a.pdf", "text/html")],
+)
+def test_disallowed_evidence_types_rejected(name: str, ctype: str) -> None:
+    from app.domain.evidence.multipart import EvidenceConstraintError, build_multipart_related
+
+    with pytest.raises(EvidenceConstraintError):
+        build_multipart_related(_submission_with((name, b"x", ctype)))
+
+
+def test_file_and_batch_size_limits() -> None:
+    from app.domain.evidence.multipart import (
+        MAX_FILE_BYTES,
+        EvidenceConstraintError,
+        build_multipart_related,
+    )
+
+    with pytest.raises(EvidenceConstraintError):
+        build_multipart_related(
+            _submission_with(("a.pdf", b"x" * MAX_FILE_BYTES, "application/pdf"))
+        )
+    near = b"x" * (MAX_FILE_BYTES - 1)
+    with pytest.raises(EvidenceConstraintError):
+        build_multipart_related(
+            _submission_with(*[(f"f{i}.png", near, "image/png") for i in range(6)])
+        )
+    build_multipart_related(_submission_with(("ok.jpeg", near, "image/jpeg")))
+
+
+def test_tracking_info_and_refund_ids_are_validated_and_serialized() -> None:
+    import json as _json
+
+    from app.domain.evidence.multipart import EvidenceConstraintError, build_multipart_related
+
+    payload = build_multipart_related(
+        _submission_with(
+            ("a.pdf", b"%PDF", "application/pdf"),
+            tracking_info=[{"carrier_name": "UPS", "tracking_number": "1Z999AA10123456784"}],
+            refund_ids=["8KX12345AB678901C"],
+        )
+    )
+    manifest = payload.body.split(b"\r\n\r\n", 1)[1].split(b"\r\n", 1)[0]
+    info = _json.loads(manifest)["evidences"][0]["evidence_info"]
+    assert info["tracking_info"] == [
+        {"carrier_name": "UPS", "tracking_number": "1Z999AA10123456784"}
+    ]
+    assert info["refund_ids"] == ["8KX12345AB678901C"]
+    with pytest.raises(EvidenceConstraintError):
+        build_multipart_related(
+            _submission_with(
+                ("a.pdf", b"%PDF", "application/pdf"),
+                tracking_info=[{"carrier_name": "UPS", "tracking_number": "../x"}],
+            )
+        )

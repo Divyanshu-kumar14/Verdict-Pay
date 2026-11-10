@@ -453,13 +453,15 @@ class DemoRunService:
         ]
 
         # Children first: dispute_actions has a FK to dispute_cases.
+        cleared_actions = 0
         if demo_dispute_ids:
-            await self.session.execute(
+            action_result = await self.session.execute(
                 delete(DisputeActionRecord).where(
                     DisputeActionRecord.dispute_id.in_(demo_dispute_ids)
                 )
             )
-        cleared_actions = len(demo_dispute_ids)
+            # The real number of audit rows removed, not the number of cases.
+            cleared_actions = int(action_result.rowcount or 0)
         if webhook_ids:
             webhook_result = await self.session.execute(
                 delete(WebhookEventRecord).where(WebhookEventRecord.event_id.in_(webhook_ids))
@@ -487,7 +489,10 @@ class DemoRunService:
             )
         )
         run_result = await self.session.execute(
-            delete(DemoRunRecord).where(DemoRunRecord.merchant_id == self.merchant_id)
+            delete(DemoRunRecord).where(
+                DemoRunRecord.merchant_id == self.merchant_id,
+                DemoRunRecord.run_id.startswith(DEMO_RUN_PREFIX),
+            )
         )
 
         cleared_cases = int(case_result.rowcount or 0)

@@ -9,7 +9,27 @@ from __future__ import annotations
 
 from typing import Final
 
-PROMPT_VERSION: Final[str] = "v1"
+PROMPT_VERSION: Final[str] = "v1.1"
+UNTRUSTED_MAX_CHARS: Final[int] = 4000
+
+
+def sanitize_untrusted(text: str | None) -> str:
+    """Neutralise untrusted buyer text before it is placed inside a prompt.
+
+    Control characters (except newline and tab) are dropped, and the
+    characters that could close the ``<claim>`` fence or be read as template
+    syntax (``<``, ``>``, ``{``, ``}``) are entity-escaped, so a buyer cannot
+    write ``</claim>`` and continue the prompt as instructions.
+    """
+    raw = (text or "")[:UNTRUSTED_MAX_CHARS]
+    kept = "".join(ch for ch in raw if ch in "\n\t" or (ord(ch) >= 32 and ord(ch) != 127))
+    return (
+        kept.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("{", "&#123;")
+        .replace("}", "&#125;")
+    )
 
 CLASSIFY_SYSTEM: Final[str] = (
     "You are a dispute-intake classifier for a merchant payments platform. "

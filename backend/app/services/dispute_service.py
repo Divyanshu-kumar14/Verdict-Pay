@@ -84,6 +84,8 @@ from app.oracle.cliff_engine import (
 )
 from app.oracle.manifest import get_manifest
 from app.oracle.money import PPM, from_minor, to_minor
+from app.sentinel import bridge as sentinel_bridge
+from app.sentinel import token as sentinel_token
 
 logger = get_logger("verdictpay.disputes")
 
@@ -881,6 +883,14 @@ class DisputeService:
         if action is DisputeAction.PROVIDE_EVIDENCE:
             from app.services.evidence_service import EvidenceService
 
+            ensure_allowed(
+                action,
+                stage=DisputeStage(case.lifecycle_stage),
+                channel=DisputeChannel(case.dispute_channel),
+                links=dict(case.paypal_links or {}),
+            )
+            approval = await self.authorize_write(case, action, request)
+
             evidence = EvidenceService(
                 self.session,
                 settings=self.settings,
@@ -888,12 +898,19 @@ class DisputeService:
                 narrative=self.narrative,
                 merchant_id=self.merchant_id,
             )
-            return await evidence.submit(dispute_id, idempotency_key=request.idempotency_key or "")
+            reset = sentinel_token.current_approval.set(approval["hmac_approval_token"])
+            try:
+                return await evidence.submit(
+                    dispute_id, idempotency_key=request.idempotency_key or ""
+                )
+            finally:
+                sentinel_token.current_approval.reset(reset)
 
         stage = DisputeStage(case.lifecycle_stage)
         channel = DisputeChannel(case.dispute_channel)
         links = dict(case.paypal_links or {})
         ensure_allowed(action, stage=stage, channel=channel, links=links)
+        approval = await self.authorize_write(case, action, request)
 
         record, replay = await claim_action(
             self.session,
@@ -922,6 +939,7 @@ class DisputeService:
             return record, case
 
         started = time.perf_counter()
+        reset = sentinel_token.current_approval.set(approval["hmac_approval_token"])
         try:
             upstream = await self._dispatch(action, case, request)
         except Exception as exc:
@@ -934,6 +952,8 @@ class DisputeService:
                 extra=log_context(dispute_id=dispute_id, action=action.value, error=record.error),
             )
             raise
+        finally:
+            sentinel_token.current_approval.reset(reset)
 
         record.status = ActionStatus.EXECUTED.value
         record.latency_ms = _elapsed_ms(started)
@@ -944,6 +964,86 @@ class DisputeService:
             case.lifecycle_stage = DisputeStage.CLOSED.value
         await self.session.commit()
         return record, case
+
+    async def authorize_write(
+        self,
+        case: DisputeCase,
+        action: DisputeAction,
+        request: schemas.ActionRequest,
+        *,
+        untrusted_text: str | None = None,
+        candidate_mode: str = "HARDENED",
+    ) -> dict[str, Any]:
+        """Run the Sentinel for one PayPal write; VETO raises 422, ALLOW returns a token.
+
+        Actions chosen by the deterministic triage carry no buyer text (the
+        text cannot have influenced them); AI-originated proposals pass it.
+        """
+        hvd = await self._hvd_inputs(exclude_dispute_id=case.dispute_id)
+        vamp = await self.vamp_status()
+        amount_minor = to_minor(quantize_money(as_decimal(case.amount_usd)))
+        offer_minor = None
+        if action is DisputeAction.MAKE_OFFER:
+            ratio = request.offer_ratio
+            if ratio is None:
+                ratio = self.settings.offer_ratio
+            offer_minor = to_minor(
+                quantize_money(as_decimal(case.amount_usd) * as_decimal(ratio))
+            )
+        proposal = sentinel_bridge.build_proposal(
+            dispute_id=case.dispute_id,
+            action=action.value,
+            stage=case.lifecycle_stage,
+            channel=case.dispute_channel,
+            reason_code=case.reason_code,
+            payment_rail=case.payment_rail or "PAYPAL_WALLET",
+            external_reason_code=case.external_reason_code,
+            amount_minor=amount_minor,
+            currency=case.currency,
+            hateoas_rels=list((case.paypal_links or {}).keys()),
+            portfolio={
+                "hvd": {
+                    "settled_txns_3m": hvd.settled_txns,
+                    "net_sales_minor_3m": hvd.net_sales_minor,
+                    "disputed_amount_minor_3m": hvd.disputed_minor,
+                },
+                "vamp": None
+                if vamp is None
+                else {
+                    "tc05_settled_cnp": vamp.tc05_settled_cnp,
+                    "tc40_fraud_count": vamp.tc40_fraud_count,
+                    "tc15_dispute_count": vamp.tc15_dispute_count,
+                },
+            },
+            untrusted_text=untrusted_text,
+            offer_amount_minor=offer_minor,
+            candidate_mode=candidate_mode,
+        )
+        return await sentinel_bridge.authorize(
+            self.session,
+            settings=self.settings,
+            merchant_id=self.merchant_id,
+            proposal=proposal,
+        )
+
+    async def record_ai_veto(self, *, dispute_id: str, veto_code: str, detail: str) -> None:
+        """Audit a deterministic AI-layer veto on the SENTINEL-AUDIT chain."""
+        await sentinel_bridge.record_verdict(
+            self.session,
+            merchant_id=self.merchant_id,
+            verdict={
+                "proposal_id": str(uuid.uuid4()),
+                "dispute_id": dispute_id,
+                "proposed_action": "AI_ANALYZE",
+                "verdict": "VETO",
+                "exit_code": 2,
+                "veto_codes": [veto_code],
+                "reasons": [detail],
+                "manifest_sha256": get_manifest().sha256,
+                "candidate_mode": "LLM_UNGUARDED",
+            },
+        )
+        await self.session.commit()
 
     def _replay_action(
         self, existing: DisputeActionRecord, case: DisputeCase

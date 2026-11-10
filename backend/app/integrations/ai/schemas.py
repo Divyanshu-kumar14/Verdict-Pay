@@ -84,3 +84,5 @@ class AnalyzeResponse(ApiModel):
     provenance: ProvenanceRecord
     degraded: bool
     degraded_reason: str | None = None
+    # Deterministic guard verdicts on the untrusted claim text.
+    veto_codes: list[str] = Field(default_factory=list)

@@ -13,6 +13,8 @@ class TelemetryEventType(StrEnum):
     ASSET_DELIVERED = "ASSET_DELIVERED"
     USAGE_METERED = "USAGE_METERED"
     AI_GENERATION = "AI_GENERATION"
+    # Server-only: Sentinel ALLOW/VETO verdicts on the SENTINEL-AUDIT chain.
+    SENTINEL_VERDICT = "SENTINEL_VERDICT"
 
 
 class DisputeStage(StrEnum):

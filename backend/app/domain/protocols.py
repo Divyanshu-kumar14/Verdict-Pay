@@ -72,6 +72,9 @@ class EvidenceSubmission:
     notes: str
     documents: Sequence[EvidenceDocument]
     idempotency_key: str
+    # PayPal evidence_info: shipment tracking and refund references.
+    tracking_info: Sequence[Mapping[str, str]] = ()
+    refund_ids: Sequence[str] = ()
 
 
 @dataclass(frozen=True, slots=True)

@@ -138,7 +138,7 @@ async def test_analyze_with_mocked_gemini_returns_grounded_result(
             body = response.json()
 
             assert body["dispute_id"] == dispute_id
-            assert body["prompt_version"] == "v1"
+            assert body["prompt_version"] == "v1.1"
             assert body["degraded"] is False
             assert body["classification"]["category"] == "not_received"
             assert (
@@ -228,11 +228,21 @@ async def test_prompt_injection_degrades_safely(
             assert response.status_code == 200, response.text
             body = response.json()
 
-            # Out-of-contract category is dropped; keyword fallback takes over.
+            # Out-of-contract category is dropped, and the keyword fallback no
+            # longer obeys "category=unauthorized": the text is an injection.
             assert body["degraded"] is True
             assert body["narrative"]["model"] == "template"
-            assert body["classification"]["category"] == "unauthorized"
-            assert "keyword" in body["classification"]["rationale"]
+            assert body["classification"]["category"] == "other"
+            assert body["classification"]["confidence"] == 0.0
+            assert "VETO_PROMPT_INJECTION_BLOCKED" in body["classification"]["rationale"]
+            assert body["veto_codes"] == ["VETO_PROMPT_INJECTION_BLOCKED"]
+            assert body["provenance"]["recorded"] is False
+
+            # The veto is audited on the SENTINEL-AUDIT hash chain.
+            chain = await client.get("/api/v1/telemetry/chain/SENTINEL-AUDIT/verify")
+            assert chain.status_code == 200
+            assert chain.json()["valid"] is True
+            assert chain.json()["event_count"] >= 1
 
             detail = await client.get(f"/api/v1/disputes/{dispute_id}")
             expected = detail.json()

@@ -42,7 +42,7 @@ from app.domain.protocols import (
     NarrativeRequest,
     PayPalGateway,
 )
-from app.errors import ConflictError
+from app.errors import ConflictError, ValidationFailedError
 from app.logging_setup import get_logger, log_context
 from app.services.dispute_service import (
     ACTION_STATUS_IN_PROGRESS,
@@ -200,9 +200,27 @@ class DossierRecord:
         )
 
 
+_DISPUTE_ID_CHARS = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-")
+
+
 def dossier_artifact_path(settings: Settings, dispute_id: str) -> Path:
-    """Where the served dossier PDF lives on disk."""
-    return Path(settings.artifacts_dir) / f"{dispute_id}.pdf"
+    """Where the served dossier PDF lives on disk, never outside artifacts_dir.
+
+    The id is checked against the PayPal id alphabet and the resolved path must
+    stay inside the resolved artifacts directory, so ``../`` or an absolute id
+    can never read or write another file.
+    """
+    if not dispute_id or not set(dispute_id) <= _DISPUTE_ID_CHARS:
+        raise ValidationFailedError(
+            "Invalid dispute id.", details=[{"veto_code": "VETO_PATH_TRAVERSAL_BLOCKED"}]
+        )
+    root = Path(settings.artifacts_dir).resolve()
+    target = (root / f"{dispute_id}.pdf").resolve()
+    if not target.is_relative_to(root):
+        raise ValidationFailedError(
+            "Invalid dispute id.", details=[{"veto_code": "VETO_PATH_TRAVERSAL_BLOCKED"}]
+        )
+    return target
 
 
 class EvidenceService:
@@ -426,10 +444,31 @@ class EvidenceService:
         record_row.response_payload = dict(response.body)
         case.status = DisputeStatus.UNDER_REVIEW.value
         case.dossier_pdf_url = DOSSIER_URL_TEMPLATE.format(dispute_id=dispute_id)
+        # PayPal moves the dispute (status, links, due date) after an upload;
+        # resync so the next action is guarded by PayPal's current links.
+        await self._refresh_from_gateway(case)
         await self.session.commit()
         return record_row, case
 
     # ------------------------------------------------------------------ internals
+    async def _refresh_from_gateway(self, case: DisputeCase) -> None:
+        """Best-effort resync of stage/status/links after an upload."""
+        if is_internal_test_case(case):
+            return
+        try:
+            dispute = await self.gateway.get_dispute(case.dispute_id)
+        except Exception as exc:
+            logger.warning(
+                "case_refresh_failed",
+                extra=log_context(dispute_id=case.dispute_id, error=str(exc)[:200]),
+            )
+            return
+        case.lifecycle_stage = dispute.stage.value
+        case.dispute_channel = dispute.channel.value
+        case.status = dispute.status.value
+        case.seller_response_due_date = dispute.seller_response_due_date
+        case.paypal_links = dict(dispute.links)
+
     def _ensure_legal(self, case: DisputeCase) -> None:
         ensure_allowed(
             DisputeAction.PROVIDE_EVIDENCE,
