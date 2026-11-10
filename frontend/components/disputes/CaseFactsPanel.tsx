@@ -219,6 +219,20 @@ export function CaseFactsPanel({ facts }: { facts: CaseFacts }) {
               {facts.ce3_window_days > 0 ? "120 to 365 day lookback" : "Lookback unavailable"}
             </span>
           </div>
+          {facts.ce3_proof ? (
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+              <Badge tone={facts.ce3_proof.verified ? "positive" : "neutral"} dot>
+                {facts.ce3_proof.verified ? "CE 3.0 eligible" : "CE 3.0 not eligible"}
+              </Badge>
+              <span className="num text-sm text-muted">
+                {formatInteger(facts.ce3_proof.matched_prior_orders.length)} prior orders ·{" "}
+                {formatInteger(facts.ce3_proof.shared_anchors.length)} shared anchors
+              </span>
+              {facts.ce3_proof.veto_code ? (
+                <span className="num text-sm text-muted">{facts.ce3_proof.veto_code}</span>
+              ) : null}
+            </div>
+          ) : null}
           <div className="mt-2">
             <RecordList
               records={facts.ce3_matches}

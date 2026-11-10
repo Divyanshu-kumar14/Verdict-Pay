@@ -86,9 +86,10 @@ def degrade_to_legal(
     stage: DisputeStage,
     channel: DisputeChannel,
     links: Mapping[str, str],
+    high_volume: bool = False,
 ) -> RecommendedAction:
     """Return the preferred action if legal, else the best legal fallback."""
-    caps = capabilities(stage=stage, channel=channel, links=links)
+    caps = capabilities(stage=stage, channel=channel, links=links, high_volume=high_volume)
     candidates = (preferred, *_DEGRADATION_ORDER)
     seen: set[RecommendedAction] = set()
     for candidate in candidates:
@@ -145,7 +146,13 @@ def decide(inputs: TriageInput) -> TriageDecision:
     )
 
     preferred, rule = _preferred_action(inputs, stage=stage, channel=channel, caps=caps)
-    final = degrade_to_legal(preferred, stage=stage, channel=channel, links=inputs.links)
+    final = degrade_to_legal(
+        preferred,
+        stage=stage,
+        channel=channel,
+        links=inputs.links,
+        high_volume=inputs.ev.high_volume,
+    )
     rationale = _rationale(
         inputs,
         stage=stage,

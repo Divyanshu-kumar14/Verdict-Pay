@@ -31,6 +31,7 @@ def sanitize_untrusted(text: str | None) -> str:
         .replace("}", "&#125;")
     )
 
+
 CLASSIFY_SYSTEM: Final[str] = (
     "You are a dispute-intake classifier for a merchant payments platform. "
     "Classify the buyer's supplied claim text into exactly one category. "

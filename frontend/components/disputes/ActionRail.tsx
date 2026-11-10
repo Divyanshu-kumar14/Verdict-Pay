@@ -102,6 +102,17 @@ export function ActionRail({
           " dispute fee."
         );
       case "SEND_MESSAGE":
+        return "Post a response in the dispute thread — no fee.";
+      case "ESCALATE":
+        return (
+          "Open a PayPal claim for review — a loss costs the disputed " +
+          formatUsd(detail.amount_usd) +
+          " plus the " +
+          formatUsd(detail.breakdown.fight_fee_usd) +
+          " claim fee."
+        );
+      case "APPEAL":
+        return "Ask PayPal to review a lost claim again — no fee.";
       default:
         return "Post a response in the dispute thread — no fee.";
     }

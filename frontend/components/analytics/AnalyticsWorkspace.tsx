@@ -8,14 +8,13 @@
  * supporting label under each, animated 0 -> value on first load and eased in
  * place on every 5s refresh thereafter. The breakdown sits behind a sliding
  * pill Tabs control, the dominant category is read off a DonutGauge, and the
- * intake slope, the high-volume fee cliff and the financial spread are drawn
- * with the hand-built chart kit. The fee cliff is given an evidence-provenance
- * treatment: a SealMark certifies the reading, an annotated marker places the
- * ratio against the threshold, and an EvidenceSignal renders the assessment
- * chain from the real high_volume fields. The queue closes the page as a
- * compact ruled table that links straight into each dispute. Every number is
- * served by GET /api/v1/reporting/summary or GET /api/v1/disputes - nothing
- * here is mock.
+ * intake slope and the financial spread are drawn with the hand-built chart
+ * kit. One TwoAxisCliffs panel owns both fee cliffs (HVD dollars, Visa VAMP
+ * counts) with its evidence-provenance treatment; the legacy single-axis copy
+ * was deleted so the page cannot show the same reading twice. The queue closes
+ * the page as a compact ruled table that links straight into each dispute.
+ * Every number is served by GET /api/v1/reporting/summary or
+ * GET /api/v1/disputes - nothing here is mock.
  */
 
 import Link from "next/link";
@@ -27,11 +26,8 @@ import {
   BarChart,
   DonutGauge,
   LineSpark,
-  ThresholdMeter,
   type BarDatum,
 } from "@/components/charts";
-import { EvidenceSignal, type SignalStep } from "@/components/evidence/EvidenceSignal";
-import { SealMark } from "@/components/evidence/SealMark";
 import { Magnetic } from "@/components/motion/Magnetic";
 import { PageHeader } from "@/components/PageHeader";
 import { TwoAxisCliffs } from "@/components/analytics/TwoAxisCliffs";
@@ -385,38 +381,6 @@ export function AnalyticsWorkspace(): React.JSX.Element {
     formatUsd(report?.fees_avoided_usd ?? 0) +
     ".";
 
-  const signalSteps: SignalStep[] = highVolume
-    ? [
-        {
-          id: "sales",
-          label: "3-month sales",
-          meta: formatInteger(highVolume.sales_3mo),
-          state: "verified",
-        },
-        {
-          id: "disputes",
-          label: "3-month disputes",
-          meta: formatInteger(highVolume.disputes_3mo),
-          state: "verified",
-        },
-        {
-          id: "ratio",
-          label: "Dispute ratio",
-          meta: formatPercent(highVolume.ratio, 2),
-          state: "verified",
-        },
-        {
-          /* The label has to follow the flag, not assume it: showing "within the
-             limit" beside a red "Above threshold" badge is the same class of
-             self-contradiction as the 3.00%-below-1.50% EV copy. */
-          id: "limit",
-          label: highVolume.flag ? "Above high-volume limit" : "Within high-volume limit",
-          meta: formatPercent(highVolume.threshold, 2) + " threshold",
-          state: highVolume.flag ? "failed" : "verified",
-        },
-      ]
-    : [];
-
   const tableRows = useMemo(
     () =>
       rows.map((row) => ({
@@ -560,61 +524,9 @@ export function AnalyticsWorkspace(): React.JSX.Element {
         />
       ) : null}
 
-      {highVolume !== null ? (
-        <Reveal>
-          <TwoAxisCliffs hvd={highVolume} vamp={report?.vamp ?? null} />
-        </Reveal>
-      ) : null}
       <Reveal>
         {highVolume !== null ? (
-          <Panel>
-            <PanelHeader
-              title="High-volume fee cliff"
-              description="Above PayPal's rolling threshold the fee is not refunded on a win, so a small claim can lose money even when it is fought."
-              actions={
-                <Badge tone={highVolume.flag ? "negative" : "positive"} dot>
-                  {highVolume.flag ? "Above threshold" : "Below threshold"}
-                </Badge>
-              }
-            />
-            <PanelBody className="grid gap-6 lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)] lg:items-center">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2.5">
-                  <p className="value text-xl text-ink">{formatPercent(highVolume.ratio, 2)}</p>
-                  <SealMark size={16} tone="accent" />
-                </div>
-                <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm">
-                  <span className="num text-ink">{formatPercent(highVolume.ratio, 2)}</span>
-                  <span className="text-muted">dispute ratio</span>
-                  <span className="text-muted">vs</span>
-                  <span className="num text-warning">{formatPercent(highVolume.threshold, 2)}</span>
-                  <span className="text-muted">threshold</span>
-                  <span
-                    className={cn(
-                      "num rounded-full border px-2 py-0.5 text-2xs",
-                      highVolume.flag
-                        ? "border-negative/40 bg-pill-negative text-negative"
-                        : "border-positive/40 bg-pill-positive text-positive",
-                    )}
-                  >
-                    {(Math.abs(highVolume.threshold - highVolume.ratio) * 100).toFixed(2)} points{" "}
-                    {highVolume.flag ? "over" : "under"}
-                  </span>
-                </div>
-                <EvidenceSignal steps={signalSteps} orientation="vertical" className="mt-4" />
-              </div>
-              <ThresholdMeter
-                ratio={highVolume.ratio}
-                limit={highVolume.threshold}
-                summary={
-                  "Rolling dispute ratio " +
-                  formatPercent(highVolume.ratio, 2) +
-                  " against the high-volume limit " +
-                  formatPercent(highVolume.threshold, 2)
-                }
-              />
-            </PanelBody>
-          </Panel>
+          <TwoAxisCliffs hvd={highVolume} vamp={report?.vamp ?? null} />
         ) : (
           <Panel>
             <PanelHeader title="High-volume fee cliff" />

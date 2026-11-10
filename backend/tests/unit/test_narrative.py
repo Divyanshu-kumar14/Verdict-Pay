@@ -262,3 +262,38 @@ def test_formatted_counts_and_percents_of_facts_validate() -> None:
     ok, reason = validate_narrative("The account consumed 43,000 metered units.", facts)
     assert not ok
     assert reason == "unverified_number:43000"
+
+
+def test_sub_100_fraction_is_never_rounded_up_to_100() -> None:
+    """A 99.99% fraction must not license a bare "100" claim."""
+    from app.api import schemas
+    from app.domain.evidence.narrative import validate_narrative
+
+    facts = schemas.CaseFacts(
+        payer_id="PAYER1",
+        chain_valid=True,
+        chain_head="",
+        event_count=3,
+        completeness=0.9999,
+    )
+    ok, reason = validate_narrative("Telemetry completeness is 100 percent.", facts)
+    assert not ok
+    assert reason == "unverified_number:100"
+
+    ok, reason = validate_narrative("Telemetry completeness is 99.99 percent.", facts)
+    assert ok, reason
+
+
+def test_exactly_full_fraction_may_be_cited_as_100() -> None:
+    from app.api import schemas
+    from app.domain.evidence.narrative import validate_narrative
+
+    facts = schemas.CaseFacts(
+        payer_id="PAYER1",
+        chain_valid=True,
+        chain_head="",
+        event_count=3,
+        completeness=1.0,
+    )
+    ok, reason = validate_narrative("Telemetry completeness is 100 percent.", facts)
+    assert ok, reason

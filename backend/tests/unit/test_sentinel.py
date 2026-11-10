@@ -105,6 +105,46 @@ def test_naive_candidates_breach_both_cliffs() -> None:
     assert vamp["portfolio_ev_analysis"]["vamp_after_ppm"] == 15_000
 
 
+def test_hvd_fight_ev_prices_the_modelled_win_probability() -> None:
+    """A win still costs the $30 HVD fee, so EV is not the p=0 worst case."""
+    proposal = candidate_naive.naive_hvd_proposal()
+    proposal["p_win_ppm"] = 800_000
+    verdict = gate.evaluate(proposal)
+    analysis = verdict["portfolio_ev_analysis"]
+    # -(30.00 fee + 20% x 2,500.00 expected loss) - 3 x 15.00 cliff penalty
+    assert analysis["fight_ev_minor"] == -57_500
+    assert analysis["cliff_penalty_minor"] == 4_500
+
+
+def test_hvd_fight_ev_honours_the_model_ev_when_supplied() -> None:
+    proposal = candidate_naive.naive_hvd_proposal()
+    proposal["modeled_fight_ev_minor"] = -12_345
+    verdict = gate.evaluate(proposal)
+    assert verdict["portfolio_ev_analysis"]["fight_ev_minor"] == -12_345
+
+
+def test_vamp_ignores_accept_claim_in_inquiry_but_counts_it_in_a_claim() -> None:
+    """ACCEPT_CLAIM in INQUIRY never becomes a chargeback, so it adds no TC15."""
+    common = {
+        "payment_rail": "UNBRANDED_CARD",
+        "dispute_channel": "EXTERNAL",
+        "reason": "UNAUTHORISED",
+        "external_reason_code": "10.4",
+        "proposed_action": "ACCEPT_CLAIM",
+        "hateoas_rels": ["accept-claim"],
+        "portfolio": {"vamp": dict(candidate_naive.VAMP_PORTFOLIO)},
+    }
+    inquiry = gate.evaluate(_proposal(**{**common, "dispute_life_cycle_stage": "INQUIRY"}))
+    assert "VETO_VAMP_CLIFF_BREACH" not in inquiry["veto_codes"]
+    assert (
+        inquiry["portfolio_ev_analysis"]["vamp_after_ppm"]
+        == (inquiry["portfolio_ev_analysis"]["vamp_before_ppm"])
+    )
+    claim = gate.evaluate(_proposal(**{**common, "dispute_life_cycle_stage": "CHARGEBACK"}))
+    assert "VETO_VAMP_CLIFF_BREACH" in claim["veto_codes"]
+    assert claim["portfolio_ev_analysis"]["vamp_after_ppm"] == 15_000
+
+
 def test_hardened_alternative_to_naive_is_allowed() -> None:
     safe = candidate_naive.naive_hvd_proposal()
     safe["proposed_action"] = "MAKE_OFFER"
@@ -252,6 +292,7 @@ def test_approval_token_round_trip_and_tamper() -> None:
         action="MAKE_OFFER",
         dispute_id="PP-D-1",
         manifest_sha256="0" * 64,
+        scope=token.SCOPE_LIVE,
     )
     token.verify(issued, secret="s3cret", action="MAKE_OFFER", dispute_id="PP-D-1")
     with pytest.raises(token.ApprovalError):
@@ -273,6 +314,30 @@ def test_approval_token_round_trip_and_tamper() -> None:
         )
     with pytest.raises(token.ApprovalError):
         token.verify(None, secret="s3cret", action="MAKE_OFFER", dispute_id="PP-D-1")
+
+
+def test_preview_scope_token_never_authorises_a_write() -> None:
+    """A Veto Lab preview token verifies as lab evidence but is not redeemable."""
+    preview = token.issue(
+        secret="s3cret",
+        proposal_id="p",
+        action="MAKE_OFFER",
+        dispute_id="PP-D-1",
+        manifest_sha256="0" * 64,
+        scope=token.SCOPE_PREVIEW,
+    )
+    with pytest.raises(token.ApprovalError) as raised:
+        token.verify(preview, secret="s3cret", action="MAKE_OFFER", dispute_id="PP-D-1")
+    assert "live PayPal write" in str(raised.value)
+    # Editing the scope in flight breaks the signature: the field is inside the MAC.
+    with pytest.raises(token.ApprovalError) as tampered:
+        token.verify(
+            {**preview, "scope": token.SCOPE_LIVE},
+            secret="s3cret",
+            action="MAKE_OFFER",
+            dispute_id="PP-D-1",
+        )
+    assert "signature is invalid" in str(tampered.value)
 
 
 # ------------------------------------------------------------- table parity

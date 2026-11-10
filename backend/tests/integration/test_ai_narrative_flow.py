@@ -91,7 +91,9 @@ async def test_ai_generated_narrative_is_labelled_in_the_dossier(tmp_path) -> No
         async with AsyncClient(transport=transport, base_url="http://testserver") as client:
             client.headers["X-API-Key"] = "ai_flow_key"
             dispute_id = await _open_case(client)
-            action = await client.post(f"/api/v1/disputes/{dispute_id}/actions/PROVIDE_EVIDENCE", json={"note": "ai flow"})
+            action = await client.post(
+                f"/api/v1/disputes/{dispute_id}/actions/PROVIDE_EVIDENCE", json={"note": "ai flow"}
+            )
             assert action.status_code in {200, 202}
             text = await _dossier_text(client, dispute_id)
 
@@ -110,7 +112,9 @@ async def test_model_failure_falls_back_and_is_labelled_as_template(tmp_path) ->
         async with AsyncClient(transport=transport, base_url="http://testserver") as client:
             client.headers["X-API-Key"] = "ai_flow_key"
             dispute_id = await _open_case(client)
-            await client.post(f"/api/v1/disputes/{dispute_id}/actions/PROVIDE_EVIDENCE", json={"note": "ai flow"})
+            await client.post(
+                f"/api/v1/disputes/{dispute_id}/actions/PROVIDE_EVIDENCE", json={"note": "ai flow"}
+            )
             text = await _dossier_text(client, dispute_id)
 
     assert "Narrative source: template" in text
@@ -124,7 +128,9 @@ async def test_template_mode_is_labelled_template(tmp_path) -> None:
         async with AsyncClient(transport=transport, base_url="http://testserver") as client:
             client.headers["X-API-Key"] = "ai_flow_key"
             dispute_id = await _open_case(client)
-            await client.post(f"/api/v1/disputes/{dispute_id}/actions/PROVIDE_EVIDENCE", json={"note": "ai flow"})
+            await client.post(
+                f"/api/v1/disputes/{dispute_id}/actions/PROVIDE_EVIDENCE", json={"note": "ai flow"}
+            )
             text = await _dossier_text(client, dispute_id)
 
     assert "Narrative source: template" in text

@@ -50,6 +50,7 @@ def _legacy_mode_for(base: str) -> GatewayMode:
         return GatewayMode.PAYPAL_SANDBOX
     return GatewayMode.PAYPAL_SANDBOX if "sandbox" in base.lower() else GatewayMode.PAYPAL_LIVE
 
+
 _BACKEND_DIR = Path(__file__).resolve().parents[1]
 _REPO_DIR = _BACKEND_DIR.parent
 _ENV_FILES = (str(_BACKEND_DIR / ".env"), str(_REPO_DIR / ".env"))
@@ -195,11 +196,7 @@ class Settings(BaseSettings):
             object.__setattr__(self, "paypal_mode", _legacy_mode_for(base).value)
         if not base:
             resolved = self.gateway_mode
-            base = (
-                PAYPAL_LIVE_BASE
-                if resolved is GatewayMode.PAYPAL_LIVE
-                else PAYPAL_SANDBOX_BASE
-            )
+            base = PAYPAL_LIVE_BASE if resolved is GatewayMode.PAYPAL_LIVE else PAYPAL_SANDBOX_BASE
         object.__setattr__(self, "paypal_api_base", base)
         return self
 

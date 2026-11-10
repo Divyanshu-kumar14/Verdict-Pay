@@ -123,13 +123,13 @@ the Disputes API is labelled `paypal_sandbox` instead, and its actions call PayP
 | EV · Fight | `-$41.40` |
 | EV · Settle | `-$99.00` |
 | EV · Offer | `-$29.70` |
-| Ratio | `2.5% → 3.0%`, `ratio_relation=at_or_above`, `threshold_crossed_now=false` |
+| Ratio | `1.37% → 1.50%`, `ratio_relation=at_or_above`, `threshold_crossed_now=false` |
 | Penalty | `$0.00` — the merchant was already above 1.5% before this dispute |
 | Policy | `DEFLECT_INQUIRY` |
 | Decision comparison | policy choice `Deflect inquiry`; cheapest modelled loss `Make offer` |
 
-The ratio row is the defect that was fixed. The merchant sits at 3.00% against a 1.50% threshold, so
-the copy must read **at or above**, never "3.00% below 1.50%". The renderer reads
+The ratio row is the defect that was fixed. The merchant sits at 1.37% against a 1.50% threshold, so
+the copy must read **at or above**, never "1.37% below 1.50%". The renderer reads
 `breakdown.ratio_relation`; it never infers position from `crosses_cliff`, which is `false` both
 below the line and already above it.
 

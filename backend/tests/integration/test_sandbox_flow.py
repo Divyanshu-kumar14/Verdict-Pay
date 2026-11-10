@@ -262,3 +262,28 @@ async def test_hvd_tier_fee_replaces_standard_fee(client) -> None:
     assert summary["high_volume"]["flag"] is True
     assert summary["high_volume"]["ratio_ppm"] == 15_000
     assert summary["high_volume"]["active_fee_tier_usd_cents"] == 3000
+
+
+async def test_hvd_claim_stage_accept_claim_fee_is_30_usd(client) -> None:
+    """Regression: the case room must quote $30, not $15, for an HVD claim.
+
+    ``build_detail`` used to call ``to_allowed_actions`` without the persisted
+    ``breakdown.high_volume``, so the ActionRail advertised the standard fee.
+    """
+    await _seed_completed_sales(client, 200, disputed=3)
+    response = await client.post(
+        "/api/v1/sandbox/dispute",
+        json={
+            "payer_id": "YRZ829104KLA",
+            "order_id": "5O190127TN364715T",
+            "stage": "CHARGEBACK",
+            "amount_usd": "99.00",
+        },
+    )
+    assert response.status_code == 200, response.text
+    case = response.json()["dispute"]
+    detail = (await client.get(f"/api/v1/disputes/{case['dispute_id']}")).json()
+    assert detail["breakdown"]["high_volume"] is True
+    actions = {action["action"]: action for action in detail["allowed_actions"]}
+    assert actions["ACCEPT_CLAIM"]["fee_usd"] == "30.00"
+    assert actions["ACCEPT_CLAIM"]["allowed"] is True

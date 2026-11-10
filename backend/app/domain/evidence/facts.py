@@ -234,6 +234,38 @@ def _event_anchor(events: Sequence[TelemetryEventView], key: str) -> str | None:
     return found
 
 
+def _ce3_order_wire(order: ce3_matcher.Ce3Order) -> dict[str, Any]:
+    """One CE 3.0 order in the wire shape the Sentinel's gate recomputes."""
+    return {
+        "order_id": order.order_id,
+        "settled_at": _as_utc(order.settled_at).isoformat(),
+        "payment_credential_hash": order.payment_credential_hash,
+        "ip_hash": order.ip_hash,
+        "device_id_hash": order.device_id_hash,
+        "account_login_id_hash": order.account_login_id_hash,
+        "shipping_address_hash": order.shipping_address_hash,
+        "payment_rail": order.payment_rail,
+        "has_prior_dispute": order.has_prior_dispute,
+        "has_tc40": order.has_tc40,
+    }
+
+
+def _ce3_history_order(transaction: PayPalTransactionRecord) -> ce3_matcher.Ce3Order:
+    """One settled historical sale as a CE 3.0 comparison order."""
+    return ce3_matcher.Ce3Order(
+        order_id=transaction.transaction_id,
+        payment_credential_hash=transaction.payment_credential_hash,
+        settled_at=_as_utc(transaction.created_at),
+        ip_hash=anchor_hash(transaction.client_ip),
+        device_id_hash=anchor_hash(transaction.device_fingerprint),
+        account_login_id_hash=transaction.account_login_id_hash or None,
+        shipping_address_hash=transaction.shipping_address_hash or None,
+        payment_rail=transaction.payment_rail,
+        has_prior_dispute=transaction.has_prior_dispute,
+        has_tc40=transaction.has_tc40,
+    )
+
+
 def _ce3_matches(
     transactions: Sequence[PayPalTransactionRecord],
     *,
@@ -242,12 +274,16 @@ def _ce3_matches(
     primary_ip: str | None,
     primary_device: str | None,
     events: Sequence[TelemetryEventView],
-) -> tuple[list[dict[str, Any]], ce3_matcher.Ce3Result]:
+) -> tuple[list[dict[str, Any]], ce3_matcher.Ce3Result, dict[str, Any] | None]:
     """Strict Visa CE 3.0 check through the deterministic oracle.
 
     Only UNBRANDED_CARD + Visa 10.4 disputes are eligible. The disputed order's
     anchors come from its own telemetry; history comes from settled
     (COMPLETED/CAPTURED) transactions with locally correlated anchors.
+
+    The third element is the merchant's claim in the exact wire shape the
+    Sentinel recomputes on a real evidence upload, so check #7 is live on the
+    write path instead of only inside the Veto Lab.
     """
     disputed_at = _as_utc(case.disputed_at) if case.disputed_at else now
     disputed = ce3_matcher.Ce3Order(
@@ -261,18 +297,7 @@ def _ce3_matches(
         payment_rail=case.payment_rail,
     )
     history = [
-        ce3_matcher.Ce3Order(
-            order_id=transaction.transaction_id,
-            payment_credential_hash=transaction.payment_credential_hash,
-            settled_at=_as_utc(transaction.created_at),
-            ip_hash=anchor_hash(transaction.client_ip),
-            device_id_hash=anchor_hash(transaction.device_fingerprint),
-            account_login_id_hash=transaction.account_login_id_hash or None,
-            shipping_address_hash=transaction.shipping_address_hash or None,
-            payment_rail=transaction.payment_rail,
-            has_prior_dispute=transaction.has_prior_dispute,
-            has_tc40=transaction.has_tc40,
-        )
+        _ce3_history_order(transaction)
         for transaction in transactions
         if str(transaction.status) in SETTLED_STATUSES
     ]
@@ -283,7 +308,7 @@ def _ce3_matches(
         reason_code=case.reason_code,
     )
     if not result.verified:
-        return [], result
+        return [], result, None
     by_id = {transaction.transaction_id: transaction for transaction in transactions}
     matches: list[dict[str, Any]] = []
     for order_id, seconds in zip(result.matched_prior_orders, result.window_seconds, strict=True):
@@ -298,7 +323,16 @@ def _ce3_matches(
                 "matched_on": "+".join(result.shared_anchors),
             }
         )
-    return matches[:_MAX_CE3_MATCHES], result
+    by_order = {order.order_id: order for order in history}
+    claim = {
+        "disputed_order": _ce3_order_wire(disputed),
+        "history": [
+            _ce3_order_wire(by_order[order_id])
+            for order_id in result.matched_prior_orders
+            if order_id in by_order
+        ],
+    }
+    return matches[:_MAX_CE3_MATCHES], result, claim
 
 
 def _chain_head(events: Sequence[TelemetryEventView]) -> str:
@@ -340,7 +374,7 @@ def assemble_facts(case: CaseInput) -> schemas.CaseFacts:
     deliveries = _deliveries(events)
     usage_units = sum(event.units_consumed for event in events)
     usage_events = sum(1 for event in events if _is_event(event, TelemetryEventType.USAGE_METERED))
-    ce3_matches, ce3_result = _ce3_matches(
+    ce3_matches, ce3_result, ce3_claim = _ce3_matches(
         case.transactions,
         case=case,
         now=now,
@@ -388,7 +422,11 @@ def assemble_facts(case: CaseInput) -> schemas.CaseFacts:
         ),
         ce3_matches=ce3_matches,
         ce3_window_days=_CE3_MAX_DAYS if ce3_matches else 0,
-        ce3_proof=ce3_result.as_dict(),
+        ce3_proof=(
+            {**ce3_result.as_dict(), "claim_manifest": ce3_claim}
+            if ce3_claim is not None
+            else ce3_result.as_dict()
+        ),
         payment_rail=case.payment_rail,
         external_reason_code=case.external_reason_code,
         signals={key: bool(getattr(signals, key)) for key in SIGNAL_KEYS},

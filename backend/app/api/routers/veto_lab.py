@@ -82,14 +82,19 @@ async def _judge(
     exit_code, verdict = await bridge.evaluate(proposal)
     audit = await bridge.record_verdict(session, merchant_id=merchant_id, verdict=verdict)
     if exit_code == 0:
+        # A preview token: verifiable as lab evidence, never redeemable by the
+        # gateway, so this public endpoint cannot act as a signing oracle.
         verdict["hmac_approval_token"] = token.issue(
             secret=settings.verdictpay_signing_secret,
             proposal_id=str(proposal.get("proposal_id")),
             action=str(proposal.get("proposed_action")),
             dispute_id=str(proposal.get("dispute_id")),
             manifest_sha256=str(verdict.get("manifest_sha256")),
+            scope=token.SCOPE_PREVIEW,
         )
-    verdict["banner"] = "EXIT CODE 0 — EXECUTED" if exit_code == 0 else "EXIT CODE 2 — VETO"
+    verdict["banner"] = (
+        "EXIT CODE 0 — ALLOW (DRY RUN · TOKEN ISSUED)" if exit_code == 0 else "EXIT CODE 2 — VETO"
+    )
     verdict["audit_id"] = audit.id
     verdict["chain_hash"] = audit.chain_hash
     return verdict
@@ -137,7 +142,10 @@ async def _llm_result(settings: Any) -> dict[str, Any]:
     if cached and time.monotonic() - cached[0] < LLM_CACHE_SECONDS:
         return {**cached[1], "cached": True}
     result = await asyncio.to_thread(_run_worker, settings)
-    _llm_cache["attack"] = (time.monotonic(), result)
+    # A degraded run is a failure, not a result: caching it for ten minutes
+    # would keep serving "no live model" long after the model came back.
+    if not result.get("degraded"):
+        _llm_cache["attack"] = (time.monotonic(), result)
     return {**result, "cached": False}
 
 

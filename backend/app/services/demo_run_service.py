@@ -417,9 +417,7 @@ class DemoRunService:
         ).all()
         return [row for row in rows if _event_run_id(row) == run_id]
 
-    async def _ai_analyzed(
-        self, dispute_id: str | None, tagged: list[TelemetryLedger]
-    ) -> bool:
+    async def _ai_analyzed(self, dispute_id: str | None, tagged: list[TelemetryLedger]) -> bool:
         """True only when a real AI provenance event exists for this run's case."""
         if dispute_id is None:
             return False
@@ -457,8 +455,7 @@ class DemoRunService:
             ).all()
         )
         webhook_ids = [
-            _WEBHOOK_ID_TEMPLATE.format(dispute_id=dispute_id)
-            for dispute_id in demo_dispute_ids
+            _WEBHOOK_ID_TEMPLATE.format(dispute_id=dispute_id) for dispute_id in demo_dispute_ids
         ]
 
         # Children first: dispute_actions has a FK to dispute_cases.

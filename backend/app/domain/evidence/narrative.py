@@ -239,10 +239,15 @@ def _facts_tokens(facts: schemas.CaseFacts) -> tuple[set[str], set[str], set[str
                 numbers.add(str(int(value)))
             if isinstance(value, (float, Decimal)) and 0 <= value <= 1:
                 # A fraction may be cited as a percent: 0.8333 -> 83, 83.3, 83.33.
+                # Rounding must not promote a sub-100% fraction to a bare "100":
+                # 0.9999 is not "100% complete", and a dossier may not say it is.
                 percent = Decimal(str(value)) * 100
                 for places in ("1", "0.1", "0.01"):
                     for rounding in ("ROUND_DOWN", "ROUND_HALF_UP"):
-                        numbers.add(str(percent.quantize(Decimal(places), rounding=rounding)))
+                        form = str(percent.quantize(Decimal(places), rounding=rounding))
+                        if percent != 100 and Decimal(form) == 100:
+                            continue
+                        numbers.add(form)
         elif isinstance(value, str):
             dates.update(match.group(0) for match in _DATE_RE.finditer(value))
             numbers.update(_NUMBER_RE.findall(value))

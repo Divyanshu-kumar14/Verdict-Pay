@@ -58,9 +58,7 @@ class OpenAINarrativeProvider:
 
         facts = self._facts_from(request)
         if facts is None:
-            logger.warning(
-                "openai_facts_unavailable", extra=log_context(payer_id=request.payer_id)
-            )
+            logger.warning("openai_facts_unavailable", extra=log_context(payer_id=request.payer_id))
             return fallback
 
         candidate = await self._chat(self._request_body(facts, request))
@@ -120,9 +118,7 @@ class OpenAINarrativeProvider:
         except (ValidationError, TypeError, ValueError):
             return None
 
-    def _request_body(
-        self, facts: schemas.CaseFacts, request: NarrativeRequest
-    ) -> dict[str, Any]:
+    def _request_body(self, facts: schemas.CaseFacts, request: NarrativeRequest) -> dict[str, Any]:
         """Build the deterministic chat-completions request body."""
         user_prompt = (
             f"{facts_as_prompt(facts)}\n\n"

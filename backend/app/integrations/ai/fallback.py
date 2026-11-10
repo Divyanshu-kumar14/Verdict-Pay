@@ -8,7 +8,9 @@ carries degraded=True and remains fully grounded.
 
 from __future__ import annotations
 
+import re
 from decimal import Decimal
+from typing import Final
 
 from app.api.schemas import CaseFacts
 from app.domain.evidence.narrative import build_template_narrative
@@ -17,25 +19,71 @@ from app.integrations.ai.schemas import ClaimCategory, EvidenceDraft
 
 # Keyword rules for the offline classifier.  Order matters (first hit wins).
 _KEYWORDS: tuple[tuple[ClaimCategory, tuple[str, ...]], ...] = (
-    (ClaimCategory.NOT_RECEIVED, (
-        "not received", "never received", "never got", "did not receive",
-        "didn't receive", "didn't get", "not delivered", "never delivered",
-        "haven't received", "never arrived", "did not arrive", "didn't arrive",
-    )),
-    (ClaimCategory.NOT_AS_DESCRIBED, (
-        "not as described", "not what", "different from", "doesn't match",
-        "does not match", "doesn't work", "does not work", "broken",
-        "misleading", "not working", "wrong item", "defective",
-    )),
-    (ClaimCategory.UNAUTHORIZED, (
-        "unauthorised", "unauthorized", "did not authorize", "didn't authorize",
-        "did not authorise", "hacked", "stolen", "fraudulent", "not me",
-        "didn't make", "did not make", "someone else", "card was",
-    )),
-    (ClaimCategory.DUPLICATE, (
-        "duplicate", "charged twice", "double charge", "double charged",
-        "charged again", "two charges", "extra charge", "charged me twice",
-    )),
+    (
+        ClaimCategory.NOT_RECEIVED,
+        (
+            "not received",
+            "never received",
+            "never got",
+            "did not receive",
+            "didn't receive",
+            "didn't get",
+            "not delivered",
+            "never delivered",
+            "haven't received",
+            "never arrived",
+            "did not arrive",
+            "didn't arrive",
+        ),
+    ),
+    (
+        ClaimCategory.NOT_AS_DESCRIBED,
+        (
+            "not as described",
+            "not what",
+            "different from",
+            "doesn't match",
+            "does not match",
+            "doesn't work",
+            "does not work",
+            "broken",
+            "misleading",
+            "not working",
+            "wrong item",
+            "defective",
+        ),
+    ),
+    (
+        ClaimCategory.UNAUTHORIZED,
+        (
+            "unauthorised",
+            "unauthorized",
+            "did not authorize",
+            "didn't authorize",
+            "did not authorise",
+            "hacked",
+            "stolen",
+            "fraudulent",
+            "not me",
+            "didn't make",
+            "did not make",
+            "someone else",
+            "card was",
+        ),
+    ),
+    (
+        ClaimCategory.DUPLICATE,
+        (
+            "duplicate",
+            "charged twice",
+            "double charge",
+            "double charged",
+            "charged again",
+            "two charges",
+            "extra charge",
+            "charged me twice",
+        ),
+    ),
 )
 
 
@@ -63,9 +111,13 @@ _INJECTION_MARKERS: tuple[str, ...] = (
     "accept the claim",
     "</claim>",
     "<claim>",
-    "act as",
     "developer mode",
 )
+
+# "act as" only addresses the model as a phrase ("act as a payment approver");
+# matched as a substring it also fires on ordinary prose like "did not act as
+# described", which would veto a legitimate buyer complaint.
+_ACT_AS_RE: Final[re.Pattern[str]] = re.compile(r"\bact as\b")
 
 
 def detect_injection(claim_text: str | None) -> str | None:
@@ -74,7 +126,8 @@ def detect_injection(claim_text: str | None) -> str | None:
     for marker in _INJECTION_MARKERS:
         if marker in text:
             return marker
-    return None
+    match = _ACT_AS_RE.search(text)
+    return match.group(0) if match is not None else None
 
 
 def classify_claim(claim_text: str | None) -> tuple[ClaimCategory, float, str]:

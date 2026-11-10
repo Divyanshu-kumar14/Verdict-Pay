@@ -225,7 +225,7 @@ async def test_provide_evidence_posts_multipart_related(
         idempotency_key="idem-evidence-1",
     )
 
-    with approved(live, 'PROVIDE_EVIDENCE'):
+    with approved(live, "PROVIDE_EVIDENCE"):
         response = await live.provide_evidence(submission)
 
     assert response.status_code == 200
@@ -822,6 +822,7 @@ def approved(live: LivePayPalGateway, action: str, dispute_id: str = "PP-D-1"):
         action=action,
         dispute_id=dispute_id,
         manifest_sha256="0" * 64,
+        scope=sentinel_token.SCOPE_LIVE,
     )
     reset = sentinel_token.current_approval.set(token)
     try:

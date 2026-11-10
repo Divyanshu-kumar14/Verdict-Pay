@@ -519,6 +519,19 @@ export const RationaleItemSchema = z.object({
 });
 export type RationaleItem = z.infer<typeof RationaleItemSchema>;
 
+/** Strict Visa CE 3.0 proof; only computed for UNBRANDED_CARD + reason 10.4. */
+export const Ce3ProofSchema = z.object({
+  eligible: z.boolean(),
+  verified: z.boolean(),
+  veto_code: z.string().nullable(),
+  matched_prior_orders: z.array(z.string()),
+  shared_anchors: z.array(z.string()),
+  window_seconds: z.array(z.number().int()),
+  sha256_manifest: z.string().nullable(),
+  claim_manifest: z.record(z.unknown()).nullable().optional(),
+});
+export type Ce3Proof = z.infer<typeof Ce3ProofSchema>;
+
 export const CaseFactsSchema = z.object({
   payer_id: z.string(),
   chain_valid: z.boolean(),
@@ -541,6 +554,9 @@ export const CaseFactsSchema = z.object({
   response_due_date: isoDateTimeSchema.nullable(),
   ce3_matches: z.array(z.record(z.unknown())),
   ce3_window_days: z.number().int(),
+  ce3_proof: Ce3ProofSchema.nullable().default(null),
+  payment_rail: z.string().default("PAYPAL_WALLET"),
+  external_reason_code: z.string().nullable().default(null),
   signals: z.record(z.boolean()),
 });
 export type CaseFacts = z.infer<typeof CaseFactsSchema>;

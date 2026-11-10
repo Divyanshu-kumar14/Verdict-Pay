@@ -82,7 +82,7 @@ a pure EV function whose constants are unit-tested to the cent, and the prose is
 inside the fence the facts built. The fee-cliff model is the part merchants feel: with 200 sales in
 the trailing 90 days, the **third** dispute moves the rolling ratio from 1.0% to 1.5% — exactly onto
 PayPal's high-volume threshold — which re-prices the portfolio at $30 per escalated claim plus a $90
-three-dispute penalty exposure. By the time the seeded queue is live the ratio sits at 2.5–3.0%, so
+three-dispute penalty exposure. By the time the seeded queue is live the ratio sits at 1.37%, so
 every subsequent fight carries the never-refunded fee. VerdictPay prices that crossing and then picks
 the action that avoids it — usually a zero-fee evidence-backed inquiry deflection that ends the case
 before a claim fee can attach.
@@ -139,7 +139,7 @@ against api-m.sandbox.paypal.com.
 **How the codebase was built — disclosed, not implied:** VerdictPay was implemented by an AI coding
 agent (DeepSeek-based DSH) working under human direction, with the human owning scope, the frozen
 spec and every merge decision. The agent did not self-certify: each phase closed on executable
-gates, `make verify` runs Ruff, pytest (296), ESLint, `tsc --noEmit`, `next build`, Vitest (188 frontend + 24 SDK) and the
+gates, `make verify` runs Ruff, pytest (468), ESLint, `tsc --noEmit`, `next build`, Vitest (188 frontend + 24 SDK) and the
 26-assertion E2E script, and an adversarial QA pass ([docs/qa/backend-findings.md](qa/backend-findings.md))
 filed 36 probes, found 2 HIGH bugs, and those two now have regression tests
 (`test_chunked_oversized_body_cannot_bypass_the_cap`,
@@ -150,7 +150,7 @@ filed 36 probes, found 2 HIGH bugs, and those two now have regression tests
 | Time | On screen | Spoken |
 |---|---|---|
 | 0:00–0:12 | Title card: "VerdictPay — defend the dispute before the fee" | "PayPal charges $15 to fight a dispute, $30 for a high-volume merchant. VerdictPay decides whether fighting is even worth it." |
-| 0:12–0:28 | `/disputes` AG Grid queue, seeded: 5 cases with `PP-D-TEST-…` ids, EV cells, stage/channel badges | "This is a seeded merchant: five open cases, $497 of exposure, a 2.5% rolling dispute ratio against PayPal's 1.5% high-volume threshold." |
+| 0:12–0:28 | `/disputes` AG Grid queue, seeded: 5 cases with `PP-D-TEST-…` ids, EV cells, stage/channel badges | "This is a seeded merchant: five open cases, $497.00 of exposure, a 1.37% rolling dispute ratio against PayPal's 1.5% high-volume threshold." |
 | 0:28–0:40 | Back to `/` judge sandbox, both panes visible | "One page. Buyer storefront left, merchant command center right. Nothing on the right is mocked." |
 | 0:40–0:55 | Click **1 · Checkout $99 Pro plan**; step log prints order, subscription, payer | "Orders v2 creates the order, Subscriptions v1 binds the plan, and the SDK ties the payer id to the exact Terms-of-Service hash the buyer accepted." |
 | 0:55–1:10 | Click **Record usage**; ledger shows 4 events, chain badge flips to verified | "Four signed events: ToS, login, delivery with a SHA-256, and 42,000 metered tokens. Each one links to the previous hash. A judge can recompute that chain." |
@@ -159,7 +159,7 @@ filed 36 probes, found 2 HIGH bugs, and those two now have regression tests
 | 1:38–1:55 | EV cards: Fight -$41.40, Settle -$99.00, Offer -$29.70 (Best EV) | "Fight is minus $41.40. Settle is the full claim. Offer is minus $29.70 and wins on raw EV — but the policy picks the zero-fee move first." |
 | 1:55–2:08 | Click **Deflect inquiry**; result chip `SKIPPED · Send message` for an `internal_test_event` case (`EXECUTED` for a `paypal_sandbox` case) | "A zero-fee, evidence-backed inquiry deflection through PayPal's send-message endpoint. This case exists only in VerdictPay, so nothing is sent to PayPal and the action is recorded as skipped. The HATEOAS guard means we cannot call an action PayPal would reject." |
 | 2:08–2:22 | Case room, download **dossier.pdf**; PDF pages scroll: chain table, ToS snapshot, usage ledger, CE 3.0 exhibit | "The dossier is ReportLab, built from the locked facts. Three pages, payer id and chain head printed, no secrets. That is the prove-it artifact." |
-| 2:22–2:36 | `/analytics`: queue 6, open exposure $596.00, fees avoided $60.00, ratio 3.00% vs 1.50% | "Six cases, $596 exposure, $60 of fees avoided, and the ratio that decides whether the next dispute costs $15 or $30." |
+| 2:22–2:36 | `/analytics`: queue 6, open exposure $497.00, fees avoided $15.00, ratio 1.37% vs 1.50% | "Six cases, $497 exposure, $15 of fees avoided, and the ratio that decides whether the next dispute costs $15 or $30." |
 | 2:36–2:52 | Terminal: `git clone … && cd Verdict-Pay && make install && make stack`, then `make web` — green assertions | "Clone it, make install, make stack, make web. Twenty-six assertions, sandbox credentials required. Everything you just saw runs with real sandbox orders." |
 
 **Production checklist**
@@ -213,7 +213,7 @@ curl -s localhost:8000/api/v1/health
 | Seller action | `SKIPPED` for `internal_test_event` (nothing sent to PayPal); `EXECUTED` for `paypal_sandbox` | same |
 | Telemetry | 4 new events, `logins=15 · tokens=42,000 · assets=1`, chain verified | same, 42,000 tokens |
 | Dossier | case room → `/dossier.pdf`, `%PDF`, 3 pages | 7 KB, `%PDF` verified; uploaded via `multipart/related` for a `paypal_sandbox` case, upload `SKIPPED` for `internal_test_event` |
-| Reporting | queue 6 · exposure `$596.00` · fees avoided `$60.00` · ratio `3.00%` vs `1.50%` | queue 7 · exposure `$695.00` · fees avoided `$60.00` |
+| Reporting | queue 6 · exposure `$497.00` · fees avoided `$15.00` · ratio `1.37%` vs `1.50%` | queue 7 · exposure `$695.00` · fees avoided `$60.00` |
 
 The CLI ends at 7 cases because it escalates a second $99 claim to CHARGEBACK and uploads a dossier.
 Latency and timestamps are the only moving values; EV and p(win) are deterministic.

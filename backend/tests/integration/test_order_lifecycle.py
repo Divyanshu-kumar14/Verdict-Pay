@@ -238,7 +238,8 @@ async def test_webhook_replay_keys_on_event_id_not_on_payload(client) -> None:
     would slip through an implementation that hashed the body.
     """
     first_body, first_headers = _signed(
-        client, _webhook_payload(dispute_id="PP-D-LIFECYCLE-1", event_id="WH-LIFECYCLE-1", amount="99.00")
+        client,
+        _webhook_payload(dispute_id="PP-D-LIFECYCLE-1", event_id="WH-LIFECYCLE-1", amount="99.00"),
     )
     first = await client.post("/api/v1/webhooks/paypal", content=first_body, headers=first_headers)
     assert first.status_code == 200, first.text
@@ -247,7 +248,8 @@ async def test_webhook_replay_keys_on_event_id_not_on_payload(client) -> None:
 
     # A retry of the SAME event, re-serialised with a different amount.
     retry_body, retry_headers = _signed(
-        client, _webhook_payload(dispute_id="PP-D-LIFECYCLE-1", event_id="WH-LIFECYCLE-1", amount="49.00")
+        client,
+        _webhook_payload(dispute_id="PP-D-LIFECYCLE-1", event_id="WH-LIFECYCLE-1", amount="49.00"),
     )
     retry = await client.post("/api/v1/webhooks/paypal", content=retry_body, headers=retry_headers)
     assert retry.status_code == 200, retry.text
@@ -259,7 +261,9 @@ async def test_webhook_replay_keys_on_event_id_not_on_payload(client) -> None:
     assert await _count(client, WebhookEventRecord) == 1
     assert await _count(client, DisputeCase) == 1
     async with client.app.state.db.session() as session:
-        case = await session.scalar(select(DisputeCase).where(DisputeCase.dispute_id == "PP-D-LIFECYCLE-1"))
+        case = await session.scalar(
+            select(DisputeCase).where(DisputeCase.dispute_id == "PP-D-LIFECYCLE-1")
+        )
     assert case is not None
     assert case.amount_usd == 99
     detail = (await client.get("/api/v1/disputes/PP-D-LIFECYCLE-1")).json()
@@ -269,12 +273,16 @@ async def test_webhook_replay_keys_on_event_id_not_on_payload(client) -> None:
 async def test_distinct_event_ids_for_one_dispute_do_not_multiply_cases(client) -> None:
     """Two different events about one dispute update one case — never two."""
     body, headers = _signed(
-        client, _webhook_payload(dispute_id="PP-D-LIFECYCLE-2", event_id="WH-LIFECYCLE-2A", amount="99.00")
+        client,
+        _webhook_payload(dispute_id="PP-D-LIFECYCLE-2", event_id="WH-LIFECYCLE-2A", amount="99.00"),
     )
-    assert (await client.post("/api/v1/webhooks/paypal", content=body, headers=headers)).status_code == 200
+    assert (
+        await client.post("/api/v1/webhooks/paypal", content=body, headers=headers)
+    ).status_code == 200
 
     body, headers = _signed(
-        client, _webhook_payload(dispute_id="PP-D-LIFECYCLE-2", event_id="WH-LIFECYCLE-2B", amount="99.00")
+        client,
+        _webhook_payload(dispute_id="PP-D-LIFECYCLE-2", event_id="WH-LIFECYCLE-2B", amount="99.00"),
     )
     second = await client.post("/api/v1/webhooks/paypal", content=body, headers=headers)
     assert second.status_code == 200

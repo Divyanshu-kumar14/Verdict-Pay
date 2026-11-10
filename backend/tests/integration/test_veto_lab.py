@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import pytest
 
+from app.errors import SentinelVetoError
+from app.integrations.paypal.live import LivePayPalGateway
 from app.main import create_app
 from app.oracle import manifest as manifest_module
+from app.sentinel import token as sentinel_token
 
 
 async def test_veto_lab_runs_three_controls(client) -> None:
@@ -20,7 +23,7 @@ async def test_veto_lab_runs_three_controls(client) -> None:
     assert "VETO_HVD_CLIFF_BREACH" in naive[0]["sentinel"]["veto_codes"]
     assert naive[1]["sentinel"]["veto_codes"] == ["VETO_VAMP_CLIFF_BREACH"]
     for case in naive:
-        assert case["hardened"]["banner"] == "EXIT CODE 0 — EXECUTED"
+        assert case["hardened"]["banner"] == "EXIT CODE 0 — ALLOW (DRY RUN · TOKEN ISSUED)"
         assert len(case["hardened"]["hmac_approval_token"]["sig_hmac_sha256"]) == 64
 
     toolkit = {case["id"]: case for case in controls["toolkit_hazards"]["cases"]}
@@ -55,6 +58,68 @@ async def test_sentinel_endpoint_vetoes_untrusted_proposal(client) -> None:
     )
     assert response.status_code == 200
     assert response.json()["exit_code"] == 2
+
+
+async def test_veto_lab_tokens_can_never_authorise_a_live_write(client, settings) -> None:
+    """Regression: the public lab endpoints must not be an ApprovalToken oracle."""
+    clean = {
+        "proposal_id": "lab-preview-1",
+        "dispute_id": "PP-D-LAB-PREVIEW",
+        "payment_rail": "PAYPAL_WALLET",
+        "dispute_channel": "INTERNAL",
+        "dispute_life_cycle_stage": "INQUIRY",
+        "reason": "MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
+        "proposed_action": "SEND_MESSAGE",
+        "dispute_amount_minor": 4_900,
+        "currency": "USD",
+        "hateoas_rels": ["send-message", "make-offer"],
+    }
+    response = await client.post("/api/v1/veto-lab/sentinel", json=clean)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["exit_code"] == 0
+    preview_token = body["hmac_approval_token"]
+    assert preview_token["scope"] == sentinel_token.SCOPE_PREVIEW
+
+    # The lab token fails verification even with the real signing secret.
+    with pytest.raises(sentinel_token.ApprovalError):
+        sentinel_token.verify(
+            preview_token,
+            secret=settings.verdictpay_signing_secret,
+            action="SEND_MESSAGE",
+            dispute_id="PP-D-LAB-PREVIEW",
+        )
+
+    # And the gateway refuses the write before it ever reaches the network.
+    live = LivePayPalGateway(settings)
+    reset = sentinel_token.current_approval.set(preview_token)
+    try:
+        with pytest.raises(SentinelVetoError) as raised:
+            await live.send_message("PP-D-LAB-PREVIEW", "hello")
+    finally:
+        sentinel_token.current_approval.reset(reset)
+        await live.close()
+    assert raised.value.details[0]["veto_code"] == "VETO_MISSING_APPROVAL_TOKEN"
+
+    # The same holds for tokens the full lab run hands out for its hardened paths.
+    run = await client.post("/api/v1/veto-lab/run")
+    assert run.status_code == 200, run.text
+    hardened_tokens = [
+        case["hardened"]["hmac_approval_token"]
+        for control in run.json()["controls"]
+        for case in control.get("cases") or []
+        if case.get("hardened", {}).get("hmac_approval_token")
+    ]
+    assert hardened_tokens
+    for hardened in hardened_tokens:
+        assert hardened["scope"] == sentinel_token.SCOPE_PREVIEW
+        with pytest.raises(sentinel_token.ApprovalError):
+            sentinel_token.verify(
+                hardened,
+                secret=settings.verdictpay_signing_secret,
+                action=hardened["action"],
+                dispute_id=hardened["dispute_id"],
+            )
 
 
 async def test_dispute_action_is_audited_and_tokened(client) -> None:

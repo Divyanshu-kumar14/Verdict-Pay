@@ -25,7 +25,7 @@ from typing import Any
 from app.oracle import ce3_matcher, hateoas
 from app.oracle.cliff_engine import hvd_state, vamp_state
 from app.oracle.manifest import ManifestError, RulesManifest, load_manifest
-from app.oracle.money import from_minor, money_round_down
+from app.oracle.money import PPM, from_minor, money_round_down
 
 DISPUTE_ID_RE = re.compile(r"^[A-Za-z0-9-]{3,64}$")
 ALLOWED_TOOLS = frozenset(hateoas.ACTION_RELS)
@@ -184,17 +184,28 @@ def _cliffs(
             )
             offer_minor = _int((proposal.get("offer_payload") or {}).get("offer_amount_minor"))
             fee_delta = int(hvd_rules["hvd_fee_minor"]) - int(hvd_rules["standard_fee_minor"])
-            fight_minor = -(amount + int(hvd_rules["hvd_fee_minor"]))
             penalty = fee_delta * 3
+            # In the HVD tier the $30 fee is not reimbursed on a win, so a win
+            # still costs the fee and a loss costs amount + fee. Priced from the
+            # model's p(win) when the proposal carries one (worst case p=0 when
+            # it does not), never from a hardcoded zero.
+            modeled = _int(proposal.get("modeled_fight_ev_minor"))
+            if modeled is not None:
+                fight_minor = modeled
+            else:
+                p_ppm = _int(proposal.get("p_win_ppm"))
+                p_ppm = 0 if p_ppm is None else min(max(p_ppm, 0), PPM)
+                fight_minor = (
+                    -((int(hvd_rules["hvd_fee_minor"]) * PPM + (PPM - p_ppm) * amount) // PPM)
+                    - penalty
+                )
             offer_ev = -(offer_minor if offer_minor is not None else amount * 3 // 10)
             analysis.update(
-                fight_ev_minor=fight_minor - penalty,
+                fight_ev_minor=fight_minor,
                 offer_ev_minor=offer_ev,
                 cliff_penalty_minor=penalty,
             )
-            if "make-offer" in set(proposal.get("hateoas_rels") or []) and offer_ev > (
-                fight_minor - penalty
-            ):
+            if "make-offer" in set(proposal.get("hateoas_rels") or []) and offer_ev > fight_minor:
                 codes.append("VETO_PORTFOLIO_CLIFF_BREACH_EV_DOMINATED")
                 reasons.append(
                     f"an amicable MAKE_OFFER (EV {money_round_down(from_minor(offer_ev))}) "
@@ -204,7 +215,10 @@ def _cliffs(
 
     vamp_in = portfolio.get("vamp")
     if rail == "UNBRANDED_CARD" and isinstance(vamp_in, dict):
-        adds = 1 if (escalates or action == "ACCEPT_CLAIM") else 0
+        # ACCEPT_CLAIM in INQUIRY is fee-free and never becomes a chargeback, so
+        # it adds no TC15; in a claim stage the claim already counts and settling
+        # it adds the one event. Escalating an INQUIRY also adds exactly one.
+        adds = 1 if (escalates or (action == "ACCEPT_CLAIM" and stage != "INQUIRY")) else 0
         base = {
             "tc05_settled_cnp": _int(vamp_in.get("tc05_settled_cnp")) or 0,
             "tc40_fraud_count": _int(vamp_in.get("tc40_fraud_count")) or 0,

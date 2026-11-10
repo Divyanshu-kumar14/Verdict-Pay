@@ -57,9 +57,7 @@ class GeminiClient:
     def model(self) -> str:
         return self._model
 
-    async def generate_json(
-        self, *, system: str, user: str, schema: Any
-    ) -> dict | None:
+    async def generate_json(self, *, system: str, user: str, schema: Any) -> dict | None:
         """Return the model JSON response as a dict, or None when disabled."""
         if not self.available:
             return None

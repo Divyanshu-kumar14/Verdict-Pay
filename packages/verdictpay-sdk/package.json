@@ -1,6 +1,6 @@
 {
   "name": "@verdictpay/sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Pre-dispute telemetry SDK for PayPal-backed SaaS: batched, signed, hash-chain ready.",
   "license": "MIT",
   "author": "Divyanshu Kumar",

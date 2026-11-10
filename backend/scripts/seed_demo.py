@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Seed a demo merchant with telemetry, CE 3.0 history and five dispute scenarios.
+"""Seed a demo merchant with telemetry, CE 3.0 history and six dispute scenarios.
 
 Runs entirely in-process against the real API (ASGI transport) and the configured
 PayPal Sandbox gateway, so checkouts are real sandbox orders. The prior-sales and
@@ -28,8 +28,19 @@ from sqlalchemy import func, select
 
 from app.api import schemas
 from app.config import get_settings
-from app.db.models import CardNetworkMonthlyFeed, DisputeCase, PaypalTransaction
-from app.domain.enums import TelemetryEventType
+from app.db.models import (
+    CardNetworkMonthlyFeed,
+    DisputeActionRecord,
+    DisputeCase,
+    PaypalTransaction,
+)
+from app.domain.enums import (
+    ActionStatus,
+    DisputeAction,
+    DisputeStage,
+    DisputeStatus,
+    TelemetryEventType,
+)
 from app.domain.evidence.facts import anchor_hash
 from app.domain.protocols import PayPalTransactionRecord
 from app.domain.telemetry.service import TelemetryService
@@ -148,6 +159,23 @@ SCENARIOS: list[dict[str, Any]] = [
         "stage": "INQUIRY",
         "channel": "INTERNAL",
         "amount_usd": "25.00",
+    },
+    {
+        # Kept out of the open queue: the seeder closes it amicably afterwards so
+        # the cold-start dashboard has one real fee avoided instead of +$0.00.
+        "label": "Historical inquiry - closed amicably after a seller reply",
+        "plan": "pro",
+        "payer_id": "YRZ441122KLA",
+        "client_ip": "198.51.100.33",
+        "device_fingerprint": "fp_5a0c2b7e91d4",
+        "logins": 12,
+        "tokens": 19_600,
+        "export_name": "monthly_invoice_2026_02.pdf",
+        "reason_code": "MERCHANDISE_OR_SERVICE_NOT_RECEIVED",
+        "stage": "INQUIRY",
+        "channel": "INTERNAL",
+        "amount_usd": "25.00",
+        "resolved": True,
     },
 ]
 
@@ -328,7 +356,10 @@ def _require_ok(response: httpx.Response, step: str) -> None:
         raise SystemExit(f"{step} failed: {response.status_code} {response.text}")
 
 
-async def _seed_scenarios(client: httpx.AsyncClient, scenarios: list[dict[str, Any]]) -> None:
+async def _seed_scenarios(
+    client: httpx.AsyncClient, scenarios: list[dict[str, Any]]
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    seeded: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for index, scenario in enumerate(scenarios, start=1):
         checkout = await client.post(
             "/api/v1/sandbox/checkout",
@@ -376,15 +407,69 @@ async def _seed_scenarios(client: httpx.AsyncClient, scenarios: list[dict[str, A
         )
         _require_ok(dispute, f"dispute #{index}")
         payload = dispute.json()["dispute"]
-        print(
-            "  seeded {id:<16} {stage:<16} {amount:>9}  {action:<17} p(win)={p:.2f}".format(
-                id=payload["dispute_id"],
-                stage=payload["stage"],
-                amount=money(payload["amount_usd"]),
-                action=payload["recommended_action"],
-                p=payload["p_win"],
+        seeded.append((scenario, payload))
+        if not scenario.get("resolved"):
+            print(
+                "  seeded {id:<16} {stage:<16} {amount:>9}  {action:<17} p(win)={p:.2f}".format(
+                    id=payload["dispute_id"],
+                    stage=payload["stage"],
+                    amount=money(payload["amount_usd"]),
+                    action=payload["recommended_action"],
+                    p=payload["p_win"],
+                )
+            )
+    return seeded
+
+
+async def _seed_resolved_history(
+    session: Any, seeded: list[tuple[dict[str, Any], dict[str, Any]]]
+) -> int:
+    """Close the seeded historical inquiry the way a seller would.
+
+    "Fees avoided" counts INQUIRY cases that closed amicably after an executed
+    SEND_MESSAGE or MAKE_OFFER. No such row exists on a fresh database, so the
+    cold-start dashboard shows +$0.00 and reads as a broken metric rather than
+    as an empty book. One labelled, historical case fixes that without
+    pretending a live inquiry resolved itself.
+    """
+    closed = 0
+    for scenario, payload in seeded:
+        if not scenario.get("resolved"):
+            continue
+        case = await session.scalar(
+            select(DisputeCase).where(DisputeCase.dispute_id == payload["dispute_id"])
+        )
+        if case is None or case.lifecycle_stage in (
+            DisputeStage.RESOLVED.value,
+            DisputeStage.CLOSED.value,
+        ):
+            continue
+        case.lifecycle_stage = DisputeStage.RESOLVED.value
+        case.status = DisputeStatus.RESOLVED.value
+        # This case record is built locally around a PayPal sandbox order, so the
+        # existing "local test dispute" badge is the honest label.
+        case.source_plane = "INTERNAL_TEST_EVENT"
+        snapshot = dict(case.facts_snapshot or {})
+        snapshot["seed_history"] = True
+        case.facts_snapshot = snapshot
+        session.add(
+            DisputeActionRecord(
+                dispute_id=case.dispute_id,
+                action=DisputeAction.SEND_MESSAGE.value,
+                status=ActionStatus.EXECUTED.value,
+                idempotency_key=f"seed-resolved-{case.dispute_id}",
+                request_payload={
+                    "action": DisputeAction.SEND_MESSAGE.value,
+                    "stage": DisputeStage.INQUIRY.value,
+                    "note": "Seeded historical inquiry: buyer withdrew after the seller reply.",
+                },
+                response_payload={"seed": True},
+                latency_ms=0,
             )
         )
+        closed += 1
+    await session.commit()
+    return closed
 
 
 async def seed(reset: bool) -> int:
@@ -415,7 +500,14 @@ async def seed(reset: bool) -> int:
         async with httpx.AsyncClient(transport=transport, base_url="http://seed") as client:
             client.headers["X-API-Key"] = settings.verdictpay_api_key
             print(f"merchant: {merchant.id} ({merchant.name})")
-            await _seed_scenarios(client, SCENARIOS)
+            seeded = await _seed_scenarios(client, SCENARIOS)
+
+        async with app.state.db.session() as session:
+            closed = await _seed_resolved_history(session, seeded)
+        print(
+            f"history: {closed} seeded inquiry closed amicably after an executed reply "
+            "(counts as one fee avoided)"
+        )
 
         print("\nseed complete. open http://localhost:3000 for the judge demo.")
         return 0

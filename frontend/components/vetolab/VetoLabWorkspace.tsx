@@ -13,6 +13,10 @@ import type { SentinelVerdict, VetoLabResponse } from "@/lib/types";
 
 type Json = Record<string, unknown>;
 
+/** The recorded npm package trace Control #2 replays through the live Sentinel. */
+const TOOLKIT_TRACE_LABEL =
+  "Recorded @paypal/agent-toolkit@1.11.0 trace · live Sentinel evaluation";
+
 function asJson(value: unknown): Json {
   return value && typeof value === "object" ? (value as Json) : {};
 }
@@ -43,7 +47,7 @@ function Verdict({ verdict, label }: { verdict: SentinelVerdict; label: string }
         }
       >
         {veto ? <ShieldAlert size={14} aria-hidden /> : <ShieldCheck size={14} aria-hidden />}
-        {veto ? "EXIT CODE 2 — VETO" : "EXIT CODE 0 — EXECUTED"}
+        {veto ? "EXIT CODE 2 — VETO" : "EXIT CODE 0 — ALLOW (DRY RUN · TOKEN ISSUED)"}
       </p>
       <p className="mt-1 text-xs text-muted">
         {verdict.proposed_action} · {verdict.dispute_id || "no id"} · mode {verdict.candidate_mode}
@@ -133,13 +137,19 @@ export function VetoLabWorkspace() {
           }
         />
         <PanelBody className="flex flex-wrap gap-2 text-xs">
-          <Badge tone="accent">[LIVE PAYPAL SANDBOX]</Badge>
+          {result === null ? (
+            <Badge tone="neutral">[PENDING LIVE PROBE]</Badge>
+          ) : probe.ok ? (
+            <Badge tone="accent">[LIVE PAYPAL SANDBOX]</Badge>
+          ) : (
+            <Badge tone="negative">[SANDBOX PROBE FAILED]</Badge>
+          )}
           <span className="text-muted">
-            {probe.ok
-              ? `${str(probe.endpoint)} · HTTP ${str(probe.http_status)} · paypal-debug-id ${str(probe.paypal_debug_id)}`
-              : result
-                ? `sandbox probe unavailable (${str(probe.error ?? probe.http_status)})`
-                : "run the lab to record a live PayPal sandbox debug_id"}
+            {result === null
+              ? "run the lab to record a live PayPal sandbox debug_id"
+              : probe.ok
+                ? `${str(probe.endpoint)} · HTTP ${str(probe.http_status)} · paypal-debug-id ${str(probe.paypal_debug_id)}`
+                : `sandbox probe unavailable (${str(probe.error ?? probe.http_status)})`}
           </span>
           {result ? (
             <span className="font-mono text-muted">
@@ -189,8 +199,8 @@ export function VetoLabWorkspace() {
       {toolkit ? (
         <Panel data-testid="control-toolkit">
           <PanelHeader
-            title={`2 · ${toolkit.title}`}
-            description={`Recorded run of tools/toolkit-probe against the real published package (${str(
+            title={`2 · ${TOOLKIT_TRACE_LABEL}`}
+            description={`Live Sentinel evaluation of the recorded run of tools/toolkit-probe against the real published package (${str(
               toolkit.recorded_at,
             )}; ${str(toolkit.network)}). Stale OAuth: token refreshed after expires_in = ${str(
               asJson(toolkit.stale_oauth).refreshed,

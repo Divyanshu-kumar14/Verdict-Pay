@@ -96,9 +96,7 @@ def main() -> None:
             try:
                 import httpx
 
-                response = httpx.get(
-                    f"http://127.0.0.1:{args.port}/api/v1/health", timeout=1
-                )
+                response = httpx.get(f"http://127.0.0.1:{args.port}/api/v1/health", timeout=1)
                 if response.status_code == 200:
                     healthy = True
                     break

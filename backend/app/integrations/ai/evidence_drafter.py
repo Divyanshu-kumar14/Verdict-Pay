@@ -77,9 +77,7 @@ async def draft_evidence(
             break
         title = str(payload.get("title", "") or "")
         narrative = str(payload.get("narrative", "") or "")
-        ok, note = evidence_validator.validate_draft(
-            title=title, narrative=narrative, facts=facts
-        )
+        ok, note = evidence_validator.validate_draft(title=title, narrative=narrative, facts=facts)
         if ok:
             return EvidenceDraft(
                 title=title.strip(),

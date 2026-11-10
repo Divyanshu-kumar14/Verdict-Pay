@@ -162,9 +162,7 @@ def build_multipart_related(
             }
         ]
     }
-    manifest_bytes = json.dumps(
-        manifest, ensure_ascii=True, separators=(",", ":")
-    ).encode("utf-8")
+    manifest_bytes = json.dumps(manifest, ensure_ascii=True, separators=(",", ":")).encode("utf-8")
 
     chunks = [
         _part(
@@ -179,8 +177,7 @@ def build_multipart_related(
             _part(
                 resolved_boundary,
                 disposition=(
-                    f'form-data; name="file{index}"; '
-                    f'filename="{_safe_filename(document.name)}"'
+                    f'form-data; name="file{index}"; filename="{_safe_filename(document.name)}"'
                 ),
                 content_type=_safe_content_type(document.content_type),
                 content=document.content,

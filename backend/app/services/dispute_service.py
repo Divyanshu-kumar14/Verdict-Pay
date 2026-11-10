@@ -838,7 +838,12 @@ class DisputeService:
                 .order_by(DisputeActionRecord.created_at.desc(), DisputeActionRecord.id)
             )
         ).all()
-        allowed_actions = to_allowed_actions(stage=stage, channel=channel, links=links)
+        allowed_actions = to_allowed_actions(
+            stage=stage,
+            channel=channel,
+            links=links,
+            high_volume=breakdown.high_volume,
+        )
         return schemas.DisputeDetail(
             **to_dispute_summary(case).model_dump(),
             breakdown=breakdown,
@@ -889,8 +894,6 @@ class DisputeService:
                 channel=DisputeChannel(case.dispute_channel),
                 links=dict(case.paypal_links or {}),
             )
-            approval = await self.authorize_write(case, action, request)
-
             evidence = EvidenceService(
                 self.session,
                 settings=self.settings,
@@ -898,19 +901,34 @@ class DisputeService:
                 narrative=self.narrative,
                 merchant_id=self.merchant_id,
             )
-            reset = sentinel_token.current_approval.set(approval["hmac_approval_token"])
-            try:
-                return await evidence.submit(
-                    dispute_id, idempotency_key=request.idempotency_key or ""
+
+            async def authorize_evidence(dossier: Any, document_name: str) -> dict[str, Any]:
+                """Gate the upload with the frozen dossier as the evidence claim."""
+                return await self.authorize_write(
+                    case,
+                    action,
+                    request,
+                    evidence_payload={
+                        "attachments": [{"name": document_name, "size_bytes": dossier.size_bytes}],
+                        # Digital goods: there is no shipment tracker, and the
+                        # merchant asserts no tracking or refund reference it
+                        # cannot corroborate, so nothing is claimed here.
+                        "known_tracking_numbers": [],
+                        "known_refund_ids": [],
+                        "evidences": [],
+                    },
                 )
-            finally:
-                sentinel_token.current_approval.reset(reset)
+
+            return await evidence.submit(
+                dispute_id,
+                idempotency_key=request.idempotency_key or "",
+                authorize=authorize_evidence,
+            )
 
         stage = DisputeStage(case.lifecycle_stage)
         channel = DisputeChannel(case.dispute_channel)
         links = dict(case.paypal_links or {})
         ensure_allowed(action, stage=stage, channel=channel, links=links)
-        approval = await self.authorize_write(case, action, request)
 
         record, replay = await claim_action(
             self.session,
@@ -928,6 +946,18 @@ class DisputeService:
         if replay is not None:
             await self.session.refresh(case)
             return self._replay_action(replay, case)
+
+        # The key is owned before the Sentinel runs, so two concurrent clicks
+        # can never both clear the gate and dispatch. A veto is terminal for
+        # this key: mark the claim FAILED or it blocks every later retry.
+        try:
+            approval = await self.authorize_write(case, action, request)
+        except Exception as exc:
+            record.status = ActionStatus.FAILED.value
+            record.error = f"{type(exc).__name__}: {exc}"
+            record.latency_ms = 0
+            await self.session.commit()
+            raise
 
         if is_internal_test_case(case):
             # PayPal has never seen this dispute, so any call would 404.
@@ -972,13 +1002,25 @@ class DisputeService:
         request: schemas.ActionRequest,
         *,
         untrusted_text: str | None = None,
+        evidence_payload: Mapping[str, Any] | None = None,
+        claimed_ce3_manifest: Mapping[str, Any] | None = None,
         candidate_mode: str = "HARDENED",
     ) -> dict[str, Any]:
         """Run the Sentinel for one PayPal write; VETO raises 422, ALLOW returns a token.
 
         Actions chosen by the deterministic triage carry no buyer text (the
         text cannot have influenced them); AI-originated proposals pass it.
+        The merchant's own ``note`` is untrusted too: it is sent to the buyer
+        verbatim, so it is scanned and priced like any other free text.
         """
+        note = (request.note or "").strip() or None
+        gate_text = "\n".join(part for part in (untrusted_text, note) if part) or None
+        if action is DisputeAction.PROVIDE_EVIDENCE and claimed_ce3_manifest is None:
+            proof = (case.facts_snapshot or {}).get("ce3_proof")
+            if isinstance(proof, Mapping):
+                claim = proof.get("claim_manifest")
+                if isinstance(claim, Mapping):
+                    claimed_ce3_manifest = claim
         hvd = await self._hvd_inputs(exclude_dispute_id=case.dispute_id)
         vamp = await self.vamp_status()
         amount_minor = to_minor(quantize_money(as_decimal(case.amount_usd)))
@@ -987,9 +1029,7 @@ class DisputeService:
             ratio = request.offer_ratio
             if ratio is None:
                 ratio = self.settings.offer_ratio
-            offer_minor = to_minor(
-                quantize_money(as_decimal(case.amount_usd) * as_decimal(ratio))
-            )
+            offer_minor = to_minor(quantize_money(as_decimal(case.amount_usd) * as_decimal(ratio)))
         proposal = sentinel_bridge.build_proposal(
             dispute_id=case.dispute_id,
             action=action.value,
@@ -1015,8 +1055,13 @@ class DisputeService:
                     "tc15_dispute_count": vamp.tc15_dispute_count,
                 },
             },
-            untrusted_text=untrusted_text,
+            untrusted_text=gate_text,
             offer_amount_minor=offer_minor,
+            offer_note=note if action is DisputeAction.MAKE_OFFER else None,
+            evidence_payload=evidence_payload,
+            claimed_ce3_manifest=claimed_ce3_manifest,
+            p_win_ppm=int((as_decimal(case.p_win) * PPM).to_integral_value(rounding=ROUND_DOWN)),
+            modeled_fight_ev_minor=to_minor(quantize_money(as_decimal(case.ev_fight_usd))),
             candidate_mode=candidate_mode,
         )
         return await sentinel_bridge.authorize(

@@ -78,9 +78,7 @@ def _call_llm(api_key: str, model: str) -> dict[str, object]:
 
 
 def main() -> int:
-    leaked = sorted(
-        key for key in os.environ if key.startswith(("PAYPAL", "VERDICTPAY", "HMAC"))
-    )
+    leaked = sorted(key for key in os.environ if key.startswith(("PAYPAL", "VERDICTPAY", "HMAC")))
     api_key = os.environ.get("LLM_API_KEY", "")
     model = os.environ.get("LLM_MODEL", "gemini-2.5-flash-lite")
     result: dict[str, object] = {

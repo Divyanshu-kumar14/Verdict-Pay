@@ -44,6 +44,10 @@ def build_proposal(
     untrusted_text: str | None = None,
     offer_amount_minor: int | None = None,
     offer_note: str | None = None,
+    evidence_payload: Mapping[str, Any] | None = None,
+    claimed_ce3_manifest: Mapping[str, Any] | None = None,
+    p_win_ppm: int | None = None,
+    modeled_fight_ev_minor: int | None = None,
     candidate_mode: str = "HARDENED",
     extra: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -69,6 +73,10 @@ def build_proposal(
             if offer_amount_minor is not None
             else None
         ),
+        "evidence_payload": dict(evidence_payload) if evidence_payload else None,
+        "claimed_ce3_manifest": (dict(claimed_ce3_manifest) if claimed_ce3_manifest else None),
+        "p_win_ppm": p_win_ppm,
+        "modeled_fight_ev_minor": modeled_fight_ev_minor,
         "candidate_mode": candidate_mode,
     }
     if extra:
@@ -174,6 +182,7 @@ async def authorize(
         action=str(proposal.get("proposed_action")),
         dispute_id=str(proposal.get("dispute_id")),
         manifest_sha256=str(verdict.get("manifest_sha256")),
+        scope=token.SCOPE_LIVE,
     )
     verdict["audit_id"] = audit.id
     return verdict

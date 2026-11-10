@@ -1,17 +1,22 @@
 /**
  * /veto-lab end to end in a real browser against the live stack: the three negative
  * controls run, each unguarded proposal is vetoed with EXIT CODE 2 and each hardened
- * alternative executes with EXIT CODE 0, and the console stays clean.
+ * alternative is allowed as a dry run with a preview ApprovalToken, and the console
+ * stays clean. The sandbox badge must only claim a live probe once one succeeded.
  */
 import { expect, test } from "@playwright/test";
 
-test("veto lab runs three controls with veto and executed provenance", async ({ page }) => {
+test("veto lab runs three controls with veto and dry-run allow provenance", async ({ page }) => {
   const consoleErrors: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error") consoleErrors.push(message.text());
   });
 
   await page.goto("/veto-lab");
+  // Before the first run nothing has been probed: no live-sandbox claim yet.
+  await expect(page.getByText("[PENDING LIVE PROBE]")).toBeVisible();
+  await expect(page.getByText("[LIVE PAYPAL SANDBOX]")).toHaveCount(0);
+
   await page.getByTestId("run-veto-lab").click();
 
   for (const id of ["control-naive", "control-toolkit", "control-llm"]) {
@@ -23,7 +28,10 @@ test("veto lab runs three controls with veto and executed provenance", async ({ 
   await expect(vetoes).toHaveCount(6);
   await expect(allows).toHaveCount(3);
   await expect(page.getByText("EXIT CODE 2 — VETO").first()).toBeVisible();
-  await expect(page.getByText("EXIT CODE 0 — EXECUTED").first()).toBeVisible();
+  await expect(
+    page.getByText("EXIT CODE 0 — ALLOW (DRY RUN · TOKEN ISSUED)").first(),
+  ).toBeVisible();
+  await expect(page.getByText("EXIT CODE 0 — EXECUTED")).toHaveCount(0);
   for (const code of [
     "VETO_HVD_CLIFF_BREACH",
     "VETO_VAMP_CLIFF_BREACH",
@@ -35,6 +43,8 @@ test("veto lab runs three controls with veto and executed provenance", async ({ 
     await expect(page.getByText(code).first()).toBeVisible();
   }
   await expect(page.getByText("[VISA-TC40 / ACQUIRER-FEED SIMULATION]").first()).toBeVisible();
-  await expect(page.getByText("[LIVE PAYPAL SANDBOX]").first()).toBeVisible();
+  await expect(
+    page.getByText("Recorded @paypal/agent-toolkit@1.11.0 trace · live Sentinel evaluation").first(),
+  ).toBeVisible();
   expect(consoleErrors).toEqual([]);
 });
