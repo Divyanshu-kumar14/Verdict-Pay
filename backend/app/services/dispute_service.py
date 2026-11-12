@@ -20,7 +20,7 @@ from decimal import ROUND_DOWN, Decimal
 from typing import Any
 
 from pydantic import ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -94,6 +94,9 @@ CENT = Decimal("0.01")
 # part of the frozen ActionStatus API enum: the column is a plain string and an
 # in-flight claim must never be presented as a finished result.
 ACTION_STATUS_IN_PROGRESS = "IN_PROGRESS"
+# A crashed process must not block its idempotency key forever. A claim older
+# than this lease is reclaimable by the next retry of the same key.
+ACTION_CLAIM_LEASE_SECONDS = 120
 TRIAGE_SNAPSHOT_KEY = "_triage"
 CONTAINMENT_SNAPSHOT_KEY = "_containment"
 # "paypal_sandbox" when PayPal created the dispute, "internal_test_event" when
@@ -250,6 +253,15 @@ def to_transaction_out(transaction: PaypalTransaction) -> schemas.TransactionOut
     )
 
 
+def claim_is_stale(record: DisputeActionRecord, *, now: datetime | None = None) -> bool:
+    """True when an IN_PROGRESS claim outlived its lease (owner crashed)."""
+    created_at = utc_aware(record.created_at)
+    if created_at is None:
+        return True
+    current = now or datetime.now(UTC)
+    return current - created_at > timedelta(seconds=ACTION_CLAIM_LEASE_SECONDS)
+
+
 async def claim_action(
     session: AsyncSession,
     *,
@@ -294,6 +306,40 @@ async def claim_action(
         if existing.dispute_id != dispute_id:
             raise ConflictError("That idempotency key belongs to another dispute.") from None
         if existing.status == ACTION_STATUS_IN_PROGRESS:
+            if not claim_is_stale(existing):
+                raise ConflictError(
+                    "This action is already being executed.", code="action_in_progress"
+                ) from None
+            # Lease expired: take the claim over instead of leaving the key
+            # permanently blocked by a crash. The conditional UPDATE is the
+            # lock — if two retries race, only one row update wins.
+            claimed_at = datetime.now(UTC)
+            taken = await session.execute(
+                update(DisputeActionRecord)
+                .where(
+                    DisputeActionRecord.id == existing.id,
+                    DisputeActionRecord.status == ACTION_STATUS_IN_PROGRESS,
+                    DisputeActionRecord.created_at == existing.created_at,
+                )
+                .values(
+                    request_payload=dict(request_payload),
+                    error=None,
+                    latency_ms=0,
+                    created_at=claimed_at,
+                )
+            )
+            await session.commit()
+            if taken.rowcount == 1:
+                # rollback()/commit() expired the case instance; the caller
+                # reads it next (authorize_write), so reload it inside the
+                # greenlet instead of letting a sync attribute read fail.
+                await session.refresh(case)
+                return existing, None
+            # Lost the takeover: replay the winner's terminal row, or report the
+            # claim as still in flight. Never dispatch a second PayPal call.
+            current = await session.get(DisputeActionRecord, existing.id)
+            if current is not None and current.status != ACTION_STATUS_IN_PROGRESS:
+                return record, current
             raise ConflictError(
                 "This action is already being executed.", code="action_in_progress"
             ) from None
@@ -882,7 +928,9 @@ class DisputeService:
 
         if request.idempotency_key:
             existing = await self._find_action_by_key(request.idempotency_key)
-            if existing is not None:
+            if existing is not None and not (
+                existing.status == ACTION_STATUS_IN_PROGRESS and claim_is_stale(existing)
+            ):
                 return self._replay_action(existing, case)
 
         if action is DisputeAction.PROVIDE_EVIDENCE:
@@ -1207,9 +1255,9 @@ class DisputeService:
         ).all()
         deflected: set[str] = set()
         for dispute_id, payload in rows:
-            if (payload or {}).get("stage", DisputeStage.INQUIRY.value) == (
-                DisputeStage.INQUIRY.value
-            ):
+            # A row without a recorded stage cannot prove the case was still an
+            # inquiry; defaulting to INQUIRY inflated fees-avoided.
+            if (payload or {}).get("stage") == DisputeStage.INQUIRY.value:
                 deflected.add(dispute_id)
         return len(deflected)
 

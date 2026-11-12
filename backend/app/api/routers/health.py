@@ -42,11 +42,19 @@ def _ai_status(request: Request) -> AiStatus:
     settings = request.app.state.settings
     narrative = getattr(request.app.state, "narrative", None)
     mode = getattr(narrative, "mode", "unknown")
+    # `configured` must describe the provider actually selected: an OpenAI
+    # deployment is not unconfigured just because there is no Gemini key.
+    if mode == "gemini":
+        configured = bool(settings.gemini_api_key) and settings.ai_enabled
+    elif mode == "openai":
+        configured = bool(settings.openai_api_key or settings.llm_base_url)
+    else:
+        configured = False
     return AiStatus(
         provider=mode,
-        model=settings.gemini_model if mode == "gemini" else "template",
+        model=getattr(narrative, "model_name", "template") if mode != "template" else "template",
         enabled=settings.ai_enabled,
-        configured=bool(settings.gemini_api_key) and settings.ai_enabled,
+        configured=configured,
         timeout_ms=settings.ai_timeout_ms,
         prompt_version=PROMPT_VERSION,
     )

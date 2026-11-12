@@ -148,6 +148,23 @@ async def test_checkout_creates_an_order_not_a_payment(demo_client: AsyncClient)
     assert status["payer_action_required"] is True
 
 
+async def test_checkout_reuses_the_runs_existing_order(demo_client: AsyncClient) -> None:
+    """A reloaded client keeps its run id; the run keeps exactly one order."""
+    first = await _checkout(demo_client)
+    second = await _checkout(demo_client, run_id=first["run_id"])
+
+    assert second["order_id"] == first["order_id"]
+    assert second["run_id"] == first["run_id"]
+    assert second["lifecycle_stage"] == first["lifecycle_stage"]
+    assert second["approval_url"] == first["approval_url"]
+
+    async with demo_client.app.state.db.session() as session:
+        rows = (
+            await session.scalars(select(PaypalOrder).where(PaypalOrder.run_id == first["run_id"]))
+        ).all()
+    assert len(rows) == 1
+
+
 async def test_capture_before_approval_is_409(demo_client: AsyncClient) -> None:
     """The order is not paid, so capture must refuse with order_not_approved."""
     order = await _checkout(demo_client)

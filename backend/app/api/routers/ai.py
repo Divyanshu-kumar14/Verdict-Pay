@@ -50,13 +50,18 @@ CLASSIFY_SCHEMA: dict[str, Any] = {
 }
 
 # Idempotency cache: repeat calls neither re-bill Gemini nor re-append chain
-# events. Keyed by (dispute_id, prompt_version, sha256(claim_text + chain head))
-# so a new claim text or new telemetry produces a fresh analysis.
+# events. Keyed by (dispute_id, prompt_version, sha256(claim text + chain head +
+# case version)) so a new claim, telemetry event, stage or amount produces a
+# fresh analysis.
 _CACHE: dict[tuple[str, str, str], AnalyzeResponse] = {}
 
 
-def _cache_key(dispute_id: str, claim_text: str | None, chain_head: str) -> tuple[str, str, str]:
-    digest = hashlib.sha256(f"{claim_text or ''}\x00{chain_head}".encode()).hexdigest()
+def _cache_key(
+    dispute_id: str, claim_text: str | None, chain_head: str, case_version: str
+) -> tuple[str, str, str]:
+    digest = hashlib.sha256(
+        f"{claim_text or ''}\x00{chain_head}\x00{case_version}".encode()
+    ).hexdigest()
     return dispute_id, PROMPT_VERSION, digest
 
 
@@ -101,7 +106,11 @@ async def _analyze(
     persisted_claim = (case.facts_snapshot or {}).get("buyer_claim_text")
     claim_text = (claim_override or "") or (persisted_claim or "") or None
     snapshot_head = str((case.facts_snapshot or {}).get("chain_head") or "")
-    key = _cache_key(dispute_id, claim_text, snapshot_head)
+    # Stage/amount/status changes invalidate the cached EV even when the
+    # telemetry chain head is unchanged (e.g. a webhook moved the case).
+    updated_at = case.updated_at.isoformat() if case.updated_at is not None else ""
+    case_version = f"{case.lifecycle_stage}:{case.status}:{case.amount_usd}:{updated_at}"
+    key = _cache_key(dispute_id, claim_text, snapshot_head, case_version)
     cached = _CACHE.get(key)
     if cached is not None:
         return cached

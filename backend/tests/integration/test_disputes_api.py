@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import UTC, datetime, timedelta
+
+from app.db.models import DisputeActionRecord
+from app.services.dispute_service import ACTION_CLAIM_LEASE_SECONDS
 
 
 async def _open_dispute(
@@ -244,6 +248,36 @@ async def test_concurrent_same_idempotency_key_claims_once(client) -> None:
     assert follow_up.json()["action_id"] != winner.json()["action_id"]
     assert follow_up.json()["upstream"]["message_id"] == "MSG-002"
     assert sum(1 for name, _ in gateway.calls if name == "send_message") == 2
+
+
+async def test_a_crashed_claim_is_reclaimed_after_its_lease(client) -> None:
+    """An IN_PROGRESS row older than the lease must not block its key forever."""
+    await _seed_telemetry(client)
+    created = await _open_dispute(client)
+    path = f"/api/v1/disputes/{created['dispute_id']}/actions/SEND_MESSAGE"
+    key = "qa-stale-claim-1"
+
+    # Simulate the process that claimed the key and died before dispatch.
+    async with client.app.state.db.session() as session:
+        session.add(
+            DisputeActionRecord(
+                dispute_id=created["dispute_id"],
+                action="SEND_MESSAGE",
+                status="IN_PROGRESS",
+                idempotency_key=key,
+                request_payload={"action": "SEND_MESSAGE"},
+                created_at=datetime.now(UTC) - timedelta(seconds=ACTION_CLAIM_LEASE_SECONDS + 5),
+            )
+        )
+        await session.commit()
+
+    response = await client.post(path, json={"idempotency_key": key})
+    assert response.status_code == 200, response.text
+    assert response.json()["status"] == "EXECUTED"
+
+    # The audit row is the same row, now terminal — no duplicate claim.
+    detail = (await client.get(f"/api/v1/disputes/{created['dispute_id']}")).json()
+    assert [row["status"] for row in detail["actions"]] == ["EXECUTED"]
 
 
 async def test_make_offer_uses_configured_ratio(client) -> None:

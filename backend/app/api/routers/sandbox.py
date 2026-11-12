@@ -105,6 +105,8 @@ OrderIdPath = Annotated[str, Path(min_length=3, max_length=64, description="PayP
 RunIdPath = Annotated[str, Path(min_length=5, max_length=64, description="Demo run id.")]
 
 _STAGE_VALUES = frozenset({"CREATED", "APPROVED", "CAPTURED", "FAILED"})
+# Furthest-confirmed ordering. FAILED is an attempt marker, not a rank.
+_STAGE_RANK = {"CREATED": 0, "APPROVED": 1, "CAPTURED": 2}
 
 
 def _sha256_hex(payload: str | bytes) -> str:
@@ -248,6 +250,21 @@ def _stage(value: str | None) -> str:
     return token if token in _STAGE_VALUES else "CREATED"
 
 
+def _advance_stage(current: str | None, candidate: str) -> str:
+    """The furthest stage PayPal has confirmed; a stale read never regresses it.
+
+    ``FAILED`` records a failed capture attempt but must not erase an earlier
+    approval, and a later confirmed capture may replace ``FAILED``.
+    """
+    current_stage = _stage(current)
+    next_stage = _stage(candidate)
+    if next_stage == "FAILED":
+        return current_stage if _STAGE_RANK.get(current_stage, 0) >= 1 else "FAILED"
+    if current_stage == "FAILED":
+        return next_stage
+    return next_stage if _STAGE_RANK[next_stage] >= _STAGE_RANK[current_stage] else current_stage
+
+
 def _order_stage(order: SandboxOrder) -> str:
     """PayPal's literal lifecycle; only visible fields may name it."""
     stage = _stage(order.lifecycle_stage)
@@ -295,7 +312,7 @@ async def _persist_order(
         if run_id is not None:
             row.run_id = run_id
         row.status = order.status or stage
-        row.lifecycle_stage = stage
+        row.lifecycle_stage = _advance_stage(row.lifecycle_stage, stage)
         row.approval_url = order.approval_url
         row.gateway_mode = settings.gateway_mode.value
         if order.payer_id:
@@ -352,6 +369,29 @@ async def _run_record(
 
 
 # --------------------------------------------------------------------------- checkout
+def _checkout_response(
+    row: PaypalOrder, *, run_id: str, settings: Settings
+) -> schemas.CheckoutResponse:
+    """Project a persisted order without asking PayPal to create another one."""
+    stage = _stage(row.lifecycle_stage)
+    return schemas.CheckoutResponse(
+        order_id=row.order_id,
+        run_id=run_id,
+        subscription_id=row.subscription_id,
+        payer_id=row.payer_id,
+        status=row.status or stage,
+        amount_usd=quantize_money(row.amount_usd),
+        currency=row.currency,
+        approval_url=row.approval_url,
+        created_at=utc_aware(row.created_at) or datetime.now(UTC),
+        gateway_mode=row.gateway_mode,
+        sandbox=settings.gateway_mode is GatewayMode.PAYPAL_SANDBOX,
+        lifecycle_stage=stage,
+        provenance=row.provenance,
+        paypal_debug_id=row.paypal_debug_id,
+    )
+
+
 @router.post("/sandbox/checkout", response_model=schemas.CheckoutResponse)
 async def sandbox_checkout(
     payload: schemas.CheckoutRequest,
@@ -364,6 +404,23 @@ async def sandbox_checkout(
     payer_id = _validated_payer_id(payload.payer_id) or settings.demo_payer_id
     runs = _runs(session, settings, merchant)
     run = await runs.ensure_run(payload.run_id)
+
+    # One run owns one order. A reload keeps the run id but loses the client
+    # step state, so a second checkout must reuse the persisted order instead
+    # of creating a second PayPal order (and later a second dispute).
+    if run.order_id:
+        existing_order = await runs.get_order_row(run.order_id)
+        if existing_order is not None:
+            logger.info(
+                "sandbox_checkout_reused",
+                extra=log_context(
+                    merchant_id=merchant.id,
+                    run_id=run.run_id,
+                    order_id=existing_order.order_id,
+                ),
+            )
+            return _checkout_response(existing_order, run_id=run.run_id, settings=settings)
+
     try:
         order = await gateway.create_order(
             payer_id=payer_id,
@@ -462,8 +519,10 @@ async def get_order(
 
     previous_stage = _stage(row.lifecycle_stage)
     stage = _order_stage(order)
-    row.status = order.status or stage
-    row.lifecycle_stage = stage
+    # A GET can race a capture: only ever advance the persisted stage.
+    row.lifecycle_stage = _advance_stage(row.lifecycle_stage, stage)
+    if not (row.lifecycle_stage == "CAPTURED" and row.capture_id):
+        row.status = order.status or stage
     row.approval_url = order.approval_url
     if order.payer_id:
         row.payer_id = order.payer_id
@@ -558,8 +617,10 @@ async def capture_order(
                 code="order_already_captured",
             ) from exc
         if _is_not_approved(exc):
-            row.lifecycle_stage = "CREATED"
-            row.status = "CREATED"
+            # Keep the furthest confirmed stage: a rejected capture attempt is
+            # not evidence that an earlier approval never happened.
+            row.lifecycle_stage = _advance_stage(row.lifecycle_stage, "CREATED")
+            row.status = row.lifecycle_stage
             row.capture_status = "ORDER_NOT_APPROVED"
             await session.commit()
             run = await _run_record(session, merchant_id=merchant.id, run_id=run_id)
@@ -628,8 +689,9 @@ async def capture_order(
                 existing.run_id = run_id
     else:
         # Not completed: the order is not paid. Record it as such and never
-        # fabricate a transaction row.
-        row.lifecycle_stage = "FAILED"
+        # fabricate a transaction row. An approval already confirmed by PayPal
+        # is not revoked by a failed capture attempt.
+        row.lifecycle_stage = _advance_stage(row.lifecycle_stage, "FAILED")
         row.status = capture_status
     await session.commit()
 
@@ -665,7 +727,7 @@ async def capture_order(
         run_id=run_id,
         capture_id=row.capture_id,
         capture_status=capture_status,
-        lifecycle_stage="CAPTURED" if completed else "FAILED",
+        lifecycle_stage=row.lifecycle_stage,
         amount_usd=quantize_money(row.amount_usd),
         currency=row.currency,
         payer_id=row.payer_id,
@@ -715,7 +777,11 @@ async def simulate_usage(
         await runs.touch(
             run,
             payer_id=payer_id,
-            steps={STEP_TELEMETRY: STEP_DONE, STEP_EVIDENCE: STEP_DONE},
+            steps={
+                STEP_TELEMETRY: STEP_DONE,
+                # Evidence is only done when the chain actually verified.
+                STEP_EVIDENCE: STEP_DONE if chain.valid else STEP_FAILED,
+            },
             telemetry_token=chain.head_hash,
         )
     return schemas.UsageResponse(

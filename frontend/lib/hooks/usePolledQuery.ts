@@ -56,8 +56,8 @@ export function usePolledQuery<T>(
   }, [fetcher]);
 
   useEffect(() => {
-    if (!enabled) return;
-
+    // Reset for a new key BEFORE the enabled gate: switching to a disabled key
+    // must not keep painting the previous key's payload.
     if (activeKeyRef.current !== key) {
       activeKeyRef.current = key;
       lastJsonRef.current = null;
@@ -65,6 +65,8 @@ export function usePolledQuery<T>(
       setError(null);
       setUpdatedAt(null);
     }
+
+    if (!enabled) return;
 
     let cancelled = false;
     let running = false;

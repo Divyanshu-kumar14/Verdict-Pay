@@ -540,6 +540,9 @@ export function CommandCenter({
   const [triageNote, setTriageNote] = useState<string | null>(null);
   const [triageError, setTriageError] = useState<ApiError | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // The `acting` state only disables the button after a render; this ref is
+  // the actual single-flight lock for a fast double click.
+  const actingRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -556,7 +559,8 @@ export function CommandCenter({
 
   const runAction = useCallback(
     async (action: DisputeAction) => {
-      if (!detail || acting) return;
+      if (!detail || actingRef.current) return;
+      actingRef.current = true;
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
@@ -576,10 +580,11 @@ export function CommandCenter({
       } catch (caught) {
         setActionError(toApiError(caught));
       } finally {
+        actingRef.current = false;
         setActing(null);
       }
     },
-    [acting, detail, onCaseChanged, refreshCase],
+    [detail, onCaseChanged, refreshCase],
   );
 
   const runTriage = useCallback(async () => {

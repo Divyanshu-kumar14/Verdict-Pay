@@ -8,9 +8,13 @@ upload the same dossier twice.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import os
+import tempfile
 import time
+import weakref
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -51,12 +55,36 @@ from app.services.dispute_service import (
     as_decimal,
     assemble_case_facts,
     claim_action,
+    claim_is_stale,
     is_internal_test_case,
     load_case,
     quantize_money,
 )
 
 logger = get_logger("verdictpay.evidence")
+
+# One in-process freeze lock per dispute: the dossier freeze is a check-then-act
+# over the snapshot and a file, and two first callers must not race it. This app
+# is single-instance by design (see SlidingWindowLimiter); a multi-instance
+# deployment would need the same guard in the database.
+_DOSSIER_LOCKS: weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, dict[str, asyncio.Lock]] = (
+    weakref.WeakKeyDictionary()
+)
+
+
+def _dossier_lock(dispute_id: str) -> asyncio.Lock:
+    """Per-event-loop lock so a fork/test loop never shares a bound lock."""
+    loop = asyncio.get_running_loop()
+    locks = _DOSSIER_LOCKS.get(loop)
+    if locks is None:
+        locks = {}
+        _DOSSIER_LOCKS[loop] = locks
+    lock = locks.get(dispute_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        locks[dispute_id] = lock
+    return lock
+
 
 NOTES_MAX_CHARS = 2000
 DOSSIER_URL_TEMPLATE = "/api/v1/disputes/{dispute_id}/dossier.pdf"
@@ -392,7 +420,9 @@ class EvidenceService:
 
         if idempotency_key:
             existing = await self._find_action(idempotency_key)
-            if existing is not None:
+            if existing is not None and not (
+                existing.status == ACTION_STATUS_IN_PROGRESS and claim_is_stale(existing)
+            ):
                 return self._replayed(existing, dispute_id), case
 
         pdf_bytes, _facts, narrative, record = await self._render(case)
@@ -512,6 +542,13 @@ class EvidenceService:
     async def _render(
         self, case: DisputeCase
     ) -> tuple[bytes, schemas.CaseFacts, str, DossierRecord]:
+        """Serialize the first render so a freeze can never race itself."""
+        async with _dossier_lock(case.dispute_id):
+            return await self._render_locked(case)
+
+    async def _render_locked(
+        self, case: DisputeCase
+    ) -> tuple[bytes, schemas.CaseFacts, str, DossierRecord]:
         """Return the dossier bytes, never re-rendering an already-frozen dossier.
 
         First call: assemble facts, constrain the narrative, render, freeze the
@@ -583,7 +620,20 @@ class EvidenceService:
     def _write_artifact(self, dispute_id: str, pdf_bytes: bytes) -> None:
         artifact = dossier_artifact_path(self.settings, dispute_id)
         artifact.parent.mkdir(parents=True, exist_ok=True)
-        artifact.write_bytes(pdf_bytes)
+        # Atomic replace: a concurrent download must never read a half-written
+        # PDF, and a crash must not leave a truncated file that verifies false.
+        descriptor, temporary = tempfile.mkstemp(
+            dir=artifact.parent, prefix=artifact.name + ".", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(descriptor, "wb") as handle:
+                handle.write(pdf_bytes)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, artifact)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
 
     def _frozen_record(self, case: DisputeCase) -> DossierRecord | None:
         """The stored dossier record, or None when this case was never rendered."""

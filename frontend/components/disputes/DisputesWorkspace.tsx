@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, Search, X } from "lucide-react";
 import { motion, useReducedMotion } from "motion/react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 
 import { PageHeader, PageMeta } from "@/components/PageHeader";
 import { StackedBar } from "@/components/charts";
@@ -130,6 +130,16 @@ export function DisputesWorkspace() {
   const highVolume = summary.data?.high_volume ?? null;
   const totalPages = meta?.total_pages && meta.total_pages > 0 ? meta.total_pages : 1;
   const referenceNow = now ?? Date.now();
+
+  // A filter change always restarts at page 1, and a shrunken result set (a
+  // poll can return fewer pages) must never leave the cursor past the end —
+  // that page would stay empty and Prev/Next would disagree with the label.
+  useEffect(() => {
+    setPage(1);
+  }, [filter, quick]);
+  useEffect(() => {
+    setPage((current) => (current > totalPages ? totalPages : current));
+  }, [totalPages]);
 
   const visible = useMemo(
     () => rows.filter((row) => matchesQuick(row, quick, referenceNow) && matchesQuery(row, filter)),

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { CircleAlert, CircleCheck, ExternalLink } from "lucide-react";
 
 import { Magnetic } from "@/components/motion/Magnetic";
@@ -77,6 +77,9 @@ export function ActionRail({
   const [running, setRunning] = useState<DisputeAction | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [result, setResult] = useState<ActionResponse | null>(null);
+  // `running` is state and only disables the button after a render: a fast
+  // double click can dispatch twice before React commits. The ref is the lock.
+  const runningRef = useRef(false);
 
   const recommendedAction = RECOMMENDATION_META[detail.recommended_action].action;
 
@@ -144,10 +147,11 @@ export function ActionRail({
   };
 
   const runConfirmed = async (): Promise<void> => {
-    if (pending === null) {
+    if (pending === null || runningRef.current) {
       return;
     }
     const action = pending.action;
+    runningRef.current = true;
     setRunning(action);
     setError(null);
     setResult(null);
@@ -167,6 +171,7 @@ export function ActionRail({
     } catch (runError) {
       setError(toApiError(runError));
     } finally {
+      runningRef.current = false;
       setRunning(null);
     }
   };
