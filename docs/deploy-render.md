@@ -143,12 +143,10 @@ curl -s -H "X-API-Key: <your key>" https://<api>.onrender.com/api/v1/disputes | 
 open https://<web>.onrender.com
 ```
 
-The web URL is recorded in [docs/submission.md](submission.md) as the hosted demo. That
-closes one of the two remaining hackathon items; the demo video is the other.
+The web URL is recorded in the README as the hosted demo.
 
 ## What is NOT deployed
 
-- **The demo video** (< 3 min, required by the hackathon) does not exist yet.
 - **Elastic, Supabase** — optional adapters, not wired into the demo path.
 - **PayPal Live** — the only modes are `PAYPAL_SANDBOX` (the default locally and in
   `render.yaml`) and `PAYPAL_LIVE`. The deploy talks to the real PayPal sandbox once
