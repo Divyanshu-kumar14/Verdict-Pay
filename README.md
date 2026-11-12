@@ -545,9 +545,11 @@ Stated plainly, because a judge should not have to discover these.
 - **The rate limiter is per process.** A multi-replica deployment would need a shared limiter.
 - **Elasticsearch is optional and off the demo path.** If `ELASTIC_URL` is unset the search adapter is
   a null implementation and SQL remains the only source of truth.
-- **Bryntum and AG Studio are not used.** AG Grid is used for the disputes table; the Bryntum
-  scheduler and AG Studio tooling are not part of this build. See
-  [docs/sponsors.md](docs/sponsors.md) for the per-tool accounting.
+- **Bryntum and AG Studio are not used.** AG Grid Community (`ag-grid-community` 34.3.1) powers the
+  disputes table; the Bryntum scheduler and AG Studio tooling are not part of this build.
+- **Sponsor & deployment tooling included.** Render Blueprint ([render.yaml](render.yaml),
+  [docs/deploy-render.md](docs/deploy-render.md)) hosts the live frontend and API, and
+  [postman/](postman) provides an importable Postman collection and local environment for the API.
 
 ## 7. Verification
 
@@ -590,7 +592,7 @@ shasum -a 256 /tmp/d.pdf
 Related documentation: [architecture](docs/architecture.md) · [architecture decisions](docs/adr/) ·
 [demo script](docs/demo.md) · [AI disclosure](docs/ai-disclosure.md) ·
 [sandbox mode](docs/live-mode.md) · [deployment](docs/deploy-render.md) ·
-[sponsor accounting](docs/sponsors.md).
+[Postman collection](postman/verdictpay-api.postman_collection.json).
 
 ## License
 

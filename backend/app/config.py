@@ -69,7 +69,7 @@ class Settings(BaseSettings):
 
     # --- core -------------------------------------------------------------
     app_env: AppEnv = "local"
-    demo_mode: bool = False
+    demo_mode: bool = True
     app_name: str = "VerdictPay API"
     api_v1_prefix: str = "/api/v1"
     database_url: str = "sqlite+aiosqlite:///./verdictpay.db"

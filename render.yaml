@@ -58,7 +58,7 @@ services:
       - key: APP_ENV
         value: production
       - key: DEMO_MODE
-        value: "false"
+        value: "true"
       - key: DATABASE_URL
         value: sqlite+aiosqlite:////app/data/verdictpay.db
       # PAYPAL_MODE must be PAYPAL_SANDBOX for a configured Render deploy to hit

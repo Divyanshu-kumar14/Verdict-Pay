@@ -368,4 +368,4 @@ flowchart LR
 * The Elastic adapter implements the `SearchIndex` port and is selected by configuration;
   the demo path reads SQL and never requires it.
 * Bryntum and AG Studio are not redistributable; the SLA board and analytics views are
-  built on open equivalents. See [sponsors.md](./sponsors.md).
+  built on open equivalents (React, Tailwind, and AG Grid Community for the disputes table).
